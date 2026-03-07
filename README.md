@@ -64,6 +64,21 @@ Open **http://localhost:8000/** for the web UI. Full setup (Postgres/Supabase, O
 
 ---
 
+## Run with Docker
+
+**Prerequisites:** Docker and Docker Compose. You provide your own `OPENAI_API_KEY` in `.env` (no key in the repo).
+
+```bash
+cd verbiage
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY=sk-... (DATABASE_URL is set by Docker Compose)
+docker-compose up --build
+```
+
+Then open **http://localhost:8000/** for the web UI. The Compose stack runs Postgres with pgvector and the app; the app creates tables on startup. To stop: `docker-compose down`.
+
+---
+
 ## API summary
 
 | Method | Path | Description |

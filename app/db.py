@@ -1,6 +1,9 @@
 """
 Postgres + pgvector DB layer. create_db runs DDL; helpers use psycopg2 connections.
 For in-memory similarity (tests/fallback), use get_embeddings_for_retrieval + similarity.cosine_similarity.
+
+Supabase transaction-mode pooler (port 6543) does not support prepared statements; use
+connection_factory=NoPrepareConnection when creating the pool for such URLs.
 """
 
 from __future__ import annotations
@@ -8,10 +11,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import psycopg2
+from psycopg2 import extensions
 from pgvector.psycopg2 import register_vector
 
 if TYPE_CHECKING:
     from psycopg2.extensions import connection as PgConnection
+
+
+class _NoPrepareCursor(extensions.cursor):
+    """Cursor that never uses prepared statements (required for Supabase transaction-mode pooler, port 6543)."""
+    prepare_threshold = None
+
+
+class NoPrepareConnection(extensions.connection):
+    """Connection whose cursors do not use prepared statements. Use for Supabase pooler port 6543."""
+    cursor_factory = _NoPrepareCursor
 
 
 def is_connection_error(exc: BaseException) -> bool:
@@ -94,6 +108,19 @@ def create_db(conn: PgConnection) -> None:
             CREATE INDEX IF NOT EXISTS idx_embeddings_embedding_hnsw
             ON embeddings USING hnsw (embedding vector_cosine_ops);
         """)
+        # Add user_id for Supabase Auth (per-user documents); idempotent for existing DBs
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents' AND column_name = 'user_id'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN user_id TEXT;
+                END IF;
+            END $$;
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);")
         conn.commit()
     finally:
         cur.close()
@@ -105,12 +132,13 @@ def insert_document(
     created_at: int,
     title: str | None = None,
     source: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO documents(doc_id, title, source, created_at) VALUES (%s,%s,%s,%s)",
-            (doc_id, title, source, created_at),
+            "INSERT INTO documents(doc_id, title, source, created_at, user_id) VALUES (%s,%s,%s,%s,%s)",
+            (doc_id, title, source, created_at, user_id),
         )
     finally:
         cur.close()
@@ -189,26 +217,36 @@ def retrieve_top_k_pg(
     query_vec: list[float],
     top_k: int,
     doc_id: str | None = None,
+    user_id: str | None = None,
 ) -> list[tuple[str, str, float, str]]:
-    """Postgres similarity search. Returns (chunk_id, doc_id, score, content). Uses <=> (cosine distance); 1 - distance = similarity."""
+    """Postgres similarity search. Returns (chunk_id, doc_id, score, content). Uses <=> (cosine distance); 1 - distance = similarity. If user_id is set, only chunks from that user's documents are considered."""
     _ensure_pgvector(conn)
     sql = """
         SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content
         FROM embeddings e
         JOIN chunks c ON e.chunk_id = c.chunk_id
     """
+    conditions: list[str] = []
+    params: list[Any] = [query_vec]
+    if user_id is not None:
+        sql = """
+        SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content
+        FROM embeddings e
+        JOIN chunks c ON e.chunk_id = c.chunk_id
+        JOIN documents d ON d.doc_id = c.doc_id
+        """
+        conditions.append("d.user_id = %s")
+        params.append(user_id)
+    if doc_id is not None:
+        conditions.append("c.doc_id = %s")
+        params.append(doc_id)
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY e.embedding <=> %s::vector LIMIT %s"
+    params.extend([query_vec, top_k])
     cur = conn.cursor()
     try:
-        if doc_id is not None:
-            cur.execute(
-                sql + " WHERE c.doc_id = %s ORDER BY e.embedding <=> %s::vector LIMIT %s",
-                (query_vec, doc_id, query_vec, top_k),
-            )
-        else:
-            cur.execute(
-                sql + " ORDER BY e.embedding <=> %s::vector LIMIT %s",
-                (query_vec, query_vec, top_k),
-            )
+        cur.execute(sql, params)
         return cur.fetchall()
     finally:
         cur.close()
@@ -229,11 +267,13 @@ def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
 
 
 def list_documents(
-    conn: PgConnection, snippet_max_len: int = 250
+    conn: PgConnection,
+    snippet_max_len: int = 250,
+    user_id: str | None = None,
 ) -> list[tuple[str, str | None, str | None, int, int, str | None]]:
     """
     Returns list of (doc_id, title, source, created_at, num_chunks, snippet).
-    Ordered by created_at desc.
+    Ordered by created_at desc. If user_id is set, only that user's documents are returned.
     """
     sql = """
         SELECT
@@ -244,11 +284,15 @@ def list_documents(
             (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.doc_id) AS num_chunks,
             (SELECT c.content FROM chunks c WHERE c.doc_id = d.doc_id ORDER BY c.chunk_index LIMIT 1) AS first_content
         FROM documents d
-        ORDER BY d.created_at DESC
     """
+    params: list[Any] = []
+    if user_id is not None:
+        sql += " WHERE d.user_id = %s"
+        params.append(user_id)
+    sql += " ORDER BY d.created_at DESC"
     cur = conn.cursor()
     try:
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
         result = []
         for doc_id, title, source, created_at, num_chunks, first_content in rows:
