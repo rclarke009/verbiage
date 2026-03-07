@@ -18,7 +18,7 @@ def retrieve_top_k(
             chunk_id=chunk_id,
             doc_id=doc_id_val,
             score=score,
-            content_snippet=content[:500] if len(content) > 500 else content,
+            content_snippet=content,
         )
         for chunk_id, doc_id_val, score, content in rows
     ]
@@ -39,7 +39,7 @@ def retrieve_top_k_in_memory(conn, query_vec, top_k, doc_id=None) -> list[Retrie
             chunk_id=chunk_id,
             doc_id=doc_id_val,
             score=score,
-            content_snippet=content[:500] if len(content) > 500 else content,
+            content_snippet=content,
         )
         for score, chunk_id, doc_id_val, content in top
     ]
