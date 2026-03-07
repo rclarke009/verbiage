@@ -42,7 +42,7 @@ Copy `.env.example` to `.env` and set:
    - Running the migration in `supabase/migrations/20250302000000_phase1_schema.sql` (Supabase SQL Editor or `supabase db push`), or
    - Starting the app once: it runs `create_db(conn)` on startup and creates tables/indexes if they don’t exist.
 
-For Supabase, use the **pooler** connection string (port **6543**) from **Project Settings → Database → Connection string (URI)**. Do not use the project URL (`https://xxx.supabase.co`); use the Postgres URI that starts with `postgresql://`.
+For Supabase, use a pooler connection string from **Project Settings → Database → Connection string (URI)**. Do not use the project URL (`https://xxx.supabase.co`); use the Postgres URI that starts with `postgresql://`. The app automatically adds `sslmode=require` for Supabase pooler URLs and disables prepared statements for **transaction mode** (port 6543). Prefer **Session mode** (port **5432**) for this app: in the dashboard click **Connect** and choose **Session mode**—it supports prepared statements and is recommended for persistent backends. If you see "server closed the connection unexpectedly", try Session mode (5432), ensure the project is not **paused** (open it in the dashboard), and check the password in the URI.
 
 Details: [supabase_migration.md](supabase_migration.md).
 
@@ -111,3 +111,18 @@ Full steps: [setup_and_testing.md](setup_and_testing.md#google-drive-ingest-read
 | pgvector / `vector` type errors | Ensure the `vector` extension is enabled and schema (tables + HNSW index) is applied. |
 | Ollama connection refused | Start Ollama; confirm `EMBED_BASE_URL` and `LLM_BASE_URL` match (e.g. `http://localhost:11434`). |
 | 503 on ingest or ask | Check embedding/LLM URLs and that models are pulled (`ollama list`). |
+| Supabase: "server closed the connection unexpectedly" on port 5432 | (1) Use **port 6543** (transaction mode) in `DATABASE_URL`; the app supports it. (2) **Unpause** the project in Supabase dashboard (free tier pauses when idle). (3) Or use the **Direct** connection URI from Project Settings → Database (host `db.PROJECT_REF.supabase.co`, user `postgres`) instead of the pooler. |
+
+### Connecting with psql (Supabase)
+
+- **Wrong:** `psql DATABASE_URL=postgresql://...` — this only sets the env var; psql still connects to the default (local) database.
+- **Right:** Pass the URI to psql and require SSL:
+  ```bash
+  psql "postgresql://postgres.PROJECT_REF:YOUR_PASSWORD@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+  ```
+  Or set the variable and use it (SSL required for Supabase):
+  ```bash
+  export DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@HOST:5432/postgres?sslmode=require"
+  psql "$DATABASE_URL"
+  ```
+- **Test from the app:** From project root, `python scripts/test_db_connection.py` — uses `.env` and prints the real connection error if it fails.

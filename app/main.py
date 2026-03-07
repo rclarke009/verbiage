@@ -11,7 +11,7 @@ import logging
 import time
 from logging.handlers import RotatingFileHandler
 
-from fastapi import FastAPI, File, Request, UploadFile, HTTPException
+from fastapi import Depends, FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import psycopg2
@@ -27,6 +27,7 @@ from app.db import (
     insert_embedding,
     is_connection_error,
     list_documents,
+    NoPrepareConnection,
 )
 from app.models import (
     AskRequest,
@@ -48,11 +49,14 @@ from app.retrieval import retrieve_top_k
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
 from app.drive_client import list_and_export_docs, DriveClientError
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
+from app.auth import get_current_user
 from app.config import (
     DATABASE_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,
+    SUPABASE_ANON_KEY,
+    SUPABASE_URL,
 )
 from app import llm_client
 
@@ -73,21 +77,43 @@ logger.info("App log file: %s", _FILE_LOG)
 
 
 
+def _create_db_pool():
+    """Create Postgres connection pool. Supabase: SSL is added in config; use NoPrepare for transaction mode (6543)."""
+    # Supabase transaction-mode pooler (port 6543) does not support prepared statements.
+    kwargs = {"minconn": 1, "maxconn": 10, "dsn": DATABASE_URL}
+    if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
+        kwargs["connection_factory"] = NoPrepareConnection
+    return psycopg2_pool.ThreadedConnectionPool(**kwargs)
+
+
 @asynccontextmanager
 async def lifespan(app):
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL must be set for Postgres connection")
-    db_pool = psycopg2_pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=10,
-        dsn=DATABASE_URL,
-    )
+    # Retry pool creation: Supabase free-tier projects pause after inactivity and may drop the first connection.
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            db_pool = _create_db_pool()
+            conn = db_pool.getconn()
+            try:
+                create_db(conn)
+            finally:
+                db_pool.putconn(conn)
+            break
+        except psycopg2.OperationalError as e:
+            last_error = e
+            logger.warning("Database connection attempt %s/3 failed: %s", attempt, e)
+            if attempt < 3:
+                await asyncio.sleep(2)
+    else:
+        raise RuntimeError(
+            "Could not connect to the database after 3 attempts. "
+            "If using Supabase: ensure the project is not paused (open the project in the dashboard), "
+            "DATABASE_URL uses the Postgres URI from Project Settings → Database, and the password is correct."
+        ) from last_error
+
     app.state.db_pool = db_pool
-    conn = db_pool.getconn()
-    try:
-        create_db(conn)
-    finally:
-        db_pool.putconn(conn)
 
     app.state.job_store = JobStore()
     job_store = app.state.job_store
@@ -167,6 +193,7 @@ async def ingest_text(
     source: str | None,
     text: str,
     chunking_options: ChunkingOptions,
+    user_id: str | None = None,
 ) -> IngestResponse:
     """
     Shared ingest: chunk text, insert document + chunks, embed, insert embeddings, commit.
@@ -177,7 +204,7 @@ async def ingest_text(
         raise ValueError("doc_id already exists")
     opts = chunking_options
     chunks = chunk_text_chars(text, opts.chunk_size, opts.chunk_overlap)
-    insert_document(conn, doc_id, int(time.time()), title, source)
+    insert_document(conn, doc_id, int(time.time()), title, source, user_id=user_id)
     for chunk in chunks:
         chunk_id = f"{doc_id}:{chunk.chunk_index}"
         insert_chunk(
@@ -203,8 +230,21 @@ async def ingest_text(
     )
 
 
+@app.get("/config")
+def get_config():
+    """Public: Supabase URL and anon key for frontend auth. No secrets."""
+    return {
+        "supabase_url": SUPABASE_URL or "",
+        "supabase_anon_key": SUPABASE_ANON_KEY or "",
+    }
+
+
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest(request: Request, ingest_request: IngestRequest):
+async def ingest(
+    request: Request,
+    ingest_request: IngestRequest,
+    user_id: str = Depends(get_current_user),
+):
     async def do_ingest(conn):
         try:
             return await ingest_text(
@@ -214,6 +254,7 @@ async def ingest(request: Request, ingest_request: IngestRequest):
                 ingest_request.source,
                 ingest_request.text,
                 ingest_request.chunking_options,
+                user_id=user_id,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -243,6 +284,7 @@ async def ingest_file(
     source: str | None = File(default=None),
     chunk_size: int = File(default=800),
     chunk_overlap: int = File(default=100),
+    user_id: str = Depends(get_current_user),
 ):
     """
     Ingest a PDF file: extract text, then chunk, embed, and store (same as POST /ingest).
@@ -290,6 +332,7 @@ async def ingest_file(
                 resolved_source,
                 text,
                 opts,
+                user_id=user_id,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -305,7 +348,11 @@ async def ingest_file(
 
 
 @app.post("/ingest/google-drive", response_model=IngestGoogleDriveResponse)
-async def ingest_google_drive(request: Request, body: IngestGoogleDriveRequest):
+async def ingest_google_drive(
+    request: Request,
+    body: IngestGoogleDriveRequest,
+    user_id: str = Depends(get_current_user),
+):
     """
     Ingest Google Docs from Drive (read-only). List/export then run shared ingest per doc.
     Duplicate doc_id is skipped and counted; other errors are recorded and processing continues.
@@ -331,6 +378,7 @@ async def ingest_google_drive(request: Request, body: IngestGoogleDriveRequest):
                     doc.source,
                     doc.text,
                     default_opts,
+                    user_id=user_id,
                 )
                 ingested += 1
                 doc_ids.append(doc.doc_id)
@@ -353,7 +401,11 @@ async def ingest_google_drive(request: Request, body: IngestGoogleDriveRequest):
 
 
 @app.post("/ask", response_model=AskResponse)
-async def ask(request: Request, ask_request: AskRequest):
+async def ask(
+    request: Request,
+    ask_request: AskRequest,
+    user_id: str = Depends(get_current_user),
+):
     async def do_ask(conn):
         rate_limiter = request.app.state.rate_limiter
         embedder = HttpEmbedder()
@@ -362,7 +414,9 @@ async def ask(request: Request, ask_request: AskRequest):
         logger.info("ask: embedding succeeded")
         query_vec = query_vectors[0]
 
-        top_chunks = retrieve_top_k(conn, query_vec, ask_request.top_k, ask_request.doc_id)
+        top_chunks = retrieve_top_k(
+            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
+        )
 
         MAX_CONTEXT_CHARS = 8000
         context_parts = []
@@ -393,9 +447,12 @@ async def ask(request: Request, ask_request: AskRequest):
     return await with_db_conn_retry(request, do_ask)
 
 @app.get("/documents", response_model=DocumentsListResponse)
-def get_documents(request: Request):
+def get_documents(
+    request: Request,
+    user_id: str = Depends(get_current_user),
+):
     def do_list(conn):
-        rows = list_documents(conn)
+        rows = list_documents(conn, user_id=user_id)
         return DocumentsListResponse(
             documents=[
                 DocumentSummary(

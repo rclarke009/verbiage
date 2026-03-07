@@ -93,46 +93,24 @@ The only required configuration is an API key for the LLM provider.
 
 ---
 
-## Running the System
+## Run with Docker
 
-The application can be started using Docker.
+**Prerequisites:** Docker and Docker Compose. You provide your own `OPENAI_API_KEY` in `.env` (no key in the repo).
 
-### 1. Clone the repository
-git clone https://github.com/systems-engineering-projects/rag-document-analysis-backend.git
-cd rag-document-analysis-backend
+```bash
+cd verbiage
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY=sk-... (DATABASE_URL is set by Docker Compose)
+docker-compose up --build
+```
+
+Then open **http://localhost:8000/** for the web UI. The Compose stack runs Postgres with pgvector and the app; the app creates tables on startup. To stop: `docker-compose down`.
 
 ---
 
-## Running the System
+## API summary
 
-The application can be started using Docker.
-
-### 1. Clone the repository
-git clone https://github.com/systems-engineering-projects/rag-document-analysis-backend.git
-cd rag-document-analysis-backend
-
-### 2. Configure environment variables
-Create a .env file:
-OPENAI_API_KEY=your_key_here
-
-### 3. Start the system
-docker compose up --build
-
-This will start:
-- FastAPI backend
-- PostgreSQL database with pgvector
-- embedding + retrieval pipeline
-
-The API will be available at:
-- http://localhost:8000
-- Optional: Local Models with Ollama
-- Instead of OpenAI, the system can use local models.
-
-Install Ollama and pull the required models:
-ollama pull nomic-embed-text
-ollama pull llama3.1:8b
-
-Then configure the application to use the Ollama provider.
+See the API docs at http://localhost:8000/docs when the server is running.
 
 ---
 

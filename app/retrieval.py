@@ -8,9 +8,11 @@ from app.db import get_embeddings_for_retrieval, retrieve_top_k_pg
 from app.similarity import cosine_similarity
 
 
-def retrieve_top_k(conn, query_vec, top_k, doc_id=None) -> list[RetrievedChunk]:
-    """Postgres similarity search; returns top_k chunks as RetrievedChunk."""
-    rows = retrieve_top_k_pg(conn, query_vec, top_k, doc_id)
+def retrieve_top_k(
+    conn, query_vec, top_k, doc_id=None, user_id=None
+) -> list[RetrievedChunk]:
+    """Postgres similarity search; returns top_k chunks as RetrievedChunk. If user_id is set, only that user's documents are searched."""
+    rows = retrieve_top_k_pg(conn, query_vec, top_k, doc_id, user_id)
     return [
         RetrievedChunk(
             chunk_id=chunk_id,

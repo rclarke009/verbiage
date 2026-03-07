@@ -1,0 +1,31 @@
+# Git and env (never bake secrets into the image)
+.git
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and local data
+logs/
+*.log
+
+# Docs and dev (not needed at runtime)
+*.md
+!README.md
+.idea/
+.vscode/
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/

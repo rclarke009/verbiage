@@ -17,7 +17,16 @@ load_dotenv()
 #   postgresql://postgres.[ref]:[PASSWORD]@aws-0-[region].pooler.supabase.com:6543/postgres
 #   (This is not the project URL https://xxx.supabase.co — that's for the JS client.)
 #   Use pooler port 6543 for short-lived connections; use with psycopg2 or asyncpg.
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+#   Supabase requires SSL: we add sslmode=require for pooler URLs if not already set.
+_raw_database_url = os.getenv("DATABASE_URL", "").strip().strip("'\"")
+if _raw_database_url:
+    _sep = "&" if "?" in _raw_database_url else "?"
+    if "pooler.supabase.com" in _raw_database_url and "sslmode=" not in _raw_database_url:
+        _raw_database_url = f"{_raw_database_url}{_sep}sslmode=require"
+    # Direct connection (db.REF.supabase.co): avoid GSSAPI "Credential cache is empty"
+    if ".supabase.co" in _raw_database_url and "gssencmode=" not in _raw_database_url:
+        _raw_database_url = f"{_raw_database_url}{_sep}gssencmode=disable"
+DATABASE_URL = _raw_database_url
 
 DB_PATH = os.getenv("DATABASE_PATH", "verbiage.db")
 
@@ -46,3 +55,8 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+
+# Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "").strip()
