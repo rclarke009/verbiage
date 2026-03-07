@@ -86,3 +86,18 @@ class IngestGoogleDriveResponse(BaseModel):
     skipped: int = Field(default=0, description="Number skipped (e.g. duplicate doc_id)")
     errors: list[str] = Field(default_factory=list, description="Error messages for failed docs")
     doc_ids: list[str] = Field(default_factory=list, description="doc_ids that were ingested")
+
+
+class DriveFileMeta(BaseModel):
+    """Metadata for a Google Doc (list only, no content)."""
+
+    id: str = Field(..., description="Drive file id")
+    name: str | None = Field(default=None, description="File name")
+    mimeType: str | None = Field(default=None, description="MIME type")
+    modifiedTime: str | None = Field(default=None, description="Last modified (RFC3339)")
+
+
+class DriveFileListResponse(BaseModel):
+    """Response from listing Drive files (metadata only)."""
+
+    files: list[DriveFileMeta] = Field(..., description="List of Google Docs metadata")

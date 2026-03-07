@@ -246,6 +246,18 @@
     .user-bar { font-size: 0.85rem; color: var(--text-muted); margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
     .user-bar span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .user-bar button { padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+
+    /* Google Drive block */
+    .drive-block { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+    .drive-block h3 { margin: 0 0 0.75rem 0; font-size: 1rem; font-weight: 600; }
+    .drive-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+    .drive-actions input[type="text"] { width: 240px; margin: 0; }
+    .drive-file-list { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; margin: 0.75rem 0; background: var(--surface); }
+    .drive-file-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    .drive-file-item:last-child { border-bottom: none; }
+    .drive-file-item input[type="checkbox"] { margin: 0; }
+    .drive-file-meta { color: var(--text-muted); font-size: 0.8rem; margin-left: 0.25rem; }
+    #drive-message { margin-top: 0.5rem; }
   </style>
 </head>
 <body>
@@ -295,6 +307,19 @@
         <button type="submit">Ingest</button>
       </form>
       <div id="ingest-message" class="message" role="alert" hidden></div>
+
+      <div class="drive-block">
+        <h3>Google Drive</h3>
+        <div class="drive-actions">
+          <button type="button" id="drive-test-btn">Test connection</button>
+          <input type="text" id="drive-folder-id" placeholder="Folder ID (leave empty for root)" aria-label="Folder ID (optional)" />
+          <button type="button" id="drive-list-btn">List files</button>
+          <button type="button" id="drive-ingest-btn">Ingest selected</button>
+        </div>
+        <div id="drive-file-list" class="drive-file-list" hidden></div>
+        <div id="drive-empty" class="drawer-empty" hidden>No Google Docs found in this folder.</div>
+        <div id="drive-message" class="message" role="alert" hidden></div>
+      </div>
     </section>
 
     <section id="panel-ask" class="panel active">
@@ -443,6 +468,7 @@
       function initTabsAndApi() {
         bindTabs();
         bindIngestForm();
+        bindDriveBlock();
         bindAskForm();
         bindDrawer();
         refreshDocsSelect();
@@ -571,6 +597,132 @@
             msg.textContent = (err && err.message) || 'Request failed';
             msg.className = 'message error';
             msg.hidden = false;
+          }
+        });
+      }
+
+      function bindDriveBlock() {
+        const testBtn = document.getElementById('drive-test-btn');
+        const listBtn = document.getElementById('drive-list-btn');
+        const ingestBtn = document.getElementById('drive-ingest-btn');
+        const folderInput = document.getElementById('drive-folder-id');
+        const fileListEl = document.getElementById('drive-file-list');
+        const emptyEl = document.getElementById('drive-empty');
+        const driveMsg = document.getElementById('drive-message');
+        const ingestMsg = document.getElementById('ingest-message');
+
+        function showDriveMsg(text, isError) {
+          driveMsg.textContent = text;
+          driveMsg.className = 'message ' + (isError ? 'error' : 'success');
+          driveMsg.hidden = false;
+        }
+
+        testBtn.addEventListener('click', async function () {
+          driveMsg.hidden = true;
+          testBtn.disabled = true;
+          try {
+            const res = await apiFetch(getApiBase() + '/drive/test');
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              showDriveMsg(data.detail || res.statusText || 'Connection failed', true);
+              return;
+            }
+            showDriveMsg('Connection OK.', false);
+          } catch (err) {
+            showDriveMsg((err && err.message) || 'Request failed', true);
+          } finally {
+            testBtn.disabled = false;
+          }
+        });
+
+        listBtn.addEventListener('click', async function () {
+          driveMsg.hidden = true;
+          emptyEl.hidden = true;
+          fileListEl.hidden = true;
+          fileListEl.innerHTML = '';
+          listBtn.disabled = true;
+          try {
+            const folderId = (folderInput && folderInput.value) ? folderInput.value.trim() : '';
+            const url = getApiBase() + '/drive/files' + (folderId ? '?folder_id=' + encodeURIComponent(folderId) : '');
+            const res = await apiFetch(url);
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              showDriveMsg(data.detail || res.statusText || 'List failed', true);
+              return;
+            }
+            const files = data.files || [];
+            if (files.length === 0) {
+              emptyEl.hidden = false;
+              showDriveMsg('No Google Docs found.', false);
+              return;
+            }
+            files.forEach(function (f) {
+              const item = document.createElement('div');
+              item.className = 'drive-file-item';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = f.id;
+              cb.id = 'drive-cb-' + f.id;
+              const label = document.createElement('label');
+              label.htmlFor = cb.id;
+              label.style.cursor = 'pointer';
+              label.appendChild(document.createTextNode(f.name || f.id));
+              if (f.modifiedTime) {
+                const meta = document.createElement('span');
+                meta.className = 'drive-file-meta';
+                meta.textContent = ' \u2022 ' + f.modifiedTime.slice(0, 10);
+                label.appendChild(meta);
+              }
+              item.appendChild(cb);
+              item.appendChild(label);
+              fileListEl.appendChild(item);
+            });
+            fileListEl.hidden = false;
+            showDriveMsg('Found ' + files.length + ' Google Doc(s). Select and click Ingest selected.', false);
+          } catch (err) {
+            showDriveMsg((err && err.message) || 'Request failed', true);
+          } finally {
+            listBtn.disabled = false;
+          }
+        });
+
+        ingestBtn.addEventListener('click', async function () {
+          const checkboxes = fileListEl.querySelectorAll('input[type="checkbox"]:checked');
+          const ids = Array.from(checkboxes).map(function (cb) { return cb.value; }).filter(Boolean);
+          if (ids.length === 0) {
+            ingestMsg.textContent = 'Select one or more files from the list above, then click Ingest selected.';
+            ingestMsg.className = 'message error';
+            ingestMsg.hidden = false;
+            return;
+          }
+          ingestMsg.hidden = true;
+          ingestBtn.disabled = true;
+          try {
+            const res = await apiFetch(getApiBase() + '/ingest/google-drive', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ file_ids: ids })
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              ingestMsg.textContent = data.detail || res.statusText || 'Ingest failed';
+              ingestMsg.className = 'message error';
+              ingestMsg.hidden = false;
+              return;
+            }
+            var summary = 'Ingested: ' + (data.ingested || 0);
+            if (data.skipped) summary += ', skipped: ' + data.skipped;
+            if (data.errors && data.errors.length) summary += '. Errors: ' + data.errors.join('; ');
+            ingestMsg.textContent = summary;
+            ingestMsg.className = 'message success';
+            ingestMsg.hidden = false;
+            refreshDocsSelect();
+          } catch (err) {
+            ingestMsg.textContent = (err && err.message) || 'Request failed';
+            ingestMsg.className = 'message error';
+            ingestMsg.hidden = false;
+          } finally {
+            ingestBtn.disabled = false;
           }
         });
       }

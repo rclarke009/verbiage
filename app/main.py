@@ -35,6 +35,8 @@ from app.models import (
     ChunkingOptions,
     DocumentSummary,
     DocumentsListResponse,
+    DriveFileListResponse,
+    DriveFileMeta,
     IngestGoogleDriveRequest,
     IngestGoogleDriveResponse,
     IngestRequest,
@@ -47,7 +49,7 @@ from app.job_store import JobStore
 from app.worker import worker_loop
 from app.retrieval import retrieve_top_k
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
-from app.drive_client import list_and_export_docs, DriveClientError
+from app.drive_client import list_and_export_docs, list_docs_metadata, test_connection, DriveClientError
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
 from app.config import (
@@ -345,6 +347,40 @@ async def ingest_file(
             raise HTTPException(status_code=503, detail="Embedding failed") from e
 
     return await with_db_conn_retry(request, do_ingest_file)
+
+
+@app.get("/drive/test")
+async def drive_test(user_id: str = Depends(get_current_user)):
+    """
+    Test Google Drive credentials. Returns { "ok": true } on success.
+    Requires authenticated user.
+    """
+    try:
+        test_connection()
+        return {"ok": True}
+    except DriveClientError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@app.get("/drive/files", response_model=DriveFileListResponse)
+async def drive_files(
+    folder_id: str | None = None,
+    file_ids: str | None = None,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    List Google Docs metadata (no export). Optional folder_id or comma-separated file_ids.
+    Requires authenticated user.
+    """
+    ids_list: list[str] | None = None
+    if file_ids:
+        ids_list = [x.strip() for x in file_ids.split(",") if x.strip()]
+    try:
+        raw = list_docs_metadata(folder_id=folder_id, file_ids=ids_list)
+        files = [DriveFileMeta(**f) for f in raw]
+        return DriveFileListResponse(files=files)
+    except DriveClientError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
 
 @app.post("/ingest/google-drive", response_model=IngestGoogleDriveResponse)
