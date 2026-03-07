@@ -54,6 +54,76 @@ def _get_credentials() -> Credentials:
     return creds
 
 
+def test_connection() -> bool:
+    """
+    Verify Drive credentials work with a minimal API call.
+    Returns True on success. Raises DriveClientError on failure.
+    """
+    creds = _get_credentials()
+    service = build("drive", "v3", credentials=creds)
+    service.files().list(pageSize=1, fields="files(id)").execute()
+    return True
+
+
+def list_docs_metadata(
+    folder_id: str | None = None,
+    file_ids: list[str] | None = None,
+) -> list[dict]:
+    """
+    List Google Docs metadata (no export). Returns list of dicts with id, name,
+    mimeType, and optionally modifiedTime. Same filtering as list_and_export_docs.
+    """
+    creds = _get_credentials()
+    service = build("drive", "v3", credentials=creds)
+    fields = "id, name, mimeType, modifiedTime"
+
+    if file_ids:
+        result: list[dict] = []
+        for fid in file_ids:
+            try:
+                meta = (
+                    service.files()
+                    .get(fileId=fid, fields=fields)
+                    .execute()
+                )
+                if meta.get("mimeType") == GOOGLE_DOCS_MIME:
+                    result.append(meta)
+                else:
+                    logger.warning(
+                        "Skipping non-Doc file %s (mimeType=%s)",
+                        fid,
+                        meta.get("mimeType"),
+                    )
+            except Exception as e:
+                logger.warning("Could not get file %s: %s", fid, e)
+        return result
+
+    q_parts = [f"mimeType = '{GOOGLE_DOCS_MIME}'"]
+    if folder_id:
+        q_parts.append(f"'{folder_id}' in parents")
+    q = " and ".join(q_parts)
+
+    result = []
+    page_token = None
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=q,
+                pageSize=100,
+                fields=f"nextPageToken, files({fields})",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for f in resp.get("files", []):
+            result.append(f)
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return result
+
+
 def list_and_export_docs(
     folder_id: str | None = None,
     file_ids: list[str] | None = None,
