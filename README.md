@@ -4,6 +4,8 @@ RAG-backed report verbiage for storm damage reports. Ingest documents, then ask 
 
 *From field notes to finished copy.*
 
+*(Deploy pipeline check — push to GitHub and confirm Render picks it up.)*
+
 ---
 
 ## What it does
