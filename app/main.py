@@ -53,6 +53,7 @@ from app.drive_client import list_and_export_docs, list_docs_metadata, test_conn
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
 from app.config import (
+    DATABASE_CONNECTION_KWARGS,
     DATABASE_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
@@ -81,7 +82,12 @@ logger.info("App log file: %s", _FILE_LOG)
 
 def _create_db_pool():
     """Create Postgres connection pool. Supabase: SSL is added in config; use NoPrepare for transaction mode (6543)."""
-    # Supabase transaction-mode pooler (port 6543) does not support prepared statements.
+    # Use parsed connection kwargs when available (handles passwords with =, &, ? in DATABASE_URL).
+    if DATABASE_CONNECTION_KWARGS:
+        conn_kwargs = dict(DATABASE_CONNECTION_KWARGS)
+        if "pooler.supabase.com" in conn_kwargs.get("host", "") and conn_kwargs.get("port") == 6543:
+            conn_kwargs["connection_factory"] = NoPrepareConnection
+        return psycopg2_pool.ThreadedConnectionPool(1, 10, **conn_kwargs)
     kwargs = {"minconn": 1, "maxconn": 10, "dsn": DATABASE_URL}
     if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
         kwargs["connection_factory"] = NoPrepareConnection

@@ -5,6 +5,7 @@ Sensible defaults where safe; no default secrets.
 
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,38 @@ if _raw_database_url:
     if ".supabase.co" in _raw_database_url and "gssencmode=" not in _raw_database_url:
         _raw_database_url = f"{_raw_database_url}{_sep}gssencmode=disable"
 DATABASE_URL = _raw_database_url
+
+
+def _parse_database_url(url: str) -> dict | None:
+    """Parse Postgres URI into kwargs for psycopg2.connect(). Handles passwords with =, &, ?."""
+    if not url:
+        return None
+    p = urlparse(url)
+    netloc = p.netloc
+    if "@" not in netloc:
+        return None
+    userinfo, _, hostport = netloc.rpartition("@")
+    user, _, password = userinfo.partition(":")
+    if not user or not hostport:
+        return None
+    host, _, port_str = hostport.rpartition(":")
+    port = int(port_str) if port_str.isdigit() else 5432
+    dbname = (p.path or "/postgres").lstrip("/") or "postgres"
+    kwargs: dict = {"host": host, "port": port, "user": user, "password": password, "dbname": dbname}
+    qs = parse_qs(p.query)
+    if "sslmode" in qs:
+        kwargs["sslmode"] = qs["sslmode"][0]
+    elif "pooler.supabase.com" in host and port == 6543:
+        kwargs["sslmode"] = "require"
+    if "gssencmode" in qs:
+        kwargs["gssencmode"] = qs["gssencmode"][0]
+    elif ".supabase.co" in host:
+        kwargs["gssencmode"] = "disable"
+    return kwargs
+
+
+# Parsed connection kwargs for psycopg2 (avoids DSN parse errors when password contains =, &, ?).
+DATABASE_CONNECTION_KWARGS = _parse_database_url(DATABASE_URL) if DATABASE_URL else None
 
 DB_PATH = os.getenv("DATABASE_PATH", "verbiage.db")
 
