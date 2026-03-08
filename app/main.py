@@ -451,7 +451,7 @@ async def ask(
         query_vec = query_vectors[0]
 
         top_chunks = retrieve_top_k(
-            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
+            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=None
         )
 
         MAX_CONTEXT_CHARS = 8000
@@ -488,7 +488,7 @@ def get_documents(
     user_id: str = Depends(get_current_user),
 ):
     def do_list(conn):
-        rows = list_documents(conn, user_id=user_id)
+        rows = list_documents(conn, user_id=None)
         return DocumentsListResponse(
             documents=[
                 DocumentSummary(
@@ -561,6 +561,7 @@ def _google_flow():
         client_config,
         scopes=["https://www.googleapis.com/auth/drive.readonly"],
         redirect_uri=GOOGLE_REDIRECT_URI,
+        autogenerate_code_verifier=False,
     )
 
 
@@ -595,7 +596,15 @@ async def auth_google_callback(request: Request):
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in callback")
     if not state_cookie or state_cookie != state_query:
-        raise HTTPException(status_code=400, detail="Invalid or missing state")
+        logger.warning(
+            "OAuth state mismatch: cookie=%s, query=%s",
+            "present" if state_cookie else "missing",
+            state_query[:20] + "..." if state_query and len(state_query) > 20 else state_query,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or missing state. Use the same host (localhost or 127.0.0.1) for the whole flow and avoid refreshing.",
+        )
     try:
         flow = _google_flow()
         flow._state = state_query
