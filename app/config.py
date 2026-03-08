@@ -25,6 +25,9 @@ if _raw_database_url:
     _sep = "&" if "?" in _raw_database_url else "?"
     if "pooler.supabase.com" in _raw_database_url and "sslmode=" not in _raw_database_url:
         _raw_database_url = f"{_raw_database_url}{_sep}sslmode=require"
+    # Direct connection (db.REF.supabase.co): avoid GSSAPI "Credential cache is empty"
+    if ".supabase.co" in _raw_database_url and "gssencmode=" not in _raw_database_url:
+        _raw_database_url = f"{_raw_database_url}{_sep}gssencmode=disable"
 DATABASE_URL = _raw_database_url
 
 
@@ -49,6 +52,10 @@ def _parse_database_url(url: str) -> dict | None:
         kwargs["sslmode"] = qs["sslmode"][0]
     elif "pooler.supabase.com" in host and port == 6543:
         kwargs["sslmode"] = "require"
+    if "gssencmode" in qs:
+        kwargs["gssencmode"] = qs["gssencmode"][0]
+    elif ".supabase.co" in host:
+        kwargs["gssencmode"] = "disable"
     return kwargs
 
 
