@@ -318,6 +318,10 @@
         <input type="email" id="auth-email" name="email" required placeholder="you@example.com" />
         <label for="auth-password">Password</label>
         <input type="password" id="auth-password" name="password" required placeholder="••••••••" />
+        <div id="auth-invite-row" hidden>
+          <label for="auth-invite">Invite code</label>
+          <input type="text" id="auth-invite" name="invite_code" autocomplete="one-time-code" placeholder="If your team shared a code" />
+        </div>
         <button type="submit" id="btn-signin">Sign in</button>
         <button type="button" id="btn-signup">Sign up</button>
       </form>
@@ -616,6 +620,10 @@
           return;
         }
         supabase = createClient(url, anonKey);
+        var inviteRow = document.getElementById('auth-invite-row');
+        if (inviteRow) {
+          inviteRow.hidden = !config.signup_invite_enabled;
+        }
         const recoveryFromHash = parseRecoveryFromHash(window.location.hash);
 
         const recoveryWaitMs = 400;
@@ -790,10 +798,33 @@
             errEl.hidden = false;
             return;
           }
+          var inviteRowEl = document.getElementById('auth-invite-row');
+          var inviteInput = document.getElementById('auth-invite');
+          var inviteCode = '';
+          if (inviteRowEl && !inviteRowEl.hidden && inviteInput) {
+            inviteCode = inviteInput.value.trim();
+          }
+          var payload = { email: email, password: password };
+          if (inviteCode) {
+            payload.invite_code = inviteCode;
+          }
           try {
-            const { data, error } = await supabase.auth.signUp({ email, password });
+            var res = await fetch(getApiBase() + '/auth/signup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            var errBody = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              var detail = errBody.detail;
+              var msg = typeof detail === 'string'
+                ? detail
+                : (Array.isArray(detail) && detail[0] && detail[0].msg) || 'Sign up failed';
+              throw new Error(msg);
+            }
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
-            showApp(data.user && data.user.email);
+            showApp(data.user.email);
             initTabsAndApi();
           } catch (err) {
             errEl.textContent = err.message || 'Sign up failed';
