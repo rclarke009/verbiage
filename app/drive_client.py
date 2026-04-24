@@ -5,6 +5,7 @@ Uses OAuth2 with drive.readonly scope. Lists and exports Google Docs as plain te
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -19,6 +20,22 @@ GOOGLE_DOCS_MIME = "application/vnd.google-apps.document"
 EXPORT_MIME_PLAIN = "text/plain"
 
 
+def _drive_modified_to_unix(modified_time: str | None) -> int | None:
+    """Parse Drive API RFC3339 modifiedTime to Unix seconds (UTC)."""
+    if not modified_time:
+        return None
+    s = modified_time.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except ValueError:
+        return None
+
+
 @dataclass
 class DriveDoc:
     """A document fetched from Drive, ready for ingest."""
@@ -27,6 +44,7 @@ class DriveDoc:
     title: str
     text: str
     source: str = "google_drive"
+    source_modified_at: int | None = None
 
 
 class DriveClientError(Exception):
@@ -143,9 +161,19 @@ def list_and_export_docs(
         files_to_export = []
         for fid in file_ids:
             try:
-                meta = service.files().get(fileId=fid, fields="id,name,mimeType").execute()
+                meta = (
+                    service.files()
+                    .get(fileId=fid, fields="id,name,mimeType,modifiedTime")
+                    .execute()
+                )
                 if meta.get("mimeType") == GOOGLE_DOCS_MIME:
-                    files_to_export.append((meta["id"], meta.get("name", fid)))
+                    files_to_export.append(
+                        (
+                            meta["id"],
+                            meta.get("name", fid),
+                            _drive_modified_to_unix(meta.get("modifiedTime")),
+                        )
+                    )
                 else:
                     logger.warning("Skipping non-Doc file %s (mimeType=%s)", fid, meta.get("mimeType"))
             except Exception as e:
@@ -165,19 +193,25 @@ def list_and_export_docs(
                 .list(
                     q=q,
                     pageSize=100,
-                    fields="nextPageToken, files(id, name)",
+                    fields="nextPageToken, files(id, name, modifiedTime)",
                     pageToken=page_token,
                 )
                 .execute()
             )
             for f in resp.get("files", []):
-                files_to_export.append((f["id"], f.get("name", f["id"])))
+                files_to_export.append(
+                    (
+                        f["id"],
+                        f.get("name", f["id"]),
+                        _drive_modified_to_unix(f.get("modifiedTime")),
+                    )
+                )
             page_token = resp.get("nextPageToken")
             if not page_token:
                 break
 
     result: list[DriveDoc] = []
-    for file_id, name in files_to_export:
+    for file_id, name, modified_unix in files_to_export:
         try:
             content = service.files().export_media(fileId=file_id, mimeType=EXPORT_MIME_PLAIN).execute()
             text = content.decode("utf-8") if isinstance(content, bytes) else content
@@ -185,7 +219,15 @@ def list_and_export_docs(
             if not text:
                 logger.warning("Empty export for %s (%s); skipping", file_id, name)
                 continue
-            result.append(DriveDoc(doc_id=file_id, title=name or file_id, text=text, source="google_drive"))
+            result.append(
+                DriveDoc(
+                    doc_id=file_id,
+                    title=name or file_id,
+                    text=text,
+                    source="google_drive",
+                    source_modified_at=modified_unix,
+                )
+            )
         except Exception as e:
             logger.warning("Export failed for %s (%s): %s", file_id, name, e)
             raise DriveClientError(f"Export failed for {name}: {e}") from e

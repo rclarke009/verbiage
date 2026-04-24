@@ -63,7 +63,11 @@ class DocumentSummary(BaseModel):
     doc_id: str = Field(..., description="Document id")
     title: str | None = Field(default=None, description="Title")
     source: str | None = Field(default=None, description="Source")
-    created_at: int = Field(..., description="Unix timestamp")
+    created_at: int = Field(..., description="Unix timestamp (ingest time)")
+    source_modified_at: int | None = Field(
+        default=None,
+        description="Unix seconds when source file was last modified, if known",
+    )
     num_chunks: int = Field(..., description="Number of chunks")
     snippet: str | None = Field(default=None, description="First ~250 chars of first chunk")
 
@@ -101,3 +105,13 @@ class DriveFileListResponse(BaseModel):
     """Response from listing Drive files (metadata only)."""
 
     files: list[DriveFileMeta] = Field(..., description="List of Google Docs metadata")
+
+
+class SimilarTitleMatch(BaseModel):
+    doc_id: str
+    title: str | None = None
+    score: float = Field(..., description="Similarity ratio 0..1")
+
+
+class SimilarTitlesResponse(BaseModel):
+    matches: list[SimilarTitleMatch] = Field(default_factory=list)
