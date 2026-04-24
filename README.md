@@ -6,9 +6,7 @@ The system ingests report documents, generates embeddings, stores them in **Post
 
 Originally built to generate suggested verbiage for storm damage reports by analyzing prior case documentation.
 
-*(Deploy pipeline check — push to GitHub and confirm Render picks it up.)*
-
-*(Deploy pipeline check — push to GitHub and confirm Render picks it up.)*
+**Production:** Hosted on [Render](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) (service dashboard).
 
 ---
 
