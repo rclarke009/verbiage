@@ -239,6 +239,12 @@
     #auth-panel { max-width: 360px; margin: 2rem auto; padding: 1.5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
     #auth-panel h2 { margin: 0 0 1rem 0; font-size: 1.1rem; }
     #auth-panel .auth-error { color: var(--error); font-size: 0.9rem; margin-top: 0.5rem; }
+    #auth-panel .auth-success { color: var(--success); font-size: 0.9rem; margin-top: 0.5rem; }
+    #auth-panel .auth-link {
+      background: none; border: none; padding: 0; margin: 0.5rem 0 0 0;
+      color: var(--accent); font-size: 0.85rem; cursor: pointer; text-decoration: underline;
+    }
+    #auth-panel .auth-link:hover { color: var(--accent-hover); }
     #auth-panel input { margin-bottom: 0.75rem; }
     #auth-panel button { margin-right: 0.5rem; margin-top: 0.5rem; }
     #app-content { display: none; }
@@ -305,16 +311,42 @@
 </head>
 <body>
   <div id="auth-panel" class="layout">
-    <h2>Sign in to Verbiage</h2>
-    <form id="form-auth">
-      <label for="auth-email">Email</label>
-      <input type="email" id="auth-email" name="email" required placeholder="you@example.com" />
-      <label for="auth-password">Password</label>
-      <input type="password" id="auth-password" name="password" required placeholder="••••••••" />
-      <button type="submit" id="btn-signin">Sign in</button>
-      <button type="button" id="btn-signup">Sign up</button>
-    </form>
+    <div id="auth-view-signin">
+      <h2>Sign in to Verbiage</h2>
+      <form id="form-auth">
+        <label for="auth-email">Email</label>
+        <input type="email" id="auth-email" name="email" required placeholder="you@example.com" />
+        <label for="auth-password">Password</label>
+        <input type="password" id="auth-password" name="password" required placeholder="••••••••" />
+        <button type="submit" id="btn-signin">Sign in</button>
+        <button type="button" id="btn-signup">Sign up</button>
+      </form>
+      <button type="button" class="auth-link" id="link-forgot">Forgot password?</button>
+    </div>
+    <div id="auth-view-forgot" hidden>
+      <h2>Reset password</h2>
+      <p style="margin:0 0 0.75rem 0;font-size:0.9rem;color:var(--text-muted);">Enter your email and we will send you a link to choose a new password.</p>
+      <form id="form-forgot">
+        <label for="forgot-email">Email</label>
+        <input type="email" id="forgot-email" name="email" required placeholder="you@example.com" />
+        <button type="submit" id="btn-send-reset">Send reset link</button>
+        <button type="button" id="btn-back-signin">Back to sign in</button>
+      </form>
+    </div>
+    <div id="auth-view-recovery" hidden>
+      <h2>Choose a new password</h2>
+      <p style="margin:0 0 0.75rem 0;font-size:0.9rem;color:var(--text-muted);">Signed in for password recovery. Set a new password below.</p>
+      <form id="form-recovery">
+        <label for="recovery-password">New password</label>
+        <input type="password" id="recovery-password" name="new_password" required autocomplete="new-password" placeholder="••••••••" minlength="6" />
+        <label for="recovery-password-confirm">Confirm password</label>
+        <input type="password" id="recovery-password-confirm" name="confirm" required autocomplete="new-password" placeholder="••••••••" minlength="6" />
+        <button type="submit" id="btn-save-password">Save password</button>
+        <button type="button" id="btn-recovery-cancel">Cancel</button>
+      </form>
+    </div>
     <p id="auth-error" class="auth-error" hidden></p>
+    <p id="auth-success" class="auth-success" hidden></p>
   </div>
 
   <div id="app-content" class="layout">
@@ -461,9 +493,45 @@
 
     const TAB_KEY = 'verbiage-tab';
     let supabase = null;
+    var authFormBound = false;
+    var recoveryFormBound = false;
 
       function getApiBase() {
         return window.location.origin;
+      }
+
+      function passwordResetRedirectTo() {
+        return window.location.origin + '/';
+      }
+
+      function parseRecoveryFromHash(hash) {
+        var q = (hash || '').replace(/^#/, '');
+        return new URLSearchParams(q).get('type') === 'recovery';
+      }
+
+      function showSignInAuthView() {
+        document.getElementById('auth-view-signin').hidden = false;
+        document.getElementById('auth-view-forgot').hidden = true;
+        document.getElementById('auth-view-recovery').hidden = true;
+      }
+
+      function showForgotAuthView() {
+        document.getElementById('auth-view-signin').hidden = true;
+        document.getElementById('auth-view-forgot').hidden = false;
+        document.getElementById('auth-view-recovery').hidden = true;
+      }
+
+      function showRecoveryAuthView() {
+        document.getElementById('auth-view-signin').hidden = true;
+        document.getElementById('auth-view-forgot').hidden = true;
+        document.getElementById('auth-view-recovery').hidden = false;
+      }
+
+      function clearAuthMessages() {
+        var errEl = document.getElementById('auth-error');
+        var okEl = document.getElementById('auth-success');
+        if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+        if (okEl) { okEl.hidden = true; okEl.textContent = ''; }
       }
 
       async function getAuthHeaders() {
@@ -525,6 +593,9 @@
       function showAuth() {
         document.getElementById('auth-panel').style.display = 'block';
         document.getElementById('app-content').classList.remove('authenticated');
+        clearAuthMessages();
+        showSignInAuthView();
+        bindAuthForm();
       }
 
       function showApp(email) {
@@ -545,23 +616,158 @@
           return;
         }
         supabase = createClient(url, anonKey);
-        const { data: { session } } = await supabase.auth.getSession();
+        const recoveryFromHash = parseRecoveryFromHash(window.location.hash);
+
+        const recoveryWaitMs = 400;
+        const recoveryWait = new Promise(function (resolve) {
+          const holder = { subscription: null };
+          const t = setTimeout(function () {
+            if (holder.subscription) holder.subscription.unsubscribe();
+            resolve(false);
+          }, recoveryWaitMs);
+          const { data } = supabase.auth.onAuthStateChange(function (event) {
+            if (event === 'PASSWORD_RECOVERY') {
+              clearTimeout(t);
+              if (holder.subscription) holder.subscription.unsubscribe();
+              resolve(true);
+            }
+          });
+          holder.subscription = data.subscription;
+        });
+
+        const [{ data: { session } }, recoveryFromEvent] = await Promise.all([
+          supabase.auth.getSession(),
+          recoveryWait,
+        ]);
+
+        const inPasswordRecovery = recoveryFromHash || recoveryFromEvent;
+
+        if (session && session.user && inPasswordRecovery) {
+          document.getElementById('auth-panel').style.display = 'block';
+          document.getElementById('app-content').classList.remove('authenticated');
+          clearAuthMessages();
+          showRecoveryAuthView();
+          bindRecoveryFormOnce();
+          return;
+        }
+
+        if (recoveryFromHash && (!session || !session.user)) {
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+          showAuth();
+          var linkErr = document.getElementById('auth-error');
+          linkErr.textContent = 'This password reset link is invalid or expired. Use Forgot password? to request a new one.';
+          linkErr.hidden = false;
+          return;
+        }
+
+        supabase.auth.onAuthStateChange(function (event) {
+          if (event === 'PASSWORD_RECOVERY') {
+            document.getElementById('auth-panel').style.display = 'block';
+            document.getElementById('app-content').classList.remove('authenticated');
+            clearAuthMessages();
+            showRecoveryAuthView();
+            bindRecoveryFormOnce();
+          }
+        });
+
         if (session && session.user) {
           showApp(session.user.email);
           initTabsAndApi();
         } else {
           showAuth();
-          bindAuthForm();
         }
       }
 
-      function bindAuthForm() {
-        var form = document.getElementById('form-auth');
-        var btnSignUp = document.getElementById('btn-signup');
+      function bindRecoveryFormOnce() {
+        if (recoveryFormBound) return;
+        recoveryFormBound = true;
+        var form = document.getElementById('form-recovery');
         var errEl = document.getElementById('auth-error');
+        var okEl = document.getElementById('auth-success');
+        var btnCancel = document.getElementById('btn-recovery-cancel');
         form.addEventListener('submit', async function (e) {
           e.preventDefault();
           errEl.hidden = true;
+          if (okEl) { okEl.hidden = true; }
+          var pw = form.new_password.value;
+          var pw2 = form.confirm.value;
+          if (pw !== pw2) {
+            errEl.textContent = 'Passwords do not match';
+            errEl.hidden = false;
+            return;
+          }
+          try {
+            const { error } = await supabase.auth.updateUser({ password: pw });
+            if (error) throw error;
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            const { data: { session: s } } = await supabase.auth.getSession();
+            var email = (s && s.user && s.user.email) || '';
+            showApp(email);
+            initTabsAndApi();
+          } catch (err) {
+            errEl.textContent = err.message || 'Could not update password';
+            errEl.hidden = false;
+          }
+        });
+        btnCancel.addEventListener('click', async function () {
+          errEl.hidden = true;
+          if (okEl) { okEl.hidden = true; }
+          if (supabase) await supabase.auth.signOut();
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+          showAuth();
+        });
+      }
+
+      function bindAuthForm() {
+        if (authFormBound) return;
+        authFormBound = true;
+        var form = document.getElementById('form-auth');
+        var btnSignUp = document.getElementById('btn-signup');
+        var errEl = document.getElementById('auth-error');
+        var okEl = document.getElementById('auth-success');
+        var linkForgot = document.getElementById('link-forgot');
+        var formForgot = document.getElementById('form-forgot');
+        var btnBackSignin = document.getElementById('btn-back-signin');
+
+        linkForgot.addEventListener('click', function () {
+          clearAuthMessages();
+          var emailMain = document.getElementById('auth-email').value.trim();
+          document.getElementById('forgot-email').value = emailMain;
+          showForgotAuthView();
+        });
+        btnBackSignin.addEventListener('click', function () {
+          clearAuthMessages();
+          showSignInAuthView();
+        });
+        formForgot.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          errEl.hidden = true;
+          if (okEl) { okEl.hidden = true; }
+          var email = formForgot.email.value.trim();
+          if (!email) {
+            errEl.textContent = 'Email required';
+            errEl.hidden = false;
+            return;
+          }
+          try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+              redirectTo: passwordResetRedirectTo(),
+            });
+            if (error) throw error;
+            if (okEl) {
+              okEl.textContent = 'Check your email for a reset link. You can close this tab after you finish.';
+              okEl.hidden = false;
+            }
+          } catch (err) {
+            errEl.textContent = err.message || 'Could not send reset email';
+            errEl.hidden = false;
+          }
+        });
+
+        form.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          errEl.hidden = true;
+          if (okEl) { okEl.hidden = true; }
           var email = form.email.value.trim();
           var password = form.password.value;
           try {
@@ -576,6 +782,7 @@
         });
         btnSignUp.addEventListener('click', async function () {
           errEl.hidden = true;
+          if (okEl) { okEl.hidden = true; }
           var email = form.email.value.trim();
           var password = form.password.value;
           if (!email || !password) {
