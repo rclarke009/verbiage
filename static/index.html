@@ -497,6 +497,8 @@
 
     const TAB_KEY = 'verbiage-tab';
     let supabase = null;
+    /** Set right after signIn while getSession() may not see the new session yet (avoids empty Bearer → 401 → signOut). */
+    let authAccessTokenOverride = null;
     var authFormBound = false;
     var recoveryFormBound = false;
 
@@ -541,14 +543,21 @@
       async function getAuthHeaders() {
         if (!supabase) return {};
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session || !session.access_token) return {};
-        return { Authorization: 'Bearer ' + session.access_token };
+        if (session && session.access_token) {
+          authAccessTokenOverride = null;
+          return { Authorization: 'Bearer ' + session.access_token };
+        }
+        if (authAccessTokenOverride) {
+          return { Authorization: 'Bearer ' + authAccessTokenOverride };
+        }
+        return {};
       }
 
       async function apiFetch(url, options = {}) {
         const headers = { ...(options.headers || {}), ...(await getAuthHeaders()) };
         const res = await fetch(url, { ...options, headers });
         if (res.status === 401) {
+          authAccessTokenOverride = null;
           supabase.auth.signOut();
           showAuth();
           throw new Error('Session expired. Please sign in again.');
@@ -595,6 +604,7 @@
       }
 
       function showAuth() {
+        authAccessTokenOverride = null;
         document.getElementById('auth-panel').style.display = 'block';
         document.getElementById('app-content').classList.remove('authenticated');
         clearAuthMessages();
@@ -781,6 +791,9 @@
           try {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
+            if (data.session && data.session.access_token) {
+              authAccessTokenOverride = data.session.access_token;
+            }
             showApp(data.user.email);
             initTabsAndApi();
           } catch (err) {
@@ -824,6 +837,9 @@
             }
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
+            if (data.session && data.session.access_token) {
+              authAccessTokenOverride = data.session.access_token;
+            }
             showApp(data.user.email);
             initTabsAndApi();
           } catch (err) {
