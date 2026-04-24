@@ -133,7 +133,28 @@ def create_db(conn: PgConnection) -> None:
                 END IF;
             END $$;
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS signup_allowlist (
+                email TEXT PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                note TEXT
+            )
+        """)
+        cur.execute("ALTER TABLE signup_allowlist ENABLE ROW LEVEL SECURITY;")
         conn.commit()
+    finally:
+        cur.close()
+
+
+def email_in_signup_allowlist(conn: PgConnection, email: str) -> bool:
+    """True if lowercase email exists in signup_allowlist (server DB role bypasses RLS)."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT 1 FROM signup_allowlist WHERE email = %s LIMIT 1",
+            (email.lower(),),
+        )
+        return cur.fetchone() is not None
     finally:
         cur.close()
 

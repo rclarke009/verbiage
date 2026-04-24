@@ -115,3 +115,13 @@ class SimilarTitleMatch(BaseModel):
 
 class SimilarTitlesResponse(BaseModel):
     matches: list[SimilarTitleMatch] = Field(default_factory=list)
+
+
+class SignupRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=6)
+    invite_code: str | None = None
+
+
+class SignupResponse(BaseModel):
+    ok: bool = True

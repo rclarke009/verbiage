@@ -28,6 +28,16 @@ SUPABASE_JWT_SECRET=your-jwt-secret-from-dashboard
 
 Restart the Verbiage server after changing these.
 
+For **closed signup** (allowlist and/or shared invite code), also set:
+
+```env
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-from-project-api-settings
+# Optional: if set, the sign-in form shows an invite field; matching code allows signup for any email.
+SIGNUP_INVITE_CODE=your-shared-secret
+```
+
+Never expose `SUPABASE_SERVICE_ROLE_KEY` in the browser or in `GET /config`. The app uses it only on the server to create users via the Auth Admin API.
+
 ---
 
 ## 3. (Optional) Add `user_id` column if you manage schema in Supabase
@@ -54,6 +64,27 @@ If you only use the app’s built-in `create_db()` (e.g. on first run), it will 
 
 ---
 
+## 4b. Closed signup (allowlist + optional invite code)
+
+Verbiage can restrict who may register: sign-up goes through **`POST /auth/signup`** on your backend, which creates the user with the **service role**. The browser no longer calls `supabase.auth.signUp` directly.
+
+1. **Disable public sign-ups** so the anon key cannot create users: **Project Settings** → **Authentication** → under **User Signups**, turn **off** **Allow new users to sign up**, then save.
+2. Set **`SUPABASE_SERVICE_ROLE_KEY`** and **`SUPABASE_URL`** in your app environment (see section 2).
+3. **Allowlist table** `signup_allowlist`: created by the app’s `create_db()` or by applying the migration under `supabase/migrations/`. Add emails in lowercase:
+
+   ```sql
+   INSERT INTO signup_allowlist (email, note)
+   VALUES (lower('colleague@example.com'), 'optional note')
+   ON CONFLICT (email) DO NOTHING;
+   ```
+
+4. **Optional shared code**: set **`SIGNUP_INVITE_CODE`** in the app environment. Anyone who knows the code can sign up with **any** email (still subject to your other rules). The UI shows an invite field when this is set. If you rely only on the allowlist, leave `SIGNUP_INVITE_CODE` unset.
+5. A user is allowed to sign up if **either** the invite code matches **`SIGNUP_INVITE_CODE`** **or** their email exists in **`signup_allowlist`**.
+
+Align **Confirm email** with server behavior: the app creates users with **`email_confirm: true`**. If you require email confirmation in the dashboard instead, adjust the server code or provider settings so new accounts match your policy.
+
+---
+
 ## 5. Password reset (redirect URLs)
 
 The Verbiage UI sends password recovery emails via Supabase (`resetPasswordForEmail` with `redirectTo` set to your app origin + `/`). Supabase only redirects to URLs you allow.
@@ -73,13 +104,15 @@ The Verbiage UI sends password recovery emails via Supabase (`resetPasswordForEm
 2. Click **Add user** → **Create new user**.
 3. Enter email and password and create the user. Use this to sign in from the Verbiage UI.
 
+With **closed signup** enabled, you can instead insert the email into **`signup_allowlist`** and use **Sign up** in the UI (or keep using **Add user** in the dashboard if you prefer).
+
 ---
 
 ## 7. Verify
 
 1. Start the Verbiage app and open the web UI.
 2. You should see the sign-in panel if Supabase is configured.
-3. Sign up or sign in with the test user.
+3. Sign up (if allowed by allowlist or invite code) or sign in with an existing user.
 4. After sign-in you should see the main app (Ingest / Ask / Documents). Ingest and Ask use your user id; documents are scoped per user.
 5. Optional: use **Forgot password?**, open the email link, set a new password, and confirm you can sign in with it.
 
@@ -90,9 +123,10 @@ The Verbiage UI sends password recovery emails via Supabase (`resetPasswordForEm
 | Step | Where | What |
 |------|--------|------|
 | 1 | Project Settings → API | Copy Project URL, anon key, JWT Secret |
-| 2 | App `.env` | Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET` |
+| 2 | App `.env` | Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`; for closed signup add `SUPABASE_SERVICE_ROLE_KEY` and optional `SIGNUP_INVITE_CODE` |
 | 3 | SQL Editor (optional) | Add `user_id` to `documents` if needed |
 | 4 | Authentication → Providers | Enable Email (or other) auth |
+| 4b | Project Settings → Authentication | Disable **Allow new users to sign up** when using closed signup; maintain `signup_allowlist` and/or `SIGNUP_INVITE_CODE` |
 | 5 | Authentication → URL Configuration | Site URL + Redirect URLs for password reset |
 | 6 | Authentication → Users | Create test user (optional) |
 | 7 | App UI | Sign in and use Ingest / Ask / Documents |

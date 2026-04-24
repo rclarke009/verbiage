@@ -8,9 +8,11 @@ from pathlib import Path
 
 import asyncio
 import logging
+import secrets
 import time
 from logging.handlers import RotatingFileHandler
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +23,7 @@ from app.db import (
     create_db,
     delete_by_doc_id,
     doc_exist,
+    email_in_signup_allowlist,
     get_valid_conn,
     insert_chunk,
     insert_document,
@@ -44,6 +47,8 @@ from app.models import (
     IngestGoogleDriveResponse,
     IngestRequest,
     IngestResponse,
+    SignupRequest,
+    SignupResponse,
 )
 from app.rate_limit import TokenBucket
 from app.chunking import chunk_text_chars
@@ -61,7 +66,9 @@ from app.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,
+    SIGNUP_INVITE_CODE,
     SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
 )
 from app import llm_client
@@ -267,13 +274,108 @@ async def ingest_text(
     )
 
 
+_SIGNUP_FORBIDDEN = "Sign up is not allowed for this email or invite code."
+
+
+def _invite_code_matches(provided: str | None, expected: str) -> bool:
+    clean = (provided or "").strip()
+    if not clean:
+        return False
+    exp = expected.encode("utf-8")
+    got = clean.encode("utf-8")
+    if len(got) != len(exp):
+        return False
+    return secrets.compare_digest(got, exp)
+
+
 @app.get("/config")
 def get_config():
     """Public: Supabase URL and anon key for frontend auth. No secrets."""
     return {
         "supabase_url": SUPABASE_URL or "",
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
+        "signup_invite_enabled": bool(SIGNUP_INVITE_CODE),
     }
+
+
+@app.post("/auth/signup", response_model=SignupResponse)
+def auth_signup(request: Request, body: SignupRequest):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Sign up is not configured on the server",
+        )
+    email = body.email.strip().lower()
+    if "@" not in email or email.startswith("@"):
+        raise HTTPException(status_code=400, detail="Invalid email")
+
+    invite_ok = bool(SIGNUP_INVITE_CODE) and _invite_code_matches(
+        body.invite_code,
+        SIGNUP_INVITE_CODE,
+    )
+
+    def allowed(conn):
+        if invite_ok:
+            return True
+        return email_in_signup_allowlist(conn, email)
+
+    if not with_db_conn_retry_sync(request, allowed):
+        raise HTTPException(status_code=403, detail=_SIGNUP_FORBIDDEN)
+
+    url = f"{SUPABASE_URL}/auth/v1/admin/users"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "email": email,
+        "password": body.password,
+        "email_confirm": True,
+    }
+    try:
+        resp = httpx.post(url, json=payload, headers=headers, timeout=30.0)
+    except httpx.RequestError as e:
+        logger.warning("auth signup admin request failed: %s", e)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not complete sign up. Try again later.",
+        ) from e
+
+    if resp.status_code in (200, 201):
+        return SignupResponse()
+
+    try:
+        data = resp.json()
+        msg = (
+            data.get("msg")
+            or data.get("message")
+            or data.get("error_description")
+            or str(data.get("error", ""))
+        )
+    except Exception:
+        msg = resp.text or ""
+    msg_lower = msg.lower()
+    if (
+        resp.status_code == 409
+        or resp.status_code == 422
+        or "already" in msg_lower
+        or "registered" in msg_lower
+        or "exists" in msg_lower
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email may already exist. Try signing in.",
+        )
+    logger.warning(
+        "auth signup admin error: status=%s body=%s",
+        resp.status_code,
+        (resp.text or "")[:500],
+    )
+    raise HTTPException(
+        status_code=502,
+        detail="Could not complete sign up. Try again later.",
+    )
 
 
 @app.post("/ingest", response_model=IngestResponse)
