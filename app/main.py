@@ -11,7 +11,7 @@ import logging
 import time
 from logging.handlers import RotatingFileHandler
 
-from fastapi import Depends, FastAPI, File, Request, UploadFile, HTTPException
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import psycopg2
@@ -27,6 +27,7 @@ from app.db import (
     insert_embedding,
     is_connection_error,
     list_documents,
+    list_doc_title_pairs,
     NoPrepareConnection,
 )
 from app.models import (
@@ -35,6 +36,8 @@ from app.models import (
     ChunkingOptions,
     DocumentSummary,
     DocumentsListResponse,
+    SimilarTitleMatch,
+    SimilarTitlesResponse,
     DriveFileListResponse,
     DriveFileMeta,
     IngestGoogleDriveRequest,
@@ -62,6 +65,7 @@ from app.config import (
     SUPABASE_URL,
 )
 from app import llm_client
+from app.similar_titles import find_similar_titles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -194,6 +198,22 @@ def with_db_conn_retry_sync(request: Request, sync_fn):
             pool.putconn(conn)
 
 
+def _parse_source_modified_at(raw: str | None) -> int | None:
+    """Unix seconds from form string; accepts ms from clients that send File.lastModified raw."""
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    try:
+        v = int(float(s))
+    except ValueError:
+        return None
+    if v > 1_000_000_000_000:
+        v //= 1000
+    return v
+
+
 async def ingest_text(
     conn,
     doc_id: str,
@@ -202,6 +222,7 @@ async def ingest_text(
     text: str,
     chunking_options: ChunkingOptions,
     user_id: str | None = None,
+    source_modified_at: int | None = None,
 ) -> IngestResponse:
     """
     Shared ingest: chunk text, insert document + chunks, embed, insert embeddings, commit.
@@ -212,7 +233,15 @@ async def ingest_text(
         raise ValueError("doc_id already exists")
     opts = chunking_options
     chunks = chunk_text_chars(text, opts.chunk_size, opts.chunk_overlap)
-    insert_document(conn, doc_id, int(time.time()), title, source, user_id=user_id)
+    insert_document(
+        conn,
+        doc_id,
+        int(time.time()),
+        title,
+        source,
+        user_id=user_id,
+        source_modified_at=source_modified_at,
+    )
     for chunk in chunks:
         chunk_id = f"{doc_id}:{chunk.chunk_index}"
         insert_chunk(
@@ -263,6 +292,7 @@ async def ingest(
                 ingest_request.text,
                 ingest_request.chunking_options,
                 user_id=user_id,
+                source_modified_at=None,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -292,11 +322,13 @@ async def ingest_file(
     source: str | None = File(default=None),
     chunk_size: int = File(default=800),
     chunk_overlap: int = File(default=100),
+    source_modified_at: str | None = Form(default=None),
     user_id: str = Depends(get_current_user),
 ):
     """
     Ingest a PDF file: extract text, then chunk, embed, and store (same as POST /ingest).
-    Multipart form: required 'file' (PDF), optional doc_id, title, source, chunk_size, chunk_overlap.
+    Multipart form: required 'file' (PDF), optional doc_id, title, source, chunk_size,
+    chunk_overlap, source_modified_at (Unix seconds or ms).
     """
     filename = file.filename or "document.pdf"
     if not any(filename.lower().endswith(ext) for ext in ALLOWED_PDF_EXTENSIONS):
@@ -331,6 +363,8 @@ async def ingest_file(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    resolved_source_modified_at = _parse_source_modified_at(source_modified_at)
+
     async def do_ingest_file(conn):
         try:
             return await ingest_text(
@@ -341,6 +375,7 @@ async def ingest_file(
                 text,
                 opts,
                 user_id=user_id,
+                source_modified_at=resolved_source_modified_at,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -421,6 +456,7 @@ async def ingest_google_drive(
                     doc.text,
                     default_opts,
                     user_id=user_id,
+                    source_modified_at=doc.source_modified_at,
                 )
                 ingested += 1
                 doc_ids.append(doc.doc_id)
@@ -494,7 +530,7 @@ def get_documents(
     user_id: str = Depends(get_current_user),
 ):
     def do_list(conn):
-        rows = list_documents(conn, user_id=None)
+        rows = list_documents(conn, user_id=user_id)
         return DocumentsListResponse(
             documents=[
                 DocumentSummary(
@@ -502,6 +538,7 @@ def get_documents(
                     title=r[1],
                     source=r[2],
                     created_at=r[3],
+                    source_modified_at=r[6],
                     num_chunks=r[4],
                     snippet=r[5],
                 )
@@ -510,6 +547,40 @@ def get_documents(
         )
 
     return with_db_conn_retry_sync(request, do_list)
+
+
+@app.get("/documents/similar-titles", response_model=SimilarTitlesResponse)
+def get_similar_titles(
+    request: Request,
+    proposed: str,
+    limit: int = 5,
+    min_ratio: float = 0.82,
+    user_id: str = Depends(get_current_user),
+):
+    """Advisory fuzzy match of proposed name against this user's document titles."""
+    if not proposed.strip():
+        return SimilarTitlesResponse(matches=[])
+    if limit < 1 or limit > 20:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 20")
+    if min_ratio < 0.5 or min_ratio > 1.0:
+        raise HTTPException(status_code=400, detail="min_ratio must be between 0.5 and 1.0")
+
+    def do_similar(conn):
+        pairs = list_doc_title_pairs(conn, user_id)
+        raw = find_similar_titles(
+            proposed,
+            pairs,
+            min_ratio=min_ratio,
+            limit=limit,
+        )
+        return SimilarTitlesResponse(
+            matches=[
+                SimilarTitleMatch(doc_id=did, title=ttl, score=sc)
+                for did, ttl, sc in raw
+            ]
+        )
+
+    return with_db_conn_retry_sync(request, do_similar)
 
 
 @app.get("/health")

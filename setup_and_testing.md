@@ -231,3 +231,36 @@ curl -s -X POST "http://localhost:8000/ingest/google-drive" \
 ```
 
 Response shape: `{"ingested": N, "skipped": M, "errors": [...], "doc_ids": [...]}`. Duplicate `doc_id` (same file already ingested) is counted as skipped; other failures are listed in `errors`.
+
+---
+
+## Google Drive troubleshooting (server refresh token)
+
+The app uses **one** Google account for Drive: credentials live on the server (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`). The signed-in Supabase user does **not** supply their own Google token.
+
+1. **Redirect URI must match exactly**  
+   In Google Cloud Console → APIs & Services → Credentials → your OAuth client → **Authorized redirect URIs**, the URI must match where the app runs, including scheme, host, port, and path. Examples:
+   - Local: `http://localhost:8000/auth/google/callback`
+   - Production: `https://your-domain.com/auth/google/callback`  
+   If you deploy to a new host, add that callback URL, redeploy, then run **`GET /auth/google`** again on that host to mint a new refresh token (or use the same client with the new URI added).
+
+2. **`GOOGLE_REDIRECT_URI` env**  
+   If the app is not on the default port or path, set `GOOGLE_REDIRECT_URI` to the same value you registered in Google Cloud. It must match the redirect URI used during the OAuth step.
+
+3. **Drive API and consent screen**  
+   Enable **Google Drive API** for the project. On the OAuth consent screen, add test users if the app is in testing mode.
+
+4. **After pasting `GOOGLE_REFRESH_TOKEN`**  
+   Restart the API process so it picks up the new env var. On **Render** (or similar), set `GOOGLE_REFRESH_TOKEN` (and client id/secret) in the service **Environment** tab and trigger a redeploy if needed.
+
+5. **`GET /drive/test` (with a valid Supabase session)**  
+   Returns `{ "ok": true }` if the refresh token works. If it fails, read the JSON `detail` string (often “credentials not configured”, invalid_grant, or revoked token).
+
+6. **New refresh token**  
+   If the token was revoked or the OAuth client changed, visit **`/auth/google`** again while logged into the correct Google account and replace `GOOGLE_REFRESH_TOKEN` in env.
+
+---
+
+## Similar titles (advisory duplicate check)
+
+**`GET /documents/similar-titles?proposed=<name>&limit=5&min_ratio=0.82`** (requires `Authorization: Bearer <Supabase access token>`) returns existing documents whose titles are fuzzily similar to `proposed`. The web UI uses this before ingesting queued PDFs or selected Drive files so you can skip near-duplicates.

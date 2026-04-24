@@ -12,3 +12,4 @@ google-api-python-client
 psycopg2-binary
 pgvector
 PyJWT>=2.8.0
+pytest>=8.0.0

@@ -121,6 +121,18 @@ def create_db(conn: PgConnection) -> None:
             END $$;
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);")
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'source_modified_at'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN source_modified_at BIGINT;
+                END IF;
+            END $$;
+        """)
         conn.commit()
     finally:
         cur.close()
@@ -133,12 +145,14 @@ def insert_document(
     title: str | None = None,
     source: str | None = None,
     user_id: str | None = None,
+    source_modified_at: int | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO documents(doc_id, title, source, created_at, user_id) VALUES (%s,%s,%s,%s,%s)",
-            (doc_id, title, source, created_at, user_id),
+            "INSERT INTO documents(doc_id, title, source, created_at, user_id, source_modified_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (doc_id, title, source, created_at, user_id, source_modified_at),
         )
     finally:
         cur.close()
@@ -270,9 +284,9 @@ def list_documents(
     conn: PgConnection,
     snippet_max_len: int = 250,
     user_id: str | None = None,
-) -> list[tuple[str, str | None, str | None, int, int, str | None]]:
+) -> list[tuple[str, str | None, str | None, int, int, str | None, int | None]]:
     """
-    Returns list of (doc_id, title, source, created_at, num_chunks, snippet).
+    Returns list of (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at).
     Ordered by created_at desc. If user_id is set, only that user's documents are returned.
     """
     sql = """
@@ -282,7 +296,8 @@ def list_documents(
             d.source,
             d.created_at,
             (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.doc_id) AS num_chunks,
-            (SELECT c.content FROM chunks c WHERE c.doc_id = d.doc_id ORDER BY c.chunk_index LIMIT 1) AS first_content
+            (SELECT c.content FROM chunks c WHERE c.doc_id = d.doc_id ORDER BY c.chunk_index LIMIT 1) AS first_content,
+            d.source_modified_at
         FROM documents d
     """
     params: list[Any] = []
@@ -295,14 +310,32 @@ def list_documents(
         cur.execute(sql, params)
         rows = cur.fetchall()
         result = []
-        for doc_id, title, source, created_at, num_chunks, first_content in rows:
+        for doc_id, title, source, created_at, num_chunks, first_content, source_modified_at in rows:
             snippet = None
             if first_content:
                 snippet = (
                     first_content[:snippet_max_len]
                     + ("..." if len(first_content) > snippet_max_len else "")
                 )
-            result.append((doc_id, title, source, created_at, num_chunks, snippet))
+            result.append(
+                (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at)
+            )
         return result
+    finally:
+        cur.close()
+
+
+def list_doc_title_pairs(
+    conn: PgConnection,
+    user_id: str,
+) -> list[tuple[str, str | None]]:
+    """(doc_id, title) for the user; used for fuzzy title matching."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT doc_id, title FROM documents WHERE user_id = %s",
+            (user_id,),
+        )
+        return [(r[0], r[1]) for r in cur.fetchall()]
     finally:
         cur.close()

@@ -194,7 +194,7 @@
     }
     .drawer-overlay.open { display: flex; }
     .drawer {
-      width: min(400px, 90vw);
+      width: min(520px, 92vw);
       background: var(--surface);
       border-left: 1px solid var(--border);
       display: flex;
@@ -258,6 +258,49 @@
     .drive-file-item input[type="checkbox"] { margin: 0; }
     .drive-file-meta { color: var(--text-muted); font-size: 0.8rem; margin-left: 0.25rem; }
     #drive-message { margin-top: 0.5rem; }
+    .drive-sort-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; font-size: 0.85rem; color: var(--text-muted); }
+    .drive-sort-bar button { padding: 0.25rem 0.5rem; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
+    .drive-sort-bar button:hover { background: var(--bg); }
+
+    .pdf-queue-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+    .pdf-queue-block h3 { margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 600; }
+    .pdf-queue-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+    .pdf-queue-toolbar button { padding: 0.35rem 0.65rem; font-size: 0.85rem; cursor: pointer; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+    .pdf-queue-toolbar button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .pdf-queue-table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; max-height: 280px; margin-bottom: 0.5rem; }
+    .pdf-queue-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .pdf-queue-table th, .pdf-queue-table td { padding: 0.4rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+    .pdf-queue-table th { background: var(--bg); color: var(--text-muted); font-weight: 600; cursor: pointer; user-select: none; }
+    .pdf-queue-table th:hover { color: var(--text); }
+    .pdf-queue-table tr:last-child td { border-bottom: none; }
+    .pdf-queue-status { font-size: 0.8rem; color: var(--text-muted); }
+    .pdf-queue-status.done { color: var(--success); }
+    .pdf-queue-status.err { color: var(--error); }
+
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200;
+      display: none; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-dialog {
+      background: var(--surface); border-radius: 8px; border: 1px solid var(--border);
+      max-width: 420px; width: 100%; padding: 1.25rem; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    .modal-dialog h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
+    .modal-dialog p { margin: 0 0 0.75rem 0; font-size: 0.9rem; color: var(--text-muted); }
+    .modal-matches { list-style: none; padding: 0; margin: 0 0 1rem 0; font-size: 0.85rem; max-height: 160px; overflow: auto; }
+    .modal-matches li { padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+    .modal-actions button { padding: 0.45rem 0.85rem; font-size: 0.9rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); }
+    .modal-actions button.danger { border-color: var(--error); color: var(--error); }
+    .modal-actions button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+    .drawer-sort-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; font-size: 0.8rem; color: var(--text-muted); }
+    .drawer-sort-bar button { padding: 0.25rem 0.45rem; font-size: 0.75rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
+    .drawer-sort-bar button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .doc-item .doc-title-line { font-weight: 600; color: var(--text); }
+    .doc-item .doc-detail { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem; line-height: 1.4; }
+    .doc-item .doc-id-small { font-size: 0.72rem; color: var(--text-muted); font-family: ui-monospace, monospace; margin-top: 0.25rem; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -292,8 +335,8 @@
       <form id="form-ingest">
         <label for="ingest-text">Text to ingest</label>
         <textarea id="ingest-text" name="text" placeholder="Paste report text…"></textarea>
-        <label for="ingest-file">Or upload a PDF</label>
-        <input type="file" id="ingest-file" name="file" accept=".pdf,application/pdf" />
+        <label for="ingest-file">Or choose PDFs (adds to queue below)</label>
+        <input type="file" id="ingest-file" name="file" accept=".pdf,application/pdf" multiple />
         <label for="ingest-doc_id">Doc ID (optional; default: generated)</label>
         <input type="text" id="ingest-doc_id" name="doc_id" placeholder="e.g. report-2024-01" />
         <label for="ingest-title">Title (optional)</label>
@@ -304,9 +347,31 @@
         <input type="number" id="ingest-chunk_size" name="chunk_size" value="800" min="1" />
         <label for="ingest-chunk_overlap">Chunk overlap</label>
         <input type="number" id="ingest-chunk_overlap" name="chunk_overlap" value="100" min="0" />
-        <button type="submit">Ingest</button>
+        <button type="submit">Ingest text</button>
       </form>
       <div id="ingest-message" class="message" role="alert" hidden></div>
+
+      <div class="pdf-queue-block">
+        <h3>PDF queue</h3>
+        <p class="pdf-queue-status" style="margin:0 0 0.5rem 0">Select one or more PDFs. Set chunk options above, then ingest the queue.</p>
+        <div class="pdf-queue-toolbar">
+          <button type="button" id="pdf-queue-clear">Clear queue</button>
+          <button type="button" id="pdf-queue-ingest" class="primary">Ingest queued PDFs</button>
+        </div>
+        <div id="pdf-queue-table-wrap" class="pdf-queue-table-wrap" hidden>
+          <table class="pdf-queue-table" id="pdf-queue-table">
+            <thead>
+              <tr>
+                <th data-sort="name">Name</th>
+                <th data-sort="type">Type</th>
+                <th data-sort="modified">Modified</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="pdf-queue-tbody"></tbody>
+          </table>
+        </div>
+      </div>
 
       <div class="drive-block">
         <h3>Google Drive</h3>
@@ -315,6 +380,13 @@
           <input type="text" id="drive-folder-id" placeholder="Folder ID (leave empty for root)" aria-label="Folder ID (optional)" />
           <button type="button" id="drive-list-btn">List files</button>
           <button type="button" id="drive-ingest-btn">Ingest selected</button>
+        </div>
+        <div id="drive-sort-bar" class="drive-sort-bar" hidden>
+          <span>Sort:</span>
+          <button type="button" id="drive-sort-name" data-dir="asc">Name A–Z</button>
+          <button type="button" id="drive-sort-name-desc" data-dir="desc">Name Z–A</button>
+          <button type="button" id="drive-sort-modified" data-dir="desc">Newest first</button>
+          <button type="button" id="drive-sort-modified-asc" data-dir="asc">Oldest first</button>
         </div>
         <div id="drive-file-list" class="drive-file-list" hidden></div>
         <div id="drive-empty" class="drawer-empty" hidden>No Google Docs found in this folder.</div>
@@ -359,7 +431,27 @@
       <div class="drawer-body">
         <div id="drawer-loading" class="drawer-loading" hidden>Loading…</div>
         <div id="drawer-empty" class="drawer-empty" hidden>No documents ingested yet.</div>
+        <div id="drawer-sort-bar" class="drawer-sort-bar" hidden>
+          <span>Sort by:</span>
+          <button type="button" data-drawer-sort="title" class="active">Title A–Z</button>
+          <button type="button" data-drawer-sort="title_desc">Title Z–A</button>
+          <button type="button" data-drawer-sort="ingested_desc">Ingested (newest)</button>
+          <button type="button" data-drawer-sort="ingested_asc">Ingested (oldest)</button>
+          <button type="button" data-drawer-sort="modified_desc">File modified</button>
+        </div>
         <ul class="doc-list" id="drawer-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="similar-modal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-labelledby="similar-modal-title">
+      <h3 id="similar-modal-title">Similar document already ingested</h3>
+      <p id="similar-modal-body"></p>
+      <ul class="modal-matches" id="similar-modal-matches"></ul>
+      <div class="modal-actions">
+        <button type="button" class="danger" id="similar-modal-skip">Skip this file</button>
+        <button type="button" class="primary" id="similar-modal-proceed">Ingest anyway</button>
       </div>
     </div>
   </div>
@@ -390,6 +482,44 @@
           throw new Error('Session expired. Please sign in again.');
         }
         return res;
+      }
+
+      var similarTitleResolver = null;
+      var similarTitleModalBound = false;
+      function bindSimilarTitleModalOnce() {
+        if (similarTitleModalBound) return;
+        similarTitleModalBound = true;
+        var modal = document.getElementById('similar-modal');
+        var modalBody = document.getElementById('similar-modal-body');
+        var modalMatches = document.getElementById('similar-modal-matches');
+        var modalSkip = document.getElementById('similar-modal-skip');
+        var modalProceed = document.getElementById('similar-modal-proceed');
+        function closeSimilar(val) {
+          modal.classList.remove('open');
+          modal.setAttribute('aria-hidden', 'true');
+          var fn = similarTitleResolver;
+          similarTitleResolver = null;
+          if (fn) fn(val);
+        }
+        modalSkip.addEventListener('click', function () { closeSimilar(false); });
+        modalProceed.addEventListener('click', function () { closeSimilar(true); });
+        modal.addEventListener('click', function (e) {
+          if (e.target === modal) closeSimilar(false);
+        });
+        window.__verbiageAskSimilarTitle = function (fileName, matches) {
+          return new Promise(function (resolve) {
+            similarTitleResolver = resolve;
+            modalBody.textContent = 'A document with a very similar name is already ingested: "' + fileName + '". Ingest this file anyway?';
+            modalMatches.innerHTML = '';
+            matches.forEach(function (m) {
+              var li = document.createElement('li');
+              li.textContent = (m.title || m.doc_id) + ' (match ' + Math.round((m.score || 0) * 100) + '%) — id: ' + m.doc_id;
+              modalMatches.appendChild(li);
+            });
+            modal.classList.add('open');
+            modal.setAttribute('aria-hidden', 'false');
+          });
+        };
       }
 
       function showAuth() {
@@ -466,8 +596,10 @@
       }
 
       function initTabsAndApi() {
+        bindSimilarTitleModalOnce();
         bindTabs();
         bindIngestForm();
+        bindPdfQueue();
         bindDriveBlock();
         bindAskForm();
         bindDrawer();
@@ -523,44 +655,9 @@
           const msg = document.getElementById('ingest-message');
           msg.hidden = true;
           const form = e.target;
-          const fileInput = document.getElementById('ingest-file');
-          const file = fileInput.files && fileInput.files[0];
-          const usePdf = file && file.name && file.name.toLowerCase().endsWith('.pdf');
-
-          if (usePdf) {
-            const formData = new FormData();
-            formData.append('file', file);
-            if (form.doc_id.value.trim()) formData.append('doc_id', form.doc_id.value.trim());
-            if (form.title.value.trim()) formData.append('title', form.title.value.trim());
-            if (form.source.value.trim()) formData.append('source', form.source.value.trim());
-            formData.append('chunk_size', form.chunk_size.value || '800');
-            formData.append('chunk_overlap', form.chunk_overlap.value || '100');
-            try {
-              const res = await apiFetch(getApiBase() + '/ingest/file', { method: 'POST', body: formData });
-              const data = await res.json().catch(function () { return {}; });
-              if (!res.ok) {
-                var detailStr = typeof data.detail === 'string' ? data.detail : (Array.isArray(data.detail) && data.detail[0] ? data.detail[0].msg : (data.detail && data.detail.msg ? data.detail.msg : null));
-                msg.textContent = detailStr || res.statusText || 'Ingest failed';
-                msg.className = 'message error';
-                msg.hidden = false;
-                return;
-              }
-              msg.textContent = 'Ingested: ' + (data.doc_id || '') + ' (' + (data.num_chunks || 0) + ' chunks).';
-              msg.className = 'message success';
-              msg.hidden = false;
-              fileInput.value = '';
-              refreshDocsSelect();
-            } catch (err) {
-              msg.textContent = (err && err.message) || 'Request failed';
-              msg.className = 'message error';
-              msg.hidden = false;
-            }
-            return;
-          }
-
           const text = form.text.value.trim();
           if (!text) {
-            msg.textContent = 'Paste text or upload a PDF to ingest.';
+            msg.textContent = 'Paste text to ingest, or add PDFs to the queue and click Ingest queued PDFs.';
             msg.className = 'message error';
             msg.hidden = false;
             return;
@@ -601,6 +698,191 @@
         });
       }
 
+      function bindPdfQueue() {
+        const fileInput = document.getElementById('ingest-file');
+        const tbody = document.getElementById('pdf-queue-tbody');
+        const wrap = document.getElementById('pdf-queue-table-wrap');
+        const btnClear = document.getElementById('pdf-queue-clear');
+        const btnIngest = document.getElementById('pdf-queue-ingest');
+        const msg = document.getElementById('ingest-message');
+        const table = document.getElementById('pdf-queue-table');
+
+        var pdfQueue = [];
+        var pdfQueueNextId = 1;
+        var pdfSort = { key: 'name', dir: 'asc' };
+
+        function formatFileDate(ms) {
+          if (ms == null || ms === '') return '—';
+          try {
+            return new Date(ms).toLocaleString();
+          } catch (e) {
+            return '—';
+          }
+        }
+
+        function displayMime(name, fileType) {
+          var t = (fileType || '').trim();
+          if (t === 'application/pdf' || !t) return 'PDF';
+          return t.split('/').pop() || 'PDF';
+        }
+
+        function sortedQueue() {
+          var arr = pdfQueue.slice();
+          var mul = pdfSort.dir === 'asc' ? 1 : -1;
+          arr.sort(function (a, b) {
+            if (pdfSort.key === 'name') {
+              return mul * String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+            }
+            if (pdfSort.key === 'type') {
+              return mul * String(a.displayType).localeCompare(String(b.displayType), undefined, { sensitivity: 'base' });
+            }
+            if (pdfSort.key === 'modified') {
+              return mul * ((a.lastModified || 0) - (b.lastModified || 0));
+            }
+            return 0;
+          });
+          return arr;
+        }
+
+        function renderPdfQueue() {
+          tbody.innerHTML = '';
+          if (pdfQueue.length === 0) {
+            wrap.hidden = true;
+            return;
+          }
+          wrap.hidden = false;
+          sortedQueue().forEach(function (entry) {
+            var tr = document.createElement('tr');
+            var tdName = document.createElement('td');
+            tdName.textContent = entry.name;
+            var tdType = document.createElement('td');
+            tdType.textContent = entry.displayType;
+            var tdMod = document.createElement('td');
+            tdMod.textContent = formatFileDate(entry.lastModified);
+            var tdSt = document.createElement('td');
+            var st = document.createElement('span');
+            st.className = 'pdf-queue-status';
+            if (entry.status === 'done') st.className += ' done';
+            if (entry.status === 'error') st.className += ' err';
+            st.textContent = entry.status === 'pending' ? 'Queued' : entry.status === 'uploading' ? 'Uploading…' : entry.status === 'done' ? 'Done' : entry.status === 'skipped' ? 'Skipped' : entry.status === 'error' ? (entry.errMsg || 'Error') : entry.status;
+            tdSt.appendChild(st);
+            tr.appendChild(tdName);
+            tr.appendChild(tdType);
+            tr.appendChild(tdMod);
+            tr.appendChild(tdSt);
+            tbody.appendChild(tr);
+          });
+        }
+
+        fileInput.addEventListener('change', function () {
+          var files = fileInput.files;
+          if (!files || !files.length) return;
+          for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (!f.name || !f.name.toLowerCase().endsWith('.pdf')) continue;
+            pdfQueue.push({
+              id: pdfQueueNextId++,
+              file: f,
+              name: f.name,
+              displayType: displayMime(f.name, f.type),
+              lastModified: f.lastModified,
+              status: 'pending',
+              errMsg: null
+            });
+          }
+          fileInput.value = '';
+          renderPdfQueue();
+        });
+
+        btnClear.addEventListener('click', function () {
+          pdfQueue = [];
+          renderPdfQueue();
+        });
+
+        if (table) {
+          table.querySelectorAll('th[data-sort]').forEach(function (th) {
+            th.addEventListener('click', function () {
+              var k = th.getAttribute('data-sort');
+              if (pdfSort.key === k) {
+                pdfSort.dir = pdfSort.dir === 'asc' ? 'desc' : 'asc';
+              } else {
+                pdfSort.key = k;
+                pdfSort.dir = k === 'modified' ? 'desc' : 'asc';
+              }
+              renderPdfQueue();
+            });
+          });
+        }
+
+        btnIngest.addEventListener('click', async function () {
+          var form = document.getElementById('form-ingest');
+          var pending = pdfQueue.filter(function (e) { return e.status === 'pending' || e.status === 'error'; });
+          if (pending.length === 0) {
+            msg.textContent = 'Add PDFs to the queue or clear completed rows and re-add files.';
+            msg.className = 'message error';
+            msg.hidden = false;
+            return;
+          }
+          msg.hidden = true;
+          btnIngest.disabled = true;
+          var ok = 0;
+          var skipped = 0;
+          var failed = 0;
+          for (var j = 0; j < pending.length; j++) {
+            var entry = pending[j];
+            entry.status = 'uploading';
+            entry.errMsg = null;
+            renderPdfQueue();
+            try {
+              var simUrl = getApiBase() + '/documents/similar-titles?proposed=' + encodeURIComponent(entry.name);
+              var simRes = await apiFetch(simUrl);
+              var simData = await simRes.json().catch(function () { return {}; });
+              var matches = (simData.matches || []);
+              if (matches.length > 0) {
+                var go = await window.__verbiageAskSimilarTitle(entry.name, matches);
+                if (!go) {
+                  entry.status = 'skipped';
+                  skipped++;
+                  renderPdfQueue();
+                  continue;
+                }
+              }
+              var formData = new FormData();
+              formData.append('file', entry.file, entry.name);
+              if (form.source.value.trim()) formData.append('source', form.source.value.trim());
+              formData.append('chunk_size', form.chunk_size.value || '800');
+              formData.append('chunk_overlap', form.chunk_overlap.value || '100');
+              if (entry.lastModified != null) {
+                formData.append('source_modified_at', String(Math.floor(entry.lastModified / 1000)));
+              }
+              var res = await apiFetch(getApiBase() + '/ingest/file', { method: 'POST', body: formData });
+              var data = await res.json().catch(function () { return {}; });
+              if (!res.ok) {
+                var detailStr = typeof data.detail === 'string' ? data.detail : (Array.isArray(data.detail) && data.detail[0] ? data.detail[0].msg : (data.detail && data.detail.msg ? data.detail.msg : null));
+                entry.status = 'error';
+                entry.errMsg = detailStr || res.statusText || 'Failed';
+                failed++;
+                renderPdfQueue();
+                continue;
+              }
+              entry.status = 'done';
+              ok++;
+              renderPdfQueue();
+            } catch (err) {
+              entry.status = 'error';
+              entry.errMsg = (err && err.message) || 'Request failed';
+              failed++;
+              renderPdfQueue();
+            }
+          }
+          btnIngest.disabled = false;
+          refreshDocsSelect();
+          msg.textContent = 'Queue finished: ' + ok + ' ingested' + (skipped ? ', ' + skipped + ' skipped' : '') + (failed ? ', ' + failed + ' failed' : '') + '.';
+          msg.className = 'message ' + (failed ? 'error' : 'success');
+          msg.hidden = false;
+        });
+      }
+
       function bindDriveBlock() {
         const testBtn = document.getElementById('drive-test-btn');
         const listBtn = document.getElementById('drive-list-btn');
@@ -610,12 +892,76 @@
         const emptyEl = document.getElementById('drive-empty');
         const driveMsg = document.getElementById('drive-message');
         const ingestMsg = document.getElementById('ingest-message');
+        const sortBar = document.getElementById('drive-sort-bar');
+
+        var driveFilesRaw = [];
+        var driveSortKey = 'name';
+        var driveSortDir = 'asc';
 
         function showDriveMsg(text, isError) {
           driveMsg.textContent = text;
           driveMsg.className = 'message ' + (isError ? 'error' : 'success');
           driveMsg.hidden = false;
         }
+
+        function parseDriveModified(f) {
+          if (!f || !f.modifiedTime) return 0;
+          try {
+            var s = f.modifiedTime;
+            if (s.slice(-1) === 'Z') s = s.slice(0, -1);
+            return new Date(s).getTime() || 0;
+          } catch (e) {
+            return 0;
+          }
+        }
+
+        function sortedDriveFiles() {
+          var arr = driveFilesRaw.slice();
+          var mul = driveSortDir === 'asc' ? 1 : -1;
+          arr.sort(function (a, b) {
+            if (driveSortKey === 'name') {
+              return mul * String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { sensitivity: 'base' });
+            }
+            return mul * (parseDriveModified(a) - parseDriveModified(b));
+          });
+          return arr;
+        }
+
+        function renderDriveFileList() {
+          fileListEl.innerHTML = '';
+          sortedDriveFiles().forEach(function (f) {
+            var item = document.createElement('div');
+            item.className = 'drive-file-item';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = f.id;
+            cb.id = 'drive-cb-' + f.id;
+            cb.dataset.fileName = f.name || f.id;
+            var label = document.createElement('label');
+            label.htmlFor = cb.id;
+            label.style.cursor = 'pointer';
+            label.appendChild(document.createTextNode(f.name || f.id));
+            var meta = document.createElement('span');
+            meta.className = 'drive-file-meta';
+            var mimeShort = (f.mimeType || 'application/vnd.google-apps.document').split('/').pop();
+            meta.textContent = ' \u2022 ' + mimeShort + (f.modifiedTime ? ' \u2022 ' + f.modifiedTime.slice(0, 10) : '');
+            label.appendChild(meta);
+            item.appendChild(cb);
+            item.appendChild(label);
+            fileListEl.appendChild(item);
+          });
+        }
+
+        function setDriveSort(key, dir) {
+          driveSortKey = key;
+          driveSortDir = dir;
+          if (driveFilesRaw.length) renderDriveFileList();
+        }
+
+        document.getElementById('drive-sort-name').addEventListener('click', function () { setDriveSort('name', 'asc'); });
+        document.getElementById('drive-sort-name-desc').addEventListener('click', function () { setDriveSort('name', 'desc'); });
+        document.getElementById('drive-sort-modified').addEventListener('click', function () { setDriveSort('modified', 'desc'); });
+        document.getElementById('drive-sort-modified-asc').addEventListener('click', function () { setDriveSort('modified', 'asc'); });
 
         testBtn.addEventListener('click', async function () {
           driveMsg.hidden = true;
@@ -639,7 +985,9 @@
           driveMsg.hidden = true;
           emptyEl.hidden = true;
           fileListEl.hidden = true;
+          sortBar.hidden = true;
           fileListEl.innerHTML = '';
+          driveFilesRaw = [];
           listBtn.disabled = true;
           try {
             const folderId = (folderInput && folderInput.value) ? folderInput.value.trim() : '';
@@ -656,27 +1004,9 @@
               showDriveMsg('No Google Docs found.', false);
               return;
             }
-            files.forEach(function (f) {
-              const item = document.createElement('div');
-              item.className = 'drive-file-item';
-              const cb = document.createElement('input');
-              cb.type = 'checkbox';
-              cb.value = f.id;
-              cb.id = 'drive-cb-' + f.id;
-              const label = document.createElement('label');
-              label.htmlFor = cb.id;
-              label.style.cursor = 'pointer';
-              label.appendChild(document.createTextNode(f.name || f.id));
-              if (f.modifiedTime) {
-                const meta = document.createElement('span');
-                meta.className = 'drive-file-meta';
-                meta.textContent = ' \u2022 ' + f.modifiedTime.slice(0, 10);
-                label.appendChild(meta);
-              }
-              item.appendChild(cb);
-              item.appendChild(label);
-              fileListEl.appendChild(item);
-            });
+            driveFilesRaw = files;
+            renderDriveFileList();
+            sortBar.hidden = false;
             fileListEl.hidden = false;
             showDriveMsg('Found ' + files.length + ' Google Doc(s). Select and click Ingest selected.', false);
           } catch (err) {
@@ -688,8 +1018,10 @@
 
         ingestBtn.addEventListener('click', async function () {
           const checkboxes = fileListEl.querySelectorAll('input[type="checkbox"]:checked');
-          const ids = Array.from(checkboxes).map(function (cb) { return cb.value; }).filter(Boolean);
-          if (ids.length === 0) {
+          const selected = Array.from(checkboxes).map(function (cb) {
+            return { id: cb.value, name: cb.dataset.fileName || cb.value };
+          }).filter(function (x) { return x.id; });
+          if (selected.length === 0) {
             ingestMsg.textContent = 'Select one or more files from the list above, then click Ingest selected.';
             ingestMsg.className = 'message error';
             ingestMsg.hidden = false;
@@ -697,24 +1029,48 @@
           }
           ingestMsg.hidden = true;
           ingestBtn.disabled = true;
+          var totalIngested = 0;
+          var totalSkipped = 0;
+          var allErrors = [];
           try {
-            const res = await apiFetch(getApiBase() + '/ingest/google-drive', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ file_ids: ids })
-            });
-            const data = await res.json().catch(function () { return {}; });
-            if (!res.ok) {
-              ingestMsg.textContent = data.detail || res.statusText || 'Ingest failed';
-              ingestMsg.className = 'message error';
-              ingestMsg.hidden = false;
-              return;
+            for (var i = 0; i < selected.length; i++) {
+              var sel = selected[i];
+              try {
+                var simUrl = getApiBase() + '/documents/similar-titles?proposed=' + encodeURIComponent(sel.name);
+                var simRes = await apiFetch(simUrl);
+                var simData = await simRes.json().catch(function () { return {}; });
+                var matches = simData.matches || [];
+                if (matches.length > 0) {
+                  var go = await window.__verbiageAskSimilarTitle(sel.name, matches);
+                  if (!go) {
+                    totalSkipped++;
+                    continue;
+                  }
+                }
+                var res = await apiFetch(getApiBase() + '/ingest/google-drive', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ file_ids: [sel.id] })
+                });
+                var data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                  allErrors.push(sel.name + ': ' + (data.detail || res.statusText));
+                  continue;
+                }
+                totalIngested += data.ingested || 0;
+                totalSkipped += data.skipped || 0;
+                if (data.errors && data.errors.length) {
+                  data.errors.forEach(function (err) { allErrors.push(err); });
+                }
+              } catch (err) {
+                allErrors.push(sel.name + ': ' + ((err && err.message) || 'failed'));
+              }
             }
-            var summary = 'Ingested: ' + (data.ingested || 0);
-            if (data.skipped) summary += ', skipped: ' + data.skipped;
-            if (data.errors && data.errors.length) summary += '. Errors: ' + data.errors.join('; ');
+            var summary = 'Ingested: ' + totalIngested;
+            if (totalSkipped) summary += ', skipped: ' + totalSkipped;
+            if (allErrors.length) summary += '. Errors: ' + allErrors.join('; ');
             ingestMsg.textContent = summary;
-            ingestMsg.className = 'message success';
+            ingestMsg.className = 'message ' + (allErrors.length ? 'error' : 'success');
             ingestMsg.hidden = false;
             refreshDocsSelect();
           } catch (err) {
@@ -792,36 +1148,105 @@
         const drawerList = document.getElementById('drawer-list');
         const drawerLoading = document.getElementById('drawer-loading');
         const drawerEmpty = document.getElementById('drawer-empty');
+        const drawerSortBar = document.getElementById('drawer-sort-bar');
+        var drawerDocsCache = [];
+        var drawerSortMode = 'title';
+
         function escapeHtml(s) {
           if (s == null) return '';
           var div = document.createElement('div');
           div.textContent = s;
           return div.innerHTML;
         }
+
+        function sourceToDisplayType(source) {
+          var s = (source || '').toLowerCase();
+          if (s === 'uploaded_pdf' || s.indexOf('pdf') >= 0) return 'PDF';
+          if (s === 'google_drive') return 'Google Doc';
+          return source ? source : '—';
+        }
+
+        function formatUnix(ts) {
+          if (ts == null || ts === '') return '—';
+          try {
+            return new Date(ts * 1000).toLocaleString();
+          } catch (e) {
+            return '—';
+          }
+        }
+
+        function sortDrawerDocs(docs, mode) {
+          var arr = docs.slice();
+          if (mode === 'title') {
+            arr.sort(function (a, b) {
+              return String(a.title || a.doc_id).localeCompare(String(b.title || b.doc_id), undefined, { sensitivity: 'base' });
+            });
+          } else if (mode === 'title_desc') {
+            arr.sort(function (a, b) {
+              return String(b.title || b.doc_id).localeCompare(String(a.title || a.doc_id), undefined, { sensitivity: 'base' });
+            });
+          } else if (mode === 'ingested_desc') {
+            arr.sort(function (a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+          } else if (mode === 'ingested_asc') {
+            arr.sort(function (a, b) { return (a.created_at || 0) - (b.created_at || 0); });
+          } else if (mode === 'modified_desc') {
+            arr.sort(function (a, b) {
+              var am = a.source_modified_at != null ? a.source_modified_at : -1;
+              var bm = b.source_modified_at != null ? b.source_modified_at : -1;
+              return bm - am;
+            });
+          }
+          return arr;
+        }
+
+        function renderDrawerList() {
+          drawerList.innerHTML = '';
+          sortDrawerDocs(drawerDocsCache, drawerSortMode).forEach(function (d) {
+            var li = document.createElement('li');
+            li.className = 'doc-item';
+            var titleLine = '<div class="doc-title-line">' + escapeHtml(d.title || d.doc_id) + '</div>';
+            var detail = 'Type: ' + escapeHtml(sourceToDisplayType(d.source)) +
+              ' · Chunks: ' + (d.num_chunks || 0) +
+              ' · Ingested: ' + formatUnix(d.created_at) +
+              ' · File modified: ' + formatUnix(d.source_modified_at);
+            if (d.source) detail += ' · Source: ' + escapeHtml(d.source);
+            var body = titleLine +
+              '<div class="doc-detail">' + detail + '</div>' +
+              '<div class="doc-id-small">id: ' + escapeHtml(d.doc_id) + '</div>' +
+              (d.snippet ? '<div class="doc-snippet">' + escapeHtml(d.snippet) + '</div>' : '');
+            li.innerHTML = body;
+            drawerList.appendChild(li);
+          });
+        }
+
+        drawerSortBar.querySelectorAll('[data-drawer-sort]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            drawerSortMode = btn.getAttribute('data-drawer-sort');
+            drawerSortBar.querySelectorAll('[data-drawer-sort]').forEach(function (b) {
+              b.classList.toggle('active', b.getAttribute('data-drawer-sort') === drawerSortMode);
+            });
+            if (drawerDocsCache.length) renderDrawerList();
+          });
+        });
+
         async function openDrawer() {
           overlay.classList.add('open');
           overlay.setAttribute('aria-hidden', 'false');
           drawerLoading.hidden = false;
           drawerEmpty.hidden = true;
+          drawerSortBar.hidden = true;
           drawerList.innerHTML = '';
           try {
             const res = await apiFetch(getApiBase() + '/documents');
             const data = await res.json();
             drawerLoading.hidden = true;
-            const docs = data.documents || [];
-            if (docs.length === 0) {
+            drawerDocsCache = data.documents || [];
+            if (drawerDocsCache.length === 0) {
               drawerEmpty.hidden = false;
               return;
             }
-            docs.forEach(function (d) {
-              const li = document.createElement('li');
-              li.className = 'doc-item';
-              li.innerHTML =
-                '<span class="doc-id">' + escapeHtml(d.doc_id) + '</span>' +
-                '<div class="doc-meta">' + escapeHtml(d.title || '') + (d.source ? ' · ' + escapeHtml(d.source) : '') + ' · ' + (d.num_chunks || 0) + ' chunks</div>' +
-                (d.snippet ? '<div class="doc-snippet">' + escapeHtml(d.snippet) + '</div>' : '');
-              drawerList.appendChild(li);
-            });
+            drawerSortBar.hidden = false;
+            renderDrawerList();
           } catch (e) {
             drawerLoading.hidden = true;
             drawerEmpty.textContent = 'Failed to load documents.';
