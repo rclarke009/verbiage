@@ -56,6 +56,7 @@ from app.embeddings import HttpEmbedder
 from app.job_store import JobStore
 from app.worker import worker_loop
 from app.retrieval import retrieve_top_k
+from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
 from app.drive_client import list_and_export_docs, list_docs_metadata, test_connection, DriveClientError
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
@@ -230,6 +231,7 @@ async def ingest_text(
     chunking_options: ChunkingOptions,
     user_id: str | None = None,
     source_modified_at: int | None = None,
+    source_url: str | None = None,
 ) -> IngestResponse:
     """
     Shared ingest: chunk text, insert document + chunks, embed, insert embeddings, commit.
@@ -248,6 +250,7 @@ async def ingest_text(
         source,
         user_id=user_id,
         source_modified_at=source_modified_at,
+        source_url=source_url,
     )
     for chunk in chunks:
         chunk_id = f"{doc_id}:{chunk.chunk_index}"
@@ -395,6 +398,7 @@ async def ingest(
                 ingest_request.chunking_options,
                 user_id=user_id,
                 source_modified_at=None,
+                source_url=ingest_request.source_url,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -425,11 +429,12 @@ async def ingest_file(
     chunk_size: int = File(default=800),
     chunk_overlap: int = File(default=100),
     source_modified_at: str | None = Form(default=None),
+    source_url: str | None = Form(default=None),
     user_id: str = Depends(get_current_user),
 ):
     """
     Ingest a PDF file: extract text, then chunk, embed, and store (same as POST /ingest).
-    Multipart form: required 'file' (PDF), optional doc_id, title, source, chunk_size,
+    Multipart form: required 'file' (PDF), optional doc_id, title, source, source_url, chunk_size,
     chunk_overlap, source_modified_at (Unix seconds or ms).
     """
     filename = file.filename or "document.pdf"
@@ -466,6 +471,7 @@ async def ingest_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     resolved_source_modified_at = _parse_source_modified_at(source_modified_at)
+    resolved_source_url = source_url.strip() if source_url and source_url.strip() else None
 
     async def do_ingest_file(conn):
         try:
@@ -478,6 +484,7 @@ async def ingest_file(
                 opts,
                 user_id=user_id,
                 source_modified_at=resolved_source_modified_at,
+                source_url=resolved_source_url,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -550,6 +557,7 @@ async def ingest_google_drive(
         nonlocal ingested, skipped, errors, doc_ids
         for doc in docs:
             try:
+                gdoc_url = f"https://docs.google.com/document/d/{doc.doc_id}/edit"
                 await ingest_text(
                     conn,
                     doc.doc_id,
@@ -559,6 +567,7 @@ async def ingest_google_drive(
                     default_opts,
                     user_id=user_id,
                     source_modified_at=doc.source_modified_at,
+                    source_url=gdoc_url,
                 )
                 ingested += 1
                 doc_ids.append(doc.doc_id)
@@ -595,7 +604,7 @@ async def ask(
         query_vec = query_vectors[0]
 
         top_chunks = retrieve_top_k(
-            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=None
+            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
         )
 
         MAX_CONTEXT_CHARS = 8000
@@ -605,7 +614,13 @@ async def ask(
             answer = "I don't have relevant context to answer that question."
             return AskResponse(answer=answer, top_chunks=[])
         for c in top_chunks:
-            block = f"[doc_id={c.doc_id} chunk_id={c.chunk_id}]\n{c.content_snippet}\n"
+            title = (c.document_title or "").strip() or c.doc_id
+            link = (c.source_url or "").strip()
+            link_line = f"Link: {link}\n" if link else ""
+            block = (
+                f"[doc_id={c.doc_id} title={title!r} chunk_id={c.chunk_id}]\n"
+                f"{link_line}{c.content_snippet}\n"
+            )
             if total_len + len(block) > MAX_CONTEXT_CHARS:
                 break
             context_parts.append(block)
@@ -639,6 +654,7 @@ def get_documents(
                     doc_id=r[0],
                     title=r[1],
                     source=r[2],
+                    source_url=resolved_source_url(r[2], r[0], r[7]),
                     created_at=r[3],
                     source_modified_at=r[6],
                     num_chunks=r[4],

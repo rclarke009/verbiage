@@ -4,8 +4,9 @@ Uses Postgres pgvector when available; retrieve_top_k_in_memory for tests/fallba
 """
 
 from app.models import RetrievedChunk
-from app.db import get_embeddings_for_retrieval, retrieve_top_k_pg
+from app.db import get_document_source_fields, get_embeddings_for_retrieval, retrieve_top_k_pg
 from app.similarity import cosine_similarity
+from app.source_url import resolved_source_url
 
 
 def retrieve_top_k(
@@ -19,8 +20,11 @@ def retrieve_top_k(
             doc_id=doc_id_val,
             score=score,
             content_snippet=content,
+            document_title=title,
+            source=src,
+            source_url=resolved_source_url(src, doc_id_val, src_url),
         )
-        for chunk_id, doc_id_val, score, content in rows
+        for chunk_id, doc_id_val, score, content, title, src, src_url in rows
     ]
 
 
@@ -34,12 +38,22 @@ def retrieve_top_k_in_memory(conn, query_vec, top_k, doc_id=None) -> list[Retrie
         scored.append((score, chunk_id, doc_id_val, content))
     scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:top_k]
-    return [
-        RetrievedChunk(
-            chunk_id=chunk_id,
-            doc_id=doc_id_val,
-            score=score,
-            content_snippet=content,
+    if not top:
+        return []
+    unique_ids = list({t[2] for t in top})
+    meta = get_document_source_fields(conn, unique_ids)
+    out: list[RetrievedChunk] = []
+    for score, chunk_id, doc_id_val, content in top:
+        title, src, src_url = meta.get(doc_id_val, (None, None, None))
+        out.append(
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                doc_id=doc_id_val,
+                score=score,
+                content_snippet=content,
+                document_title=title,
+                source=src,
+                source_url=resolved_source_url(src, doc_id_val, src_url),
+            )
         )
-        for score, chunk_id, doc_id_val, content in top
-    ]
+    return out

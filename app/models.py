@@ -26,6 +26,7 @@ class IngestRequest (BaseModel):
     doc_id: str | None = None
     title: str | None = None
     source: str | None = None
+    source_url: str | None = Field(default=None, description="Optional URL to the full report")
     chunking_options: ChunkingOptions | None = None
 
     @model_validator(mode="after")
@@ -52,6 +53,12 @@ class RetrievedChunk(BaseModel):
     doc_id: str = Field(..., description="doc_id")
     score: float = Field(..., description="score")
     content_snippet: str = Field(..., description="content_snippet")
+    document_title: str | None = Field(default=None, description="Ingested document title")
+    source: str | None = Field(default=None, description="Ingested source label")
+    source_url: str | None = Field(
+        default=None,
+        description="Resolved URL to open the full report (stored or derived for Google Drive)",
+    )
 
 class AskResponse(BaseModel):
     answer: str = Field(...,description="Answer from system")
@@ -63,6 +70,10 @@ class DocumentSummary(BaseModel):
     doc_id: str = Field(..., description="Document id")
     title: str | None = Field(default=None, description="Title")
     source: str | None = Field(default=None, description="Source")
+    source_url: str | None = Field(
+        default=None,
+        description="Resolved URL to open the full report, if any",
+    )
     created_at: int = Field(..., description="Unix timestamp (ingest time)")
     source_modified_at: int | None = Field(
         default=None,

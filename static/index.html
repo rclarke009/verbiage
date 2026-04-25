@@ -172,6 +172,20 @@
       margin-bottom: 0.5rem;
       font-size: 0.9rem;
     }
+    .mention-doc-title a {
+      color: var(--accent);
+      font-weight: 500;
+      margin-left: 0.35rem;
+    }
+    .mention-doc-title a:hover { text-decoration: underline; }
+    .ask-citation-footnote {
+      margin: 0.75rem 0 0 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .doc-open-wrap { margin: 0.25rem 0 0.35rem 0; }
+    .doc-report-link { color: var(--accent); font-weight: 500; }
+    .doc-report-link:hover { text-decoration: underline; }
     .mention-snippet {
       margin: 0.5rem 0;
       padding: 0.5rem;
@@ -379,6 +393,8 @@
         <input type="text" id="ingest-title" name="title" placeholder="Report title" />
         <label for="ingest-source">Source (optional)</label>
         <input type="text" id="ingest-source" name="source" placeholder="File or origin" />
+        <label for="ingest-source_url">Full report link (optional)</label>
+        <input type="url" id="ingest-source_url" name="source_url" placeholder="https://…" autocomplete="off" />
         <label for="ingest-chunk_size">Chunk size</label>
         <input type="number" id="ingest-chunk_size" name="chunk_size" value="800" min="1" />
         <label for="ingest-chunk_overlap">Chunk overlap</label>
@@ -452,6 +468,7 @@
           <div class="ask-result-right">
             <h3>Where it's mentioned</h3>
             <div id="ask-mentions"></div>
+            <p class="ask-citation-footnote">Link is from when the document was ingested. If the file was removed or you no longer have access, open the report from your Drive or files.</p>
           </div>
         </div>
       </div>
@@ -504,6 +521,16 @@
 
       function getApiBase() {
         return window.location.origin;
+      }
+
+      function isSafeReportUrl(href) {
+        if (href == null || String(href).trim() === '') return false;
+        try {
+          var u = new URL(href, window.location.origin);
+          return u.protocol === 'https:' || u.protocol === 'http:';
+        } catch (e) {
+          return false;
+        }
       }
 
       function passwordResetRedirectTo() {
@@ -926,6 +953,9 @@
           if (form.doc_id.value.trim()) body.doc_id = form.doc_id.value.trim();
           if (form.title.value.trim()) body.title = form.title.value.trim();
           if (form.source.value.trim()) body.source = form.source.value.trim();
+          if (form.source_url && form.source_url.value.trim()) {
+            body.source_url = form.source_url.value.trim();
+          }
           try {
             const res = await apiFetch(getApiBase() + '/ingest', {
               method: 'POST',
@@ -1104,6 +1134,9 @@
               var formData = new FormData();
               formData.append('file', entry.file, entry.name);
               if (form.source.value.trim()) formData.append('source', form.source.value.trim());
+              if (form.source_url && form.source_url.value.trim()) {
+                formData.append('source_url', form.source_url.value.trim());
+              }
               formData.append('chunk_size', form.chunk_size.value || '800');
               formData.append('chunk_overlap', form.chunk_overlap.value || '100');
               if (entry.lastModified != null) {
@@ -1378,7 +1411,18 @@
               docSection.className = 'mention-doc';
               var title = document.createElement('div');
               title.className = 'mention-doc-title';
-              title.textContent = docId;
+              var c0 = docChunks[0] || {};
+              var displayName = c0.document_title || docId;
+              title.appendChild(document.createTextNode(displayName));
+              if (c0.source_url && isSafeReportUrl(c0.source_url)) {
+                title.appendChild(document.createTextNode(' '));
+                var a = document.createElement('a');
+                a.href = c0.source_url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.textContent = 'Open full report';
+                title.appendChild(a);
+              }
               docSection.appendChild(title);
               docChunks.forEach(function (c) {
                 var snip = document.createElement('div');
@@ -1411,6 +1455,13 @@
           var div = document.createElement('div');
           div.textContent = s;
           return div.innerHTML;
+        }
+
+        function escapeAttr(s) {
+          if (s == null) return '';
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;');
         }
 
         function sourceToDisplayType(source) {
@@ -1459,12 +1510,16 @@
             var li = document.createElement('li');
             li.className = 'doc-item';
             var titleLine = '<div class="doc-title-line">' + escapeHtml(d.title || d.doc_id) + '</div>';
+            var openLine = '';
+            if (d.source_url && isSafeReportUrl(d.source_url)) {
+              openLine = '<div class="doc-open-wrap"><a class="doc-report-link" href="' + escapeAttr(d.source_url) + '" target="_blank" rel="noopener noreferrer">Open full report</a></div>';
+            }
             var detail = 'Type: ' + escapeHtml(sourceToDisplayType(d.source)) +
               ' · Chunks: ' + (d.num_chunks || 0) +
               ' · Ingested: ' + formatUnix(d.created_at) +
               ' · File modified: ' + formatUnix(d.source_modified_at);
             if (d.source) detail += ' · Source: ' + escapeHtml(d.source);
-            var body = titleLine +
+            var body = titleLine + openLine +
               '<div class="doc-detail">' + detail + '</div>' +
               '<div class="doc-id-small">id: ' + escapeHtml(d.doc_id) + '</div>' +
               (d.snippet ? '<div class="doc-snippet">' + escapeHtml(d.snippet) + '</div>' : '');
