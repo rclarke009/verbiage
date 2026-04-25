@@ -83,6 +83,8 @@ GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
+# SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used
+# to verify access tokens). Do not use the anon key, service role key, or a secret from another project.
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "").strip()

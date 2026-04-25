@@ -134,6 +134,18 @@ def create_db(conn: PgConnection) -> None:
             END $$;
         """)
         cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'source_url'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN source_url TEXT;
+                END IF;
+            END $$;
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS signup_allowlist (
                 email TEXT PRIMARY KEY,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -167,13 +179,14 @@ def insert_document(
     source: str | None = None,
     user_id: str | None = None,
     source_modified_at: int | None = None,
+    source_url: str | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO documents(doc_id, title, source, created_at, user_id, source_modified_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s)",
-            (doc_id, title, source, created_at, user_id, source_modified_at),
+            "INSERT INTO documents(doc_id, title, source, created_at, user_id, source_modified_at, source_url) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (doc_id, title, source, created_at, user_id, source_modified_at, source_url),
         )
     finally:
         cur.close()
@@ -253,23 +266,19 @@ def retrieve_top_k_pg(
     top_k: int,
     doc_id: str | None = None,
     user_id: str | None = None,
-) -> list[tuple[str, str, float, str]]:
-    """Postgres similarity search. Returns (chunk_id, doc_id, score, content). Uses <=> (cosine distance); 1 - distance = similarity. If user_id is set, only chunks from that user's documents are considered."""
+) -> list[tuple[str, str, float, str, str | None, str | None, str | None]]:
+    """Postgres similarity search. Returns (chunk_id, doc_id, score, content, title, source, source_url). Uses <=> (cosine distance). If user_id is set, only that user's documents are considered."""
     _ensure_pgvector(conn)
     sql = """
-        SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content
+        SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content,
+               d.title, d.source, d.source_url
         FROM embeddings e
         JOIN chunks c ON e.chunk_id = c.chunk_id
+        JOIN documents d ON d.doc_id = c.doc_id
     """
     conditions: list[str] = []
     params: list[Any] = [query_vec]
     if user_id is not None:
-        sql = """
-        SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content
-        FROM embeddings e
-        JOIN chunks c ON e.chunk_id = c.chunk_id
-        JOIN documents d ON d.doc_id = c.doc_id
-        """
         conditions.append("d.user_id = %s")
         params.append(user_id)
     if doc_id is not None:
@@ -305,9 +314,9 @@ def list_documents(
     conn: PgConnection,
     snippet_max_len: int = 250,
     user_id: str | None = None,
-) -> list[tuple[str, str | None, str | None, int, int, str | None, int | None]]:
+) -> list[tuple[str, str | None, str | None, int, int, str | None, int | None, str | None]]:
     """
-    Returns list of (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at).
+    Returns list of (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at, source_url).
     Ordered by created_at desc. If user_id is set, only that user's documents are returned.
     """
     sql = """
@@ -318,7 +327,8 @@ def list_documents(
             d.created_at,
             (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.doc_id) AS num_chunks,
             (SELECT c.content FROM chunks c WHERE c.doc_id = d.doc_id ORDER BY c.chunk_index LIMIT 1) AS first_content,
-            d.source_modified_at
+            d.source_modified_at,
+            d.source_url
         FROM documents d
     """
     params: list[Any] = []
@@ -331,7 +341,16 @@ def list_documents(
         cur.execute(sql, params)
         rows = cur.fetchall()
         result = []
-        for doc_id, title, source, created_at, num_chunks, first_content, source_modified_at in rows:
+        for (
+            doc_id,
+            title,
+            source,
+            created_at,
+            num_chunks,
+            first_content,
+            source_modified_at,
+            source_url,
+        ) in rows:
             snippet = None
             if first_content:
                 snippet = (
@@ -339,9 +358,31 @@ def list_documents(
                     + ("..." if len(first_content) > snippet_max_len else "")
                 )
             result.append(
-                (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at)
+                (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at, source_url)
             )
         return result
+    finally:
+        cur.close()
+
+
+def get_document_source_fields(
+    conn: PgConnection, doc_ids: list[str]
+) -> dict[str, tuple[str | None, str | None, str | None]]:
+    """
+    For each doc_id, return (title, source, source_url) from documents.
+    Omits doc_ids that are not in the table.
+    """
+    if not doc_ids:
+        return {}
+    unique: list[str] = list(dict.fromkeys(doc_ids))
+    placeholders = ",".join(["%s"] * len(unique))
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"SELECT doc_id, title, source, source_url FROM documents WHERE doc_id IN ({placeholders})",
+            unique,
+        )
+        return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
     finally:
         cur.close()
 

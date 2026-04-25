@@ -61,7 +61,8 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
-        logger.debug("Invalid JWT: %s", e)
+        # Log at warning so deploy logs (e.g. Render) show signature/audience errors; never log the token.
+        logger.warning("JWT verification failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
