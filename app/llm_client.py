@@ -1,9 +1,12 @@
 """
 LLM client: async answer_with_context uses OpenAI when OPENAI_API_KEY is set,
 with optional fallback to Ollama; otherwise Ollama only.
+
+Streaming helpers yield text deltas for POST /ask/stream (SSE).
 """
 
 import asyncio
+import json
 import logging
 import random
 
@@ -148,3 +151,75 @@ async def answer_with_context(prompt: str) -> str:
                 return await _answer_ollama(prompt)
             raise
     return await _answer_ollama(prompt)
+
+
+async def _answer_openai_stream(prompt: str):
+    """Stream OpenAI chat completion content deltas."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+    }
+    payload = {
+        "model": LLM_OPENAI_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST",
+            OPENAI_CHAT_URL,
+            headers=headers,
+            json=payload,
+        ) as resp:
+            if resp.status_code == 429:
+                raise LLMRateLimitedError("OpenAI rate limited")
+            if resp.status_code >= 400:
+                err_txt = await resp.aread()
+                snippet = err_txt[:200].decode(errors="replace") if err_txt else "(empty)"
+                raise LLMServiceError(
+                    f"OpenAI API error {resp.status_code}: {snippet}"
+                )
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line.removeprefix("data:").strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    j = json.loads(data)
+                    choice = (j.get("choices") or [None])[0]
+                    if not choice:
+                        continue
+                    delta = choice.get("delta") or {}
+                    content = delta.get("content") or ""
+                    if content:
+                        yield content
+                except json.JSONDecodeError:
+                    continue
+
+
+async def answer_with_context_stream(prompt: str):
+    """Async iterator of answer text deltas. OpenAI streamed; otherwise one chunk from non-stream APIs."""
+    if OPENAI_API_KEY:
+        try:
+            async for part in _answer_openai_stream(prompt):
+                yield part
+            return
+        except LLMRateLimitedError:
+            raise
+        except LLMUpstreamTimeoutError:
+            raise
+        except LLMServiceError:
+            raise
+        except Exception as e:
+            if LLM_FALLBACK_TO_LOCAL:
+                logger.warning("OpenAI streaming failed, falling back to local once: %s", e)
+                text = await _answer_ollama(prompt)
+                if text:
+                    yield text
+                return
+            raise
+    text = await _answer_ollama(prompt)
+    if text:
+        yield text
