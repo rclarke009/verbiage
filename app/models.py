@@ -40,6 +40,20 @@ class IngestResponse(BaseModel):
     num_chunks: int = Field(..., description="Number of chunks")
     embedding_model: str = Field(..., description="Embedding model")
     dim: int = Field(..., description="Embedding vector dimension")
+    embedding_chars_total: int = Field(
+        ...,
+        description=(
+            "Sum of chunk character lengths passed to embedding (overlap counted); "
+            "compare volume to OpenAI embedding usage deltas per ingest."
+        ),
+    )
+    embedding_tokens_estimate: int = Field(
+        ...,
+        description=(
+            "Heuristic ingest embedding tokens: sum ceil(len(chunk)/4) per chunk; "
+            "approximate checklist vs usage dashboard (~4 chars/token English)."
+        ),
+    )
 
 
 class AskRequest(BaseModel):

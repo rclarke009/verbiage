@@ -310,6 +310,33 @@ def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
         cur.close()
 
 
+def delete_document_for_user(conn: PgConnection, doc_id: str, user_id: str) -> bool:
+    """
+    Delete a document only if owned by user_id (documents.user_id). Returns True if a row was removed.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT 1 FROM documents WHERE doc_id = %s AND user_id = %s",
+            (doc_id, user_id),
+        )
+        if not cur.fetchone():
+            return False
+        cur.execute(
+            "DELETE FROM embeddings WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE doc_id = %s)",
+            (doc_id,),
+        )
+        cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
+        cur.execute(
+            "DELETE FROM documents WHERE doc_id = %s AND user_id = %s",
+            (doc_id, user_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        cur.close()
+
+
 def list_documents(
     conn: PgConnection,
     snippet_max_len: int = 250,

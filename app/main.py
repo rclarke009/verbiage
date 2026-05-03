@@ -4,6 +4,8 @@ ask questions; retrieval uses embeddings + pgvector. LLM and embeddings via Open
 with optional fallback to Ollama; otherwise Ollama only.
 """
 from contextlib import asynccontextmanager
+import json
+import os
 from pathlib import Path
 
 import asyncio
@@ -14,14 +16,16 @@ from logging.handlers import RotatingFileHandler
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2 import pool as psycopg2_pool
 
 from app.db import (
     create_db,
     delete_by_doc_id,
+    delete_document_for_user,
     doc_exist,
     email_in_signup_allowlist,
     get_valid_conn,
@@ -36,6 +40,7 @@ from app.db import (
 from app.models import (
     AskRequest,
     AskResponse,
+    RetrievedChunk,
     ChunkingOptions,
     DocumentSummary,
     DocumentsListResponse,
@@ -52,6 +57,7 @@ from app.models import (
 )
 from app.rate_limit import TokenBucket
 from app.chunking import chunk_text_chars
+from app.embedding_usage_estimate import embedding_metering
 from app.embeddings import HttpEmbedder
 from app.job_store import JobStore
 from app.worker import worker_loop
@@ -153,7 +159,20 @@ async def lifespan(app):
     logger.info("Work has stopped")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="TrueAI", lifespan=lifespan)
+
+
+_cors = os.getenv("CORS_ORIGINS", "").strip()
+if _cors:
+    origins = [o.strip() for o in _cors.split(",") if o.strip()]
+    logger.info("CORS enabled for origins: %s", origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 async def with_db_conn_retry(request: Request, async_fn):
@@ -269,11 +288,14 @@ async def ingest_text(
         chunk_id = f"{doc_id}:{chunk.chunk_index}"
         insert_embedding(conn, chunk_id, embedder.model, vector, embedder.dim)
     conn.commit()
+    chars_total, toks_estimate = embedding_metering([c.content for c in chunks])
     return IngestResponse(
         doc_id=doc_id,
         num_chunks=len(chunks),
         embedding_model=embedder.model,
         dim=embedder.dim,
+        embedding_chars_total=chars_total,
+        embedding_tokens_estimate=toks_estimate,
     )
 
 
@@ -589,6 +611,55 @@ async def ingest_google_drive(
     return await with_db_conn_retry(request, do_google_drive_ingest)
 
 
+def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> str | None:
+    """Build LLM user prompt from retrieved chunks. None when there are no chunks."""
+    MAX_CONTEXT_CHARS = 8000
+    if not top_chunks:
+        return None
+    context_parts = []
+    total_len = 0
+    for c in top_chunks:
+        title = (c.document_title or "").strip() or c.doc_id
+        link = (c.source_url or "").strip()
+        link_line = f"Link: {link}\n" if link else ""
+        block = (
+            f"[doc_id={c.doc_id} title={title!r} chunk_id={c.chunk_id}]\n"
+            f"{link_line}{c.content_snippet}\n"
+        )
+        if total_len + len(block) > MAX_CONTEXT_CHARS:
+            break
+        context_parts.append(block)
+        total_len += len(block)
+
+    context_str = "\n".join(context_parts) if context_parts else "(No relevant context found.)"
+    return (
+        "Answer using only the context below. If the context doesn't contain enough information, say so.\n\n"
+        "Context:\n" + context_str + "\n\n"
+        "Question: " + question
+    )
+
+
+def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
+    payload = []
+    for c in top_chunks:
+        src_low = (c.source or "").lower()
+        kind = (
+            "google_drive"
+            if "drive" in src_low or "google" in src_low
+            else "stored"
+        )
+        payload.append(
+            {
+                "filename": c.document_title or c.doc_id or "document",
+                "source_url": c.source_url or "",
+                "source_type": kind,
+                "page": 0,
+                "section": c.chunk_id or "",
+            }
+        )
+    return payload
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask(
     request: Request,
@@ -607,31 +678,11 @@ async def ask(
             conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
         )
 
-        MAX_CONTEXT_CHARS = 8000
-        context_parts = []
-        total_len = 0
-        if not top_chunks:
+        prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
+        if prompt is None:
             answer = "I don't have relevant context to answer that question."
             return AskResponse(answer=answer, top_chunks=[])
-        for c in top_chunks:
-            title = (c.document_title or "").strip() or c.doc_id
-            link = (c.source_url or "").strip()
-            link_line = f"Link: {link}\n" if link else ""
-            block = (
-                f"[doc_id={c.doc_id} title={title!r} chunk_id={c.chunk_id}]\n"
-                f"{link_line}{c.content_snippet}\n"
-            )
-            if total_len + len(block) > MAX_CONTEXT_CHARS:
-                break
-            context_parts.append(block)
-            total_len += len(block)
 
-        context_str = "\n".join(context_parts) if context_parts else "(No relevant context found.)"
-        prompt = (
-            "Answer using only the context below. If the context doesn't contain enough information, say so.\n\n"
-            "Context:\n" + context_str + "\n\n"
-            "Question: " + ask_request.question
-        )
         logger.info("ask: acquiring rate limit token")
         await rate_limiter.acquire()
         logger.info("ask: rate limit acquired, calling LLM")
@@ -640,6 +691,63 @@ async def ask(
         return AskResponse(answer=answer, top_chunks=top_chunks)
 
     return await with_db_conn_retry(request, do_ask)
+
+
+@app.post("/ask/stream")
+async def ask_stream(
+    request: Request,
+    ask_request: AskRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk."""
+
+    async def do_prepare(conn):
+        rate_limiter = request.app.state.rate_limiter
+        embedder = HttpEmbedder()
+        logger.info("ask_stream: embedding query (1 text)")
+        query_vectors = await embedder.embed_many([ask_request.question])
+        query_vec = query_vectors[0]
+        top_chunks = retrieve_top_k(
+            conn,
+            query_vec,
+            ask_request.top_k,
+            ask_request.doc_id,
+            user_id=user_id,
+        )
+        prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
+        return rate_limiter, prompt, top_chunks
+
+    async def event_iter():
+        try:
+            rate_limiter, prompt, top_chunks = await with_db_conn_retry(request, do_prepare)
+        except Exception:
+            yield f"event: error\ndata: {json.dumps({'detail': 'retrieval_failed'})}\n\n"
+            return
+
+        if prompt is None:
+            msg = json.dumps({"token": "I don't have relevant context to answer that question."})
+            yield f"event: token\ndata: {msg}\n\n"
+            yield f"event: sources\ndata: {json.dumps({'sources': [], 'chunks_used': 0})}\n\n"
+            return
+
+        payload = {"sources": _sources_payload_for_sse(top_chunks), "chunks_used": len(top_chunks)}
+        yield f"event: sources\ndata: {json.dumps(payload)}\n\n"
+
+        await rate_limiter.acquire()
+        try:
+            async for delta in llm_client.answer_with_context_stream(prompt):
+                if delta:
+                    yield f"event: token\ndata: {json.dumps({'token': delta})}\n\n"
+        except asyncio.CancelledError:
+            raise
+        except LLMRateLimitedError:
+            yield f"event: token\ndata: {json.dumps({'token': '\\n(Error: LLM rate limited.)'})}\n\n"
+        except (LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError) as e:
+            yield f"event: token\ndata: {json.dumps({'token': '\\n(Error: LLM unavailable.)'})}\n\n"
+            logger.warning("ask_stream LLM error: %s", e)
+
+    return StreamingResponse(event_iter(), media_type="text/event-stream")
+
 
 @app.get("/documents", response_model=DocumentsListResponse)
 def get_documents(
@@ -665,6 +773,20 @@ def get_documents(
         )
 
     return with_db_conn_retry_sync(request, do_list)
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(
+    doc_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user),
+):
+    def do_delete(conn):
+        if not delete_document_for_user(conn, doc_id, user_id):
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {"ok": True}
+
+    return with_db_conn_retry_sync(request, do_delete)
 
 
 @app.get("/documents/similar-titles", response_model=SimilarTitlesResponse)
