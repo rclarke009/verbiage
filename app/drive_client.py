@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -68,7 +69,15 @@ def _get_credentials() -> Credentials:
         client_secret=GOOGLE_CLIENT_SECRET,
         scopes=["https://www.googleapis.com/auth/drive.readonly"],
     )
-    creds.refresh(Request())
+    try:
+        creds.refresh(Request())
+    except RefreshError as e:
+        raise DriveClientError(
+            f"Google refused the refresh token ({e!s}). "
+            "Use the same GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET that created the token; "
+            "check .env for stray quotes; revoke the app under Google Account → Security → "
+            "Third-party access if needed, then open /auth/google again."
+        ) from e
     return creds
 
 

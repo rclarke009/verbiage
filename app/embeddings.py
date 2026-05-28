@@ -18,6 +18,7 @@ from app.embeddings_openai import (
     OPENAI_EMBED_MODEL,
     embed_texts_openai,
 )
+from app.monitoring.metrics import record_upstream_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class HttpEmbedder(Embedder):
             except Exception as e:
                 if EMBED_FALLBACK_TO_LOCAL:
                     logger.warning("OpenAI embedding failed, falling back to local: %s", e)
+                    record_upstream_fallback("embed")
                     return await embed_texts_ollama(texts)
                 raise
         return await embed_texts_ollama(texts)

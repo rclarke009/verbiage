@@ -19,6 +19,7 @@ from app.errors import (
     LLMServiceError,
     LLMUpstreamTimeoutError,
 )
+from app.monitoring.metrics import record_upstream_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ async def embed_texts_openai(texts: list[str]) -> list[list[float]]:
                 jitter = random.uniform(0, delay * 0.5)
                 await asyncio.sleep(delay + jitter)
             else:
+                record_upstream_timeout("embed_openai")
                 raise last_exc
             continue
         except (LLMRateLimitedError, LLMUpstreamTimeoutError) as e:

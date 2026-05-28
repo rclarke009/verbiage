@@ -36,6 +36,8 @@ ollama run llama3.1:8b
 
 ## App setup
 
+Use a **`venv`** in the repo (required on PEP 668 “externally managed” Python installs; see **`setup.md`** troubleshooting if `pip install` is blocked globally).
+
 ```bash
 cd verbiage
 python3 -m venv .venv
@@ -51,17 +53,39 @@ Start the API:
 uvicorn app.main:app --reload
 ```
 
-Default: `http://localhost:8000`. The same server serves the **web UI** at the root URL (see below).
+Default: `http://localhost:8000`. The same server can serve the **built** SPA at the root (from `static/`). For **local UI development with hot reload**, prefer **Vite + uvicorn** — see **[setup.md](setup.md)** (*Local development: Vite + uvicorn (hot-reload SPA)*; two terminals, then open the port Vite prints, usually **5173**).
+
+---
+
+## Unit tests (pytest)
+
+After **`pip install -r requirements.txt`** inside the project **`venv`**, run tests from the **repository root** with **`PYTHONPATH=.`** so the **`app`** package resolves:
+
+```bash
+cd verbiage
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+PYTHONPATH=. pytest tests/ -q
+```
+
+- **`tests/test_metrics.py`** — Prometheus middleware and RAG metric helpers (no database).
+- Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
+
+Operational scraping and env vars for **`/metrics`** are described in **[setup.md](setup.md)** (*Prometheus metrics (optional)*).
 
 ---
 
 ## Web UI
 
-After starting the API with `uvicorn app.main:app --reload`, open a browser at:
+You can open the UI in two ways:
 
-**http://localhost:8000/**
+1. **Production-style / Docker:** **`http://localhost:8000/`** — loads the SPA built into `static/`.
+2. **Development:** Vite (**`npm run dev`** in `frontend/`) with API on **`:8000`** — proxies API routes; detailed steps in **`setup.md`** (§ *Local development: Vite + uvicorn*).
 
-You get a single-page UI with **menu/tabs** so you can focus on one task at a time.
+Protected API routes (**`/ingest`**, **`/documents`**, **`/ask`**, …) expect **`Authorization: Bearer <Supabase access token>`**. The SPA signs in via Supabase; **`setup_and_testing`** curl snippets below omit that header unless noted — pass a token after sign-in, or use public routes (**`/health`**, **`/config`**).
+
+### Reference — older static shell UX
+
+After starting the API, **`http://localhost:8000/`** historically served a single-page shell; the React SPA restores similar workflows:
 
 ### Tabs
 

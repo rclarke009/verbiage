@@ -77,10 +77,21 @@ LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", 3))
 LLM_TOKEN_LIMIT = int(os.getenv("LLM_TOKEN_LIMIT", 10))
 LLM_RATE_LIMIT_SECONDS = int(os.getenv("LLM_RATE_LIMIT_SECONDS", 60))
 
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN", "")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+def _google_env(name: str, default: str = "") -> str:
+    """Strip whitespace and a single pair of outer quotes (common .env paste mistakes)."""
+    raw = os.getenv(name, default) or ""
+    v = raw.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        v = v[1:-1].strip()
+    return v
+
+
+GOOGLE_CLIENT_ID = _google_env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = _google_env("GOOGLE_CLIENT_SECRET")
+GOOGLE_REFRESH_TOKEN = _google_env("GOOGLE_REFRESH_TOKEN")
+GOOGLE_REDIRECT_URI = _google_env(
+    "GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback"
+)
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
 # SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used
@@ -92,3 +103,19 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 # Optional shared invite code; if set, matching code allows signup without an allowlist row
 SIGNUP_INVITE_CODE = os.getenv("SIGNUP_INVITE_CODE", "").strip()
+# Optional canonical browser origin for auth email links (password reset redirect). No trailing slash.
+PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+
+# Prometheus metrics: expose GET /metrics when METRICS_ENABLED; optional Bearer METRICS_TOKEN for scrape auth.
+def metrics_enabled() -> bool:
+    """True when METRICS_ENABLED env is set (read each time for tests)."""
+    return os.getenv("METRICS_ENABLED", "").lower() in ("1", "true", "yes")
+
+
+METRICS_ENABLED = metrics_enabled()
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
+# When set (e.g. 0.35), increments rag_retrieval_low_quality_total when top-1 similarity is below this but chunks exist.
+_raw_sim_thresh = os.getenv("RAG_SIMILARITY_ALERT_THRESHOLD", "").strip()
+RAG_SIMILARITY_ALERT_THRESHOLD: float | None = (
+    float(_raw_sim_thresh) if _raw_sim_thresh else None
+)
