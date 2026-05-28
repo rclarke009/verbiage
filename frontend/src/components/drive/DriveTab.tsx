@@ -34,6 +34,30 @@ function defaultSelection(files: DriveFileMeta[]): Set<string> {
   return new Set(files.filter(f => f.index_status !== 'indexed').map(f => f.id))
 }
 
+function looksLikeAuthError(message: string): boolean {
+  return /credentials|token/i.test(message)
+}
+
+const detailsStyle: CSSProperties = {
+  marginBottom: 14,
+  fontSize: 13,
+  color: '#24292f',
+}
+
+const detailsSummaryStyle: CSSProperties = {
+  cursor: 'pointer',
+  color: '#0969da',
+  fontWeight: 600,
+  userSelect: 'none',
+}
+
+const detailsBodyStyle: CSSProperties = {
+  marginTop: 10,
+  paddingLeft: 4,
+  lineHeight: 1.6,
+  color: '#57606a',
+}
+
 function IndexStatusBadge({ file }: { file: DriveFileMeta }) {
   const status = file.index_status ?? 'not_indexed'
   const styles: Record<string, CSSProperties> = {
@@ -81,6 +105,7 @@ export function DriveTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
+  const [authHelpOpen, setAuthHelpOpen] = useState(false)
   const base = apiOrigin()
   const queryClient = useQueryClient()
   const initDoneRef = useRef(false)
@@ -207,6 +232,10 @@ export function DriveTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when folder resolves after init
   }, [folderInput, publicConfig, teamInboxId])
 
+  useEffect(() => {
+    if (err && looksLikeAuthError(err)) setAuthHelpOpen(true)
+  }, [err])
+
   const commitFolderInput = () => {
     const { id, error } = parseDriveFolderInput(folderInput)
     if (error) {
@@ -246,59 +275,43 @@ export function DriveTab() {
     })
   }
 
+  const defaultFolderLinkText =
+    teamInboxLabel || 'the team ingest folder in Google Drive'
+
   return (
     <div>
       <h2 style={{ marginTop: 0, color: '#0969da', fontSize: 18 }}>Google Drive</h2>
 
-      <p style={{ fontSize: 13, color: '#57606a', lineHeight: 1.6 }}>
-        The API reads Drive using server credentials (<code>GOOGLE_REFRESH_TOKEN</code> and client
-        id/secret). To obtain a refresh token, open{' '}
-        <a href={`${base}/auth/google`} target="_blank" rel="noopener noreferrer">
-          /auth/google
-        </a>{' '}
-        in your browser while the API origin matches <code>GOOGLE_REDIRECT_URI</code>; copy the shown
-        value into your environment. Supported file types: Google Docs, PDF, and Word (.docx). Max
-        download size 50 MB per file.
-        {teamInboxId ? (
-          <>
-            {' '}
-            The team ingest inbox is pre-configured; the active folder path appears below. Paste
-            another folder link only when ingesting elsewhere.
-          </>
-        ) : null}
+      <p style={{ fontSize: 13, color: '#57606a', lineHeight: 1.6, marginBottom: 14 }}>
+        List and ingest completed reports from Google Drive into the document repository.
       </p>
 
-      <div style={{ marginBottom: 14 }}>
-        <button
-          type="button"
-          onClick={() => testMutation.mutate()}
-          disabled={testMutation.isPending}
-          style={btnSecondary}
-        >
-          {testMutation.isPending ? 'Testing…' : 'Test credentials'}
-        </button>
-      </div>
-
-      <label style={{ fontSize: 13, color: '#24292f', display: 'block', marginBottom: 8 }}>
-        Inbox folder (paste link or ID)
-        <input
-          value={folderInput}
-          onChange={e => {
-            setFolderInput(e.target.value)
-            setFolderParseError('')
+      {teamInboxId ? (
+        <p style={{ fontSize: 13, color: '#24292f', lineHeight: 1.6, marginBottom: 14 }}>
+          Our default folder for ingesting completed reports into the repository is{' '}
+          <a
+            href={driveFolderUrl(teamInboxId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#0969da', fontWeight: 600 }}
+          >
+            {defaultFolderLinkText}
+          </a>
+          . You may change selections and ingest from other folders below, but the best procedure is
+          to copy your file into that folder first.
+        </p>
+      ) : (
+        <div
+          style={{
+            ...banner,
+            background: '#fff8c5',
+            color: '#9a6700',
+            border: '1px solid #fae17d',
           }}
-          onBlur={commitFolderInput}
-          placeholder={
-            teamInboxId
-              ? 'Team inbox (default) — paste another folder to override'
-              : 'Paste drive.google.com/.../folders/… or folder id'
-          }
-          style={inputStyle}
-        />
-      </label>
-
-      {folderParseError && (
-        <p style={{ fontSize: 12, color: '#cf222e', marginTop: -4, marginBottom: 12 }}>{folderParseError}</p>
+        >
+          No team ingest folder is configured. An administrator must set{' '}
+          <code>GOOGLE_DRIVE_DEFAULT_FOLDER_ID</code> on the server, or paste a folder link below.
+        </div>
       )}
 
       {effectiveFolderId && (
@@ -334,11 +347,6 @@ export function DriveTab() {
             Open in Drive
           </a>
         )}
-        {showResetInbox && (
-          <button type="button" onClick={resetToTeamInbox} style={btnSecondary}>
-            Reset to team inbox
-          </button>
-        )}
         <button type="button" onClick={() => listMutation.mutate()} disabled={listMutation.isPending} style={btnPrimary}>
           {listMutation.isPending ? 'Listing…' : 'List files'}
         </button>
@@ -368,7 +376,7 @@ export function DriveTab() {
 
       {!canIngestQuick && (
         <p style={{ fontSize: 12, color: '#57606a', marginBottom: 12 }}>
-          Select files below or configure a folder (team inbox or paste a link).
+          Select files below, or open <em>Use a different folder</em> to browse another location.
         </p>
       )}
 
@@ -430,6 +438,70 @@ export function DriveTab() {
           })}
         </div>
       )}
+
+      <details style={detailsStyle} open={!teamInboxId}>
+        <summary style={detailsSummaryStyle}>Use a different folder</summary>
+        <div style={detailsBodyStyle}>
+          <label style={{ fontSize: 13, color: '#24292f', display: 'block', marginBottom: 8 }}>
+            Folder link or ID
+            <input
+              value={folderInput}
+              onChange={e => {
+                setFolderInput(e.target.value)
+                setFolderParseError('')
+              }}
+              onBlur={commitFolderInput}
+              placeholder={
+                teamInboxId
+                  ? 'Paste drive.google.com/.../folders/… or folder id'
+                  : 'Paste drive.google.com/.../folders/… or folder id (required)'
+              }
+              style={inputStyle}
+            />
+          </label>
+          {folderParseError && (
+            <p style={{ fontSize: 12, color: '#cf222e', marginTop: -4, marginBottom: 12 }}>
+              {folderParseError}
+            </p>
+          )}
+          {showResetInbox && (
+            <button type="button" onClick={resetToTeamInbox} style={btnSecondary}>
+              Reset to team inbox
+            </button>
+          )}
+        </div>
+      </details>
+
+      <details
+        style={detailsStyle}
+        open={authHelpOpen}
+        onToggle={e => setAuthHelpOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary style={detailsSummaryStyle}>Connection or setup problems?</summary>
+        <div style={detailsBodyStyle}>
+          <p style={{ marginTop: 0 }}>
+            The API reads Drive using server credentials (<code>GOOGLE_REFRESH_TOKEN</code> and client
+            id/secret). To obtain a refresh token, open{' '}
+            <a href={`${base}/auth/google`} target="_blank" rel="noopener noreferrer">
+              /auth/google
+            </a>{' '}
+            in your browser while the API origin matches <code>GOOGLE_REDIRECT_URI</code>; copy the
+            shown value into your environment.
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            Supported file types: Google Docs, PDF, and Word (.docx). Max download size 50 MB per
+            file.
+          </p>
+          <button
+            type="button"
+            onClick={() => testMutation.mutate()}
+            disabled={testMutation.isPending}
+            style={btnSecondary}
+          >
+            {testMutation.isPending ? 'Testing…' : 'Test credentials'}
+          </button>
+        </div>
+      </details>
     </div>
   )
 }
