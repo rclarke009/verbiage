@@ -874,9 +874,11 @@ async def ask_stream(
         except asyncio.CancelledError:
             raise
         except LLMRateLimitedError:
-            yield f"event: token\ndata: {json.dumps({'token': '\\n(Error: LLM rate limited.)'})}\n\n"
+            err_msg = json.dumps({"token": "\\n(Error: LLM rate limited.)"})
+            yield f"event: token\ndata: {err_msg}\n\n"
         except (LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError) as e:
-            yield f"event: token\ndata: {json.dumps({'token': '\\n(Error: LLM unavailable.)'})}\n\n"
+            err_msg = json.dumps({"token": "\\n(Error: LLM unavailable.)"})
+            yield f"event: token\ndata: {err_msg}\n\n"
             logger.warning("ask_stream LLM error: %s", e)
         finally:
             record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
