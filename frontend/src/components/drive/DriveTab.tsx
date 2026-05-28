@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
+import { driveGetFolder, driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
 import { useAuth } from '../../context/AuthContext'
 import { apiOrigin } from '../../lib/api'
 import {
@@ -10,7 +10,7 @@ import {
   parseDriveFolderInput,
   resolveDriveFolderForApi,
 } from '../../lib/driveFolder'
-import type { DriveFileListSummary, DriveFileMeta, IngestBatchStatusResponse } from '../../types'
+import type { DriveFileListSummary, DriveFileMeta, DriveFolderContext, IngestBatchStatusResponse } from '../../types'
 
 import type { CSSProperties } from 'react'
 
@@ -74,6 +74,7 @@ function IndexStatusBadge({ file }: { file: DriveFileMeta }) {
 export function DriveTab() {
   const { publicConfig } = useAuth()
   const teamInboxId = publicConfig?.google_drive_default_folder_id ?? ''
+  const teamInboxLabel = publicConfig?.google_drive_default_folder_label ?? ''
   const [folderInput, setFolderInput] = useState('')
   const [folderParseError, setFolderParseError] = useState('')
   const [files, setFiles] = useState<DriveFileMeta[]>([])
@@ -87,6 +88,21 @@ export function DriveTab() {
 
   const apiFolderId = () => resolveDriveFolderForApi(folderInput, teamInboxId)
   const effectiveFolderId = apiFolderId()
+
+  const { data: folderContext, isLoading: folderLoading } = useQuery({
+    queryKey: ['drive-folder', effectiveFolderId],
+    queryFn: () => driveGetFolder(effectiveFolderId),
+    enabled: !!effectiveFolderId,
+  })
+
+  const folderDisplayPath =
+    folderContext?.display_path ??
+    (effectiveFolderId === teamInboxId && teamInboxLabel
+      ? teamInboxLabel
+      : effectiveFolderId)
+  const folderIsDefault =
+    folderContext?.is_default ??
+    (!!teamInboxId && effectiveFolderId === teamInboxId)
 
   const testMutation = useMutation({
     mutationFn: () => driveTest(),
@@ -108,6 +124,12 @@ export function DriveTab() {
       setSelected(defaultSelection(fileList))
       setErr('')
       setMsg(data.summary ? formatListSummary(data.summary) : `Found ${fileList.length} ingestable file(s).`)
+      if (data.folder && effectiveFolderId) {
+        queryClient.setQueryData<DriveFolderContext>(
+          ['drive-folder', effectiveFolderId],
+          data.folder,
+        )
+      }
     },
     onError: (e: Error) => {
       setFiles([])
@@ -240,8 +262,8 @@ export function DriveTab() {
         {teamInboxId ? (
           <>
             {' '}
-            The team ingest inbox is pre-configured; paste another folder link only when ingesting
-            elsewhere.
+            The team ingest inbox is pre-configured; the active folder path appears below. Paste
+            another folder link only when ingesting elsewhere.
           </>
         ) : null}
       </p>
@@ -277,6 +299,28 @@ export function DriveTab() {
 
       {folderParseError && (
         <p style={{ fontSize: 12, color: '#cf222e', marginTop: -4, marginBottom: 12 }}>{folderParseError}</p>
+      )}
+
+      {effectiveFolderId && (
+        <div
+          style={{
+            fontSize: 13,
+            color: '#24292f',
+            marginBottom: 12,
+            padding: '10px 12px',
+            background: '#f6f8fa',
+            border: '1px solid #d0d7de',
+            borderRadius: 6,
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>Folder:</strong>{' '}
+          {folderLoading && !folderContext ? 'Loading…' : folderDisplayPath}
+          {' · '}
+          <span style={{ color: '#57606a', fontStyle: 'italic' }}>
+            {folderIsDefault ? 'Team inbox (default)' : 'Custom folder'}
+          </span>
+        </div>
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 16 }}>

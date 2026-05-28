@@ -22,6 +22,7 @@ export interface PublicAppConfig {
   signup_invite_enabled: boolean
   public_app_url: string
   google_drive_default_folder_id: string
+  google_drive_default_folder_label: string
 }
 
 interface AuthCtx {
@@ -54,6 +55,7 @@ async function fetchPublicConfig(): Promise<PublicAppConfig> {
     signup_invite_enabled: Boolean(raw.signup_invite_enabled),
     public_app_url: String(raw.public_app_url ?? ''),
     google_drive_default_folder_id: String(raw.google_drive_default_folder_id ?? ''),
+    google_drive_default_folder_label: String(raw.google_drive_default_folder_label ?? ''),
   }
 }
 

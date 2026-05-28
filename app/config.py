@@ -101,6 +101,7 @@ GOOGLE_REDIRECT_URI = _google_env(
     "GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback"
 )
 GOOGLE_DRIVE_DEFAULT_FOLDER_ID = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_ID")
+GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
 # SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used
