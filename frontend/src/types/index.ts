@@ -80,6 +80,30 @@ export interface IngestResponse {
   embedding_tokens_estimate: number
 }
 
+export interface IngestBatchEnqueueResponse {
+  batch_id: string
+  total: number
+  job_ids: string[]
+}
+
+export type IngestBatchStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface IngestBatchStatusResponse {
+  batch_id: string
+  kind: string
+  status: IngestBatchStatus
+  total: number
+  pending: number
+  running: number
+  succeeded: number
+  failed: number
+  skipped: number
+  errors: string[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+/** @deprecated Sync ingest response; Drive ingest now returns IngestBatchEnqueueResponse (202). */
 export interface IngestGoogleDriveResponse {
   ingested: number
   skipped: number

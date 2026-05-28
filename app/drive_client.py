@@ -298,3 +298,44 @@ def list_and_export_docs(
             raise DriveClientError(f"Export failed for {name}: {e}") from e
 
     return result
+
+def export_drive_doc(file_id: str) -> DriveDoc:
+    """Export a single Google Doc to plain text (used by async ingest worker)."""
+    creds = _get_credentials()
+    service = build("drive", "v3", credentials=creds)
+    try:
+        meta = (
+            service.files()
+            .get(fileId=file_id, fields="id,name,mimeType,modifiedTime")
+            .execute()
+        )
+    except Exception as e:
+        raise DriveClientError(f"Could not get file {file_id}: {e}") from e
+
+    if meta.get("mimeType") != GOOGLE_DOCS_MIME:
+        raise DriveClientError(
+            f"File {file_id} is not a Google Doc (mimeType={meta.get('mimeType')})"
+        )
+
+    name = meta.get("name", file_id)
+    modified_unix = _drive_modified_to_unix(meta.get("modifiedTime"))
+    try:
+        content = service.files().export_media(
+            fileId=file_id, mimeType=EXPORT_MIME_PLAIN
+        ).execute()
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        text = text.strip()
+        if not text:
+            raise DriveClientError(f"Empty export for {file_id} ({name})")
+        return DriveDoc(
+            doc_id=file_id,
+            title=name or file_id,
+            text=text,
+            source="google_drive",
+            source_modified_at=modified_unix,
+        )
+    except DriveClientError:
+        raise
+    except Exception as e:
+        raise DriveClientError(f"Export failed for {name}: {e}") from e
+

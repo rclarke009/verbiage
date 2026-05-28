@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
-import { driveListFiles, driveTest, ingestGoogleDrive } from '../../api/drive'
+import { driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
 import { useAuth } from '../../context/AuthContext'
 import { apiOrigin } from '../../lib/api'
 import {
@@ -10,7 +10,7 @@ import {
   parseDriveFolderInput,
   resolveDriveFolderForApi,
 } from '../../lib/driveFolder'
-import type { DriveFileListSummary, DriveFileMeta, IngestGoogleDriveResponse } from '../../types'
+import type { DriveFileListSummary, DriveFileMeta, IngestBatchStatusResponse } from '../../types'
 
 import type { CSSProperties } from 'react'
 
@@ -108,17 +108,36 @@ export function DriveTab() {
     },
   })
 
+  const [batchStatus, setBatchStatus] = useState<IngestBatchStatusResponse | null>(null)
+
+  const formatBatchProgress = (s: IngestBatchStatusResponse) =>
+    `Ingesting ${s.total} doc(s): ${s.succeeded} done, ${s.pending + s.running} in progress` +
+    (s.failed ? `, ${s.failed} failed` : '') +
+    (s.skipped ? `, ${s.skipped} skipped` : '')
+
   const ingestMutation = useMutation({
-    mutationFn: () =>
-      ingestGoogleDrive({
+    mutationFn: async () => {
+      const enqueued = await ingestGoogleDrive({
         folder_id: apiFolderId() ?? null,
         file_ids: selected.size ? Array.from(selected) : null,
-      }),
-    onSuccess: (r: IngestGoogleDriveResponse) => {
+      })
+      setBatchStatus(null)
+      setErr('')
+      setMsg(`Queued ${enqueued.total} document(s)…`)
+      const { promise } = pollIngestBatch(enqueued.batch_id, status => {
+        setBatchStatus(status)
+        setMsg(formatBatchProgress(status))
+      })
+      return promise
+    },
+    onSuccess: finalStatus => {
       setErr('')
       const ingestMsg =
-        `Ingest finished: ${r.ingested} new, ${r.skipped} skipped.` +
-        (r.errors.length ? ` (${r.errors.length} error rows — check server logs).` : '')
+        `Ingest finished: ${finalStatus.succeeded} indexed, ${finalStatus.skipped} skipped.` +
+        (finalStatus.failed
+          ? ` ${finalStatus.failed} failed` +
+            (finalStatus.errors.length ? ` — ${finalStatus.errors.slice(0, 2).join('; ')}` : '')
+          : '')
       queryClient.invalidateQueries({ queryKey: ['documents'] })
       listMutation.mutate(undefined, {
         onSuccess: data => {
@@ -132,8 +151,10 @@ export function DriveTab() {
           setMsg(ingestMsg)
         },
       })
+      setBatchStatus(null)
     },
     onError: (e: Error) => {
+      setBatchStatus(null)
       setMsg('')
       setErr(e.message)
     },
@@ -283,7 +304,11 @@ export function DriveTab() {
           disabled={ingestMutation.isPending}
           style={btnPrimary}
         >
-          {ingestMutation.isPending ? 'Ingesting…' : 'Ingest'}
+          {ingestMutation.isPending
+            ? batchStatus
+              ? formatBatchProgress(batchStatus)
+              : 'Queuing…'
+            : 'Ingest'}
         </button>
       </div>
 

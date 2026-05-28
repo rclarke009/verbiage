@@ -23,15 +23,17 @@ import psycopg2
 from psycopg2 import pool as psycopg2_pool
 
 from app.db import (
+    INGEST_JOB_KIND_GOOGLE_DRIVE,
     create_db,
-    delete_by_doc_id,
+    create_ingest_batch,
     delete_document as remove_document_from_db,
-    doc_exist,
     email_in_signup_allowlist,
     get_document_full_text,
     get_document_index_by_doc_ids,
+    get_ingest_batch,
+    get_ingest_batch_errors,
     get_valid_conn,
-    insert_document,
+    insert_ingest_jobs,
     is_connection_error,
     list_documents,
     list_doc_title_pairs,
@@ -50,7 +52,6 @@ from app.models import (
     DriveFileMeta,
     DriveFileListSummary,
     IngestGoogleDriveRequest,
-    IngestGoogleDriveResponse,
     IngestRequest,
     IngestResponse,
     ReindexRequest,
@@ -60,13 +61,13 @@ from app.models import (
 from app.rate_limit import TokenBucket
 from app.indexing import index_document, reindex_document
 from app.embeddings import HttpEmbedder
-from app.job_store import JobStore
-from app.worker import worker_loop
+from app.ingest_core import ingest_new_document
+from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusResponse
+from app.ingest_worker import ingest_worker_loop
 from app.retrieval import retrieve_top_k
 from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
 from app.drive_client import (
-    list_and_export_docs,
     list_docs_metadata,
     test_connection,
     DriveClientError,
@@ -84,6 +85,7 @@ from app.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
+    INGEST_WORKER_ENABLED,
     GOOGLE_REDIRECT_URI,
     METRICS_ENABLED,
     METRICS_TOKEN,
@@ -164,20 +166,22 @@ async def lifespan(app):
 
     app.state.db_pool = db_pool
 
-    app.state.job_store = JobStore()
-    job_store = app.state.job_store
     app.state.rate_limiter = TokenBucket()
-    rate_limiter = app.state.rate_limiter
-    task = asyncio.create_task(worker_loop(job_store, rate_limiter))
-    logger.info("Work Started")
+    ingest_task = None
+    if INGEST_WORKER_ENABLED:
+        ingest_task = asyncio.create_task(ingest_worker_loop(db_pool))
+        logger.info("Ingest worker started")
+    else:
+        logger.info("Ingest worker disabled")
 
     yield
 
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    if ingest_task is not None:
+        ingest_task.cancel()
+        try:
+            await ingest_task
+        except asyncio.CancelledError:
+            pass
     db_pool.closeall()
     logger.info("Work has stopped")
 
@@ -277,34 +281,18 @@ async def ingest_text(
     source_url: str | None = None,
     source_filename: str | None = None,
 ) -> IngestResponse:
-    """
-    Shared ingest: store full text + metadata, chunk, embed, and persist.
-    Raises ValueError('doc_id already exists') if doc_id is duplicate.
-    Rollback (delete_by_doc_id) on embedding failure.
-    """
-    if doc_exist(conn, doc_id):
-        raise ValueError("doc_id already exists")
-    opts = chunking_options
-    config_dict = opts.model_dump()
-    insert_document(
+    """Shared sync ingest wrapper; commits on success."""
+    result = await ingest_new_document(
         conn,
         doc_id,
-        int(time.time()),
         title,
         source,
+        text,
+        chunking_options,
         source_modified_at=source_modified_at,
         source_url=source_url,
-        full_text=text,
         source_filename=source_filename,
-        chunking_config=config_dict,
     )
-    embedder = HttpEmbedder()
-    try:
-        result = await index_document(conn, doc_id, text, opts, embedder=embedder)
-    except Exception as e:
-        delete_by_doc_id(conn, doc_id)
-        logger.exception("embedding failed", exc_info=e)
-        raise
     conn.commit()
     return result
 
@@ -618,63 +606,89 @@ async def drive_files(
     return await with_db_conn_retry(request, enrich)
 
 
-@app.post("/ingest/google-drive", response_model=IngestGoogleDriveResponse)
+@app.post(
+    "/ingest/google-drive",
+    response_model=IngestBatchEnqueueResponse,
+    status_code=202,
+)
 async def ingest_google_drive(
     request: Request,
     body: IngestGoogleDriveRequest,
     user_id: str = Depends(get_current_user),
 ):
     """
-    Ingest Google Docs from Drive (read-only). List/export then run shared ingest per doc.
-    Duplicate doc_id is skipped and counted; other errors are recorded and processing continues.
+    Enqueue Google Docs from Drive for background ingest (read-only metadata list only).
+    Poll GET /ingest/batches/{batch_id} for progress. Stale docs are re-indexed in the worker.
     """
     try:
         folder_id = body.folder_id
         if not body.file_ids:
             folder_id = resolve_drive_folder_id(folder_id)
-        docs = list_and_export_docs(folder_id=folder_id, file_ids=body.file_ids)
+        raw = list_docs_metadata(folder_id=folder_id, file_ids=body.file_ids)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    default_opts = ChunkingOptions()
-    ingested = 0
-    skipped = 0
-    errors: list[str] = []
-    doc_ids: list[str] = []
 
-    async def do_google_drive_ingest(conn):
-        nonlocal ingested, skipped, errors, doc_ids
-        for doc in docs:
-            try:
-                gdoc_url = f"https://docs.google.com/document/d/{doc.doc_id}/edit"
-                await ingest_text(
-                    conn,
-                    doc.doc_id,
-                    doc.title,
-                    doc.source,
-                    doc.text,
-                    default_opts,
-                    source_modified_at=doc.source_modified_at,
-                    source_url=gdoc_url,
-                    source_filename=doc.title,
-                )
-                ingested += 1
-                doc_ids.append(doc.doc_id)
-            except ValueError as e:
-                if "already exists" in str(e):
-                    skipped += 1
-                else:
-                    errors.append(f"{doc.doc_id} ({doc.title}): {e}")
-            except Exception as e:
-                errors.append(f"{doc.doc_id} ({doc.title}): {e}")
-                logger.warning("Ingest failed for %s: %s", doc.doc_id, e)
-        return IngestGoogleDriveResponse(
-            ingested=ingested,
-            skipped=skipped,
-            errors=errors,
-            doc_ids=doc_ids,
+    if not raw:
+        raise HTTPException(status_code=400, detail="No Google Docs found to ingest")
+
+    jobs_to_insert: list[tuple[str, str, dict]] = []
+    for f in raw:
+        fid = f["id"]
+        drive_ts = _drive_modified_to_unix(f.get("modifiedTime"))
+        jobs_to_insert.append(
+            (
+                fid,
+                INGEST_JOB_KIND_GOOGLE_DRIVE,
+                {
+                    "drive_file_id": fid,
+                    "title": f.get("name"),
+                    "drive_modified_unix": drive_ts,
+                },
+            )
         )
 
-    return await with_db_conn_retry(request, do_google_drive_ingest)
+    async def do_enqueue(conn):
+        batch_id = create_ingest_batch(conn, INGEST_JOB_KIND_GOOGLE_DRIVE, len(jobs_to_insert))
+        job_ids = insert_ingest_jobs(conn, batch_id, jobs_to_insert)
+        conn.commit()
+        return IngestBatchEnqueueResponse(
+            batch_id=batch_id,
+            total=len(jobs_to_insert),
+            job_ids=job_ids,
+        )
+
+    return await with_db_conn_retry(request, do_enqueue)
+
+
+@app.get("/ingest/batches/{batch_id}", response_model=IngestBatchStatusResponse)
+async def get_ingest_batch_status(
+    request: Request,
+    batch_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Poll ingest batch progress (pending/running/succeeded/failed/skipped counts)."""
+
+    async def do_get(conn):
+        batch = get_ingest_batch(conn, batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        errors = get_ingest_batch_errors(conn, batch_id)
+        return IngestBatchStatusResponse(
+            batch_id=batch["id"],
+            kind=batch["kind"],
+            status=batch["status"],
+            total=batch["total"],
+            pending=batch["pending"],
+            running=batch["running"],
+            succeeded=batch["succeeded"],
+            failed=batch["failed"],
+            skipped=batch["skipped"],
+            errors=errors,
+            created_at=batch["created_at"],
+            updated_at=batch["updated_at"],
+        )
+
+    return await with_db_conn_retry(request, do_get)
 
 
 def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> str | None:
