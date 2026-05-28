@@ -26,6 +26,13 @@ Copy `.env.example` to `.env` and set:
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_OPENAI_MODEL` | No | Ollama base/model; OpenAI model (default: `gpt-4o-mini`). See `.env.example`. |
 | `LLM_TIMEOUT_SECONDS`, `LLM_RATE_LIMIT_SECONDS`, etc. | No | See `.env.example` and `app/config.py`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_REDIRECT_URI` | No | Only for Google Drive ingest. |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Required for SPA + auth API | Returned (public fields only) via **GET /config** for the React app; required for login. |
+| `SUPABASE_JWT_SECRET` | Required for protected routes | Server verifies JWT access tokens (`Authorization: Bearer`). Without this, authenticated endpoints return **503**. Keep secret server-side only. |
+| `SUPABASE_SERVICE_ROLE_KEY` | No | Needed for **POST /auth/signup** when using the managed sign-up flow; never expose to the browser. |
+| `CORS_ORIGINS` | No | Comma-separated origins for split deployments (browser → API from another origin). **Not needed** when using the **Vite dev proxy** (`npm run dev` → same-origin requests to `:5173` that proxy to `:8000`). |
+| `METRICS_ENABLED` | No | When `true` / `1` / `yes`, registers **`GET /metrics`** (Prometheus text format) and enables HTTP timing/counters in middleware. Restart the API after changing this. |
+| `METRICS_TOKEN` | No | If set, scrapes must send **`Authorization: Bearer <METRICS_TOKEN>`** or `/metrics` returns 401. |
+| `RAG_SIMILARITY_ALERT_THRESHOLD` | No | Optional float (e.g. `0.35`). When set, increments **`rag_retrieval_low_quality_total`** when retrieval returns chunks but top‑1 cosine similarity is below this value. |
 
 **Note:** There is no SQLite fallback. `DATABASE_URL` must be set to a valid Postgres URI. Default: OpenAI when `OPENAI_API_KEY` is set; otherwise Ollama.
 
@@ -62,6 +69,8 @@ Details: [supabase_migration.md](supabase_migration.md).
 
 ## Install and run
 
+On macOS with **Homebrew Python**, installs are often **externally managed (PEP 668)** — use the project **`venv`** below rather than `pip install` globally.
+
 ```bash
 cd verbiage
 python3 -m venv .venv
@@ -72,21 +81,63 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
+If you **`git clone`** or **`mv`** the repo to a **new folder**, recreate the venv: **`rm -rf .venv`** then **`python3 -m venv .venv`** again. An old venv keeps **shebang paths** to the previous location; **`uvicorn` failing with exit 127 / “bad interpreter”** usually means `.venv` is stale — delete and recreate it in **this** checkout.
+
 - **Dev:** `--reload` watches for code changes.
 - **Server:** e.g. `uvicorn app.main:app --host 0.0.0.0 --port 8000` (or behind a reverse proxy / process manager).
 
-Default: **http://localhost:8000**. Root serves the web UI; API is under the same host.
+Default: **http://localhost:8000**. Root serves the **built** SPA (from `static/`) after `npm run build:static` in `frontend/` (or Docker); API routes are under the same host.
+
+### Local development: Vite + uvicorn (hot-reload SPA)
+
+Use **two terminals** so the UI can hot-reload while the FastAPI process handles `/config`, auth, and API routes:
+
+**Terminal A — API (repo root)**
+
+```bash
+cd verbiage
+.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Terminal B — Vite**
+
+```bash
+cd verbiage/frontend
+npm install   # once
+npm run dev
+```
+
+Open the URL Vite prints (usually **http://127.0.0.1:5173/**). The dev server **proxies** API paths (`/config`, `/ingest`, `/ask`, `/documents`, etc.) to **http://127.0.0.1:8000** ([`frontend/vite.config.ts`](frontend/vite.config.ts)); override proxy target with **`VITE_PROXY_API`** if the API listens elsewhere.
+
+Leave **`VITE_API_ORIGIN` unset** in dev so the SPA uses relative URLs behind the proxy. For a hosted UI pointing at a **separate API origin**, set **`VITE_API_ORIGIN`** to that base URL (and configure **`CORS_ORIGINS`** on the server).
+
+See **[`frontend/.env.example`](frontend/.env.example)** for optional frontend env vars (`build:static`, `VITE_FEATURE_VISION`, etc.).
 
 ---
 
 ## Verify
 
-1. **Health:** `curl -s http://localhost:8000/health` → `{"healthy": true}`.
-2. **Ingest:** `curl -s -X POST http://localhost:8000/ingest -H "Content-Type: application/json" -d '{"text": "Test report content.", "title": "Test"}'`. You can also upload a PDF via the web UI (Ingest tab) or **POST /ingest/file** (multipart: `file`, optional `doc_id`, `title`, `source`, `chunk_size`, `chunk_overlap`).
-3. **List:** `curl -s http://localhost:8000/documents` → list including the new doc.
-4. **Ask:** `curl -s -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{"question": "Summarize the test report."}'`.
+1. **Health:** `curl -s http://localhost:8000/health` → `{"healthy": true}` (**no auth**).
+2. **`/config`:** `curl -s http://localhost:8000/config` → public Supabase anon fields for the SPA (**no auth**).
+3. **Protected API** (**`/ingest`**, **`/documents`**, **`/ask`**): require **`Authorization: Bearer <Supabase JWT>`** once auth is configured. Use the SPA, or acquire a token and pass the header — see **`setup_and_testing.md`** curl examples (**adjust for auth**).
 
-More examples: [setup_and_testing.md](setup_and_testing.md).
+You can also upload a PDF via the SPA (**Documents** tab) or **POST /ingest/file** (multipart: `file`, optional `doc_id`, `title`, `source`, `chunk_size`, `chunk_overlap`).
+
+Further curl examples (**may need Bearer**): [setup_and_testing.md](setup_and_testing.md).
+
+---
+
+## Prometheus metrics (optional)
+
+The app exposes [Prometheus](https://prometheus.io/) metrics via **`prometheus-client`** (see **`app/monitoring/`**).
+
+1. **Enable:** Set **`METRICS_ENABLED=true`** in `.env` and **restart** the API so **`GET /metrics`** is registered.
+2. **Scrape locally:**  
+   `curl -s http://localhost:8000/metrics`  
+   With auth:  
+   `curl -s http://localhost:8000/metrics -H "Authorization: Bearer YOUR_METRICS_TOKEN"`
+3. **What you get:** HTTP latency and status classes (`http_request_duration_seconds`, `http_requests_total`); RAG pipeline phases and retrieval similarity histograms (`rag_phase_seconds`, `rag_retrieval_*`); empty retrieval / no-context counters; stream-only retrieval failures (`rag_stream_retrieval_failed_total`); upstream timeouts and OpenAI→Ollama fallbacks (`upstream_timeouts_total`, `upstream_fallback_total`). Metric names and behavior are documented in comments in **`app/monitoring/metrics.py`**.
+4. **Tests:** From the repo root with the venv active, run **`PYTHONPATH=. pytest tests/test_metrics.py -q`** (see [setup_and_testing.md](setup_and_testing.md#unit-tests-pytest)).
 
 ---
 
@@ -107,6 +158,7 @@ Full steps: [setup_and_testing.md](setup_and_testing.md#google-drive-ingest-read
 
 | Issue | Action |
 |-------|--------|
+| **`uvicorn: bad interpreter` / exit code 127** | Recreate **`rm -rf .venv && python3 -m venv .venv`** in this checkout; old venv points at wrong `python`. |
 | `DATABASE_URL must be set` | Set `DATABASE_URL` in `.env` to your Postgres URI. |
 | pgvector / `vector` type errors | Ensure the `vector` extension is enabled and schema (tables + HNSW index) is applied. |
 | Ollama connection refused | Start Ollama; confirm `EMBED_BASE_URL` and `LLM_BASE_URL` match (e.g. `http://localhost:11434`). |

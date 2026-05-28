@@ -16,7 +16,7 @@ from logging.handlers import RotatingFileHandler
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 import psycopg2
@@ -73,6 +73,9 @@ from app.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,
+    METRICS_ENABLED,
+    METRICS_TOKEN,
+    PUBLIC_APP_URL,
     SIGNUP_INVITE_CODE,
     SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -80,6 +83,14 @@ from app.config import (
 )
 from app import llm_client
 from app.similar_titles import find_similar_titles
+from app.monitoring.middleware import PrometheusMiddleware
+from app.monitoring.metrics import (
+    record_no_context_response,
+    record_rag_phase_seconds,
+    record_retrieval_scores,
+    record_stream_retrieval_failed,
+)
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 logging.basicConfig(
     level=logging.INFO,
@@ -173,6 +184,8 @@ if _cors:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+app.add_middleware(PrometheusMiddleware)
 
 
 async def with_db_conn_retry(request: Request, async_fn):
@@ -320,6 +333,7 @@ def get_config():
         "supabase_url": SUPABASE_URL or "",
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
         "signup_invite_enabled": bool(SIGNUP_INVITE_CODE),
+        "public_app_url": PUBLIC_APP_URL or "",
     }
 
 
@@ -666,27 +680,37 @@ async def ask(
     ask_request: AskRequest,
     user_id: str = Depends(get_current_user),
 ):
+    rag_endpoint = "sync"
+
     async def do_ask(conn):
         rate_limiter = request.app.state.rate_limiter
         embedder = HttpEmbedder()
         logger.info("ask: embedding query (1 text)")
+        t_embed = time.perf_counter()
         query_vectors = await embedder.embed_many([ask_request.question])
+        record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         logger.info("ask: embedding succeeded")
         query_vec = query_vectors[0]
 
+        t_retrieve = time.perf_counter()
         top_chunks = retrieve_top_k(
             conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
         )
+        record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+        record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
 
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
         if prompt is None:
+            record_no_context_response(rag_endpoint)
             answer = "I don't have relevant context to answer that question."
             return AskResponse(answer=answer, top_chunks=[])
 
         logger.info("ask: acquiring rate limit token")
         await rate_limiter.acquire()
         logger.info("ask: rate limit acquired, calling LLM")
+        t_llm = time.perf_counter()
         answer = await llm_client.answer_with_context(prompt)
+        record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
         logger.info("ask: LLM answered successfully")
         return AskResponse(answer=answer, top_chunks=top_chunks)
 
@@ -701,12 +725,17 @@ async def ask_stream(
 ):
     """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk."""
 
+    rag_endpoint = "stream"
+
     async def do_prepare(conn):
         rate_limiter = request.app.state.rate_limiter
         embedder = HttpEmbedder()
         logger.info("ask_stream: embedding query (1 text)")
+        t_embed = time.perf_counter()
         query_vectors = await embedder.embed_many([ask_request.question])
+        record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         query_vec = query_vectors[0]
+        t_retrieve = time.perf_counter()
         top_chunks = retrieve_top_k(
             conn,
             query_vec,
@@ -714,6 +743,8 @@ async def ask_stream(
             ask_request.doc_id,
             user_id=user_id,
         )
+        record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+        record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
         return rate_limiter, prompt, top_chunks
 
@@ -721,10 +752,12 @@ async def ask_stream(
         try:
             rate_limiter, prompt, top_chunks = await with_db_conn_retry(request, do_prepare)
         except Exception:
+            record_stream_retrieval_failed()
             yield f"event: error\ndata: {json.dumps({'detail': 'retrieval_failed'})}\n\n"
             return
 
         if prompt is None:
+            record_no_context_response(rag_endpoint)
             msg = json.dumps({"token": "I don't have relevant context to answer that question."})
             yield f"event: token\ndata: {msg}\n\n"
             yield f"event: sources\ndata: {json.dumps({'sources': [], 'chunks_used': 0})}\n\n"
@@ -734,6 +767,7 @@ async def ask_stream(
         yield f"event: sources\ndata: {json.dumps(payload)}\n\n"
 
         await rate_limiter.acquire()
+        t_llm = time.perf_counter()
         try:
             async for delta in llm_client.answer_with_context_stream(prompt):
                 if delta:
@@ -745,6 +779,8 @@ async def ask_stream(
         except (LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError) as e:
             yield f"event: token\ndata: {json.dumps({'token': '\\n(Error: LLM unavailable.)'})}\n\n"
             logger.warning("ask_stream LLM error: %s", e)
+        finally:
+            record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
 
     return StreamingResponse(event_iter(), media_type="text/event-stream")
 
@@ -826,6 +862,19 @@ def get_similar_titles(
 @app.get("/health")
 def health():
     return {"healthy": True}
+
+
+if METRICS_ENABLED:
+
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics(request: Request):
+        """Prometheus scrape endpoint; optional Bearer METRICS_TOKEN."""
+        if METRICS_TOKEN:
+            auth = (request.headers.get("authorization") or "").strip()
+            if auth != f"Bearer {METRICS_TOKEN}":
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        payload = generate_latest()
+        return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
 
 
 @app.exception_handler(LLMTimeoutError)

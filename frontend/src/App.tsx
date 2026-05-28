@@ -14,7 +14,7 @@ const queryClient = new QueryClient()
 const FEATURE_VISION = String(import.meta.env.VITE_FEATURE_VISION ?? '').toLowerCase() === 'true'
 
 function AppInner() {
-  const { session } = useAuth()
+  const { session, passwordRecovery } = useAuth()
   const [activeTab, setActiveTab] = useState('chat')
 
   const tabs = useMemo(() => {
@@ -35,6 +35,23 @@ function AppInner() {
             TrueAI
           </h1>
           <p style={{ margin: 0, color: '#57606a', fontSize: 14 }}>Document RAG workspace — sign in to continue.</p>
+        </header>
+        <LoginPanel />
+      </div>
+    )
+  }
+
+  if (passwordRecovery) {
+    return (
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
+        <header style={{ marginBottom: 24 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 650, margin: '0 0 6px', color: '#0969da' }}>
+            Set a new password
+          </h1>
+          <p style={{ margin: 0, color: '#57606a', fontSize: 14 }}>
+            Signed in as <span style={{ color: '#24292f' }}>{session.user.email}</span>. Choose a new password to
+            finish resetting your account.
+          </p>
         </header>
         <LoginPanel />
       </div>

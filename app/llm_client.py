@@ -22,6 +22,7 @@ from app.config import (
     OPENAI_API_KEY,
 )
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMUpstreamTimeoutError
+from app.monitoring.metrics import record_upstream_fallback, record_upstream_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ async def _answer_openai(prompt: str) -> str:
                 jitter = random.uniform(0, delay * 0.5)
                 await asyncio.sleep(delay + jitter)
             else:
+                record_upstream_timeout("llm_openai")
                 raise last_exc
             continue
         except (LLMRateLimitedError, LLMUpstreamTimeoutError) as e:
@@ -121,6 +123,7 @@ async def _answer_ollama(prompt: str) -> str:
                 jitter = random.uniform(0, delay * 0.5)
                 await asyncio.sleep(delay + jitter)
             else:
+                record_upstream_timeout("llm_ollama")
                 raise last_exc
             continue
         except (LLMRateLimitedError, LLMUpstreamTimeoutError) as e:
@@ -148,6 +151,7 @@ async def answer_with_context(prompt: str) -> str:
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
                 logger.warning("OpenAI LLM failed, falling back to local: %s", e)
+                record_upstream_fallback("llm")
                 return await _answer_ollama(prompt)
             raise
     return await _answer_ollama(prompt)
@@ -215,6 +219,7 @@ async def answer_with_context_stream(prompt: str):
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
                 logger.warning("OpenAI streaming failed, falling back to local once: %s", e)
+                record_upstream_fallback("llm")
                 text = await _answer_ollama(prompt)
                 if text:
                     yield text
