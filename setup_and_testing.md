@@ -250,11 +250,14 @@ Set the shared **ready-for-TrueAI** folder so operators are not copying folder i
 ```bash
 # Folder id or full URL — also set on Render in production
 GOOGLE_DRIVE_DEFAULT_FOLDER_ID=1HUgl4ryKyijBOP4_nJkJCCT3mvLdKPih
+# Optional: human-readable path shown in the Drive tab for the team inbox
+GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL=Shared drives / Team / Ready for AI Ingest
 ```
 
-- **`GET /config`** returns `google_drive_default_folder_id` (parsed id) for the SPA.
+- **`GET /config`** returns `google_drive_default_folder_id` (parsed id) and `google_drive_default_folder_label` for the SPA.
+- **`GET /drive/folder`** resolves the active folder path (env label for default inbox; Drive API breadcrumb for overrides).
 - **`GET /drive/files`** and **`POST /ingest/google-drive`** use this folder when `folder_id` is omitted (unless `file_ids` is set).
-- The **Google Drive** tab pre-fills the inbox, **auto-lists** on open, accepts a pasted folder URL to override, and offers **Reset to team inbox**.
+- The **Google Drive** tab pre-fills the inbox, shows the active folder path, **auto-lists** on open, accepts a pasted folder URL to override, and offers **Reset to team inbox**.
 
 **Folder access:** The Google account that completed **`/auth/google`** (stored in `GOOGLE_REFRESH_TOKEN`) must be able to open the inbox folder. If a manager owns the folder, they must **share** it with that account (Viewer is enough for read-only ingest).
 

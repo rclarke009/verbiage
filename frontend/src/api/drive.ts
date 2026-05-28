@@ -2,6 +2,7 @@ import { apiFetch, readErrorDetail } from '../lib/api'
 
 import type {
   DriveFileListResponse,
+  DriveFolderContext,
   IngestBatchEnqueueResponse,
   IngestBatchStatusResponse,
 } from '../types'
@@ -10,6 +11,16 @@ export async function driveTest(): Promise<{ ok: boolean }> {
   const res = await apiFetch('/drive/test')
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<{ ok: boolean }>
+}
+
+export async function driveGetFolder(folderId?: string | null): Promise<DriveFolderContext> {
+  const q =
+    folderId != null && folderId.trim()
+      ? `?folder_id=${encodeURIComponent(folderId.trim())}`
+      : ''
+  const res = await apiFetch(`/drive/folder${q}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<DriveFolderContext>
 }
 
 export async function driveListFiles(folderId?: string | null): Promise<DriveFileListResponse> {

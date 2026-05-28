@@ -18,6 +18,7 @@ from app.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
+    GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL,
     GOOGLE_REFRESH_TOKEN,
 )
 from app.docx_extract import extract_text_from_docx
@@ -37,6 +38,7 @@ DRIVE_INGEST_MIMES: tuple[str, ...] = (
 )
 
 MAX_DRIVE_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_FOLDER_PATH_DEPTH = 5
 
 _DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")
 _DRIVE_RAW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -186,6 +188,69 @@ def test_connection() -> bool:
     service = build("drive", "v3", credentials=creds)
     service.files().list(pageSize=1, fields="files(id)").execute()
     return True
+
+
+def _folder_display_from_service(service, folder_id: str) -> dict:
+    """Build folder breadcrumb using an existing Drive v3 service."""
+    segments: list[str] = []
+    current_id = folder_id
+    visited: set[str] = set()
+    for _ in range(MAX_FOLDER_PATH_DEPTH + 1):
+        if current_id in visited:
+            break
+        visited.add(current_id)
+        meta = (
+            service.files()
+            .get(
+                fileId=current_id,
+                fields="name,parents,mimeType",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        name = (meta.get("name") or current_id).strip()
+        segments.insert(0, name)
+        parents = meta.get("parents") or []
+        if not parents:
+            break
+        current_id = parents[0]
+    folder_name = segments[-1] if segments else None
+    path = " / ".join(segments) if segments else None
+    return {"id": folder_id, "name": folder_name, "path": path}
+
+
+def get_folder_display(folder_id: str) -> dict:
+    """
+    Return {id, name, path} for a Drive folder.
+    path is a parent breadcrumb when available; name/path are None on API failure.
+    """
+    try:
+        creds = _get_credentials()
+        service = build("drive", "v3", credentials=creds)
+        return _folder_display_from_service(service, folder_id)
+    except Exception as e:
+        logger.warning("Could not get folder display for %s: %s", folder_id, e)
+        return {"id": folder_id, "name": None, "path": None}
+
+
+def build_drive_folder_context(folder_id: str | None) -> dict | None:
+    """Build UI folder context with display_path (env label for default inbox)."""
+    if not folder_id:
+        return None
+    display = get_folder_display(folder_id)
+    default_id = parse_drive_folder_id(GOOGLE_DRIVE_DEFAULT_FOLDER_ID)
+    is_default = bool(default_id and folder_id == default_id)
+    if is_default and GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL:
+        display_path = GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL
+    else:
+        display_path = display.get("path") or display.get("name") or folder_id
+    return {
+        "id": folder_id,
+        "name": display.get("name"),
+        "path": display.get("path"),
+        "is_default": is_default,
+        "display_path": display_path,
+    }
 
 
 def list_docs_metadata(

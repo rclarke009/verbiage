@@ -51,6 +51,7 @@ from app.models import (
     DriveFileListResponse,
     DriveFileMeta,
     DriveFileListSummary,
+    DriveFolderContext,
     IngestGoogleDriveRequest,
     IngestRequest,
     IngestResponse,
@@ -75,6 +76,7 @@ from app.drive_client import (
     _drive_modified_to_unix,
     parse_drive_folder_id,
     resolve_drive_folder_id,
+    build_drive_folder_context,
 )
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
@@ -85,6 +87,7 @@ from app.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
+    GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL,
     INGEST_WORKER_ENABLED,
     GOOGLE_REDIRECT_URI,
     METRICS_ENABLED,
@@ -320,6 +323,7 @@ def get_config():
         "signup_invite_enabled": bool(SIGNUP_INVITE_CODE),
         "public_app_url": PUBLIC_APP_URL or "",
         "google_drive_default_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_DEFAULT_FOLDER_ID) or "",
+        "google_drive_default_folder_label": GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL or "",
     }
 
 
@@ -536,6 +540,7 @@ async def drive_test(user_id: str = Depends(get_current_user)):
 def _build_drive_file_list(
     raw: list[dict],
     index_by_id: dict[str, tuple[int | None, int]],
+    folder: DriveFolderContext | None = None,
 ) -> DriveFileListResponse:
     """Attach index_status to Drive metadata using documents table lookup."""
     files: list[DriveFileMeta] = []
@@ -574,7 +579,29 @@ def _build_drive_file_list(
             not_indexed=not_indexed,
             stale=stale,
         ),
+        folder=folder,
     )
+
+
+@app.get("/drive/folder", response_model=DriveFolderContext)
+async def drive_folder(
+    folder_id: str | None = None,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Resolve folder location for Drive UI (name/path or team inbox label).
+    Requires authenticated user.
+    """
+    resolved = resolve_drive_folder_id(folder_id)
+    if not resolved:
+        raise HTTPException(
+            status_code=400,
+            detail="No folder_id provided and no default inbox configured",
+        )
+    ctx = build_drive_folder_context(resolved)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return DriveFolderContext(**ctx)
 
 
 @app.get("/drive/files", response_model=DriveFileListResponse)
@@ -589,10 +616,15 @@ async def drive_files(
     Requires authenticated user.
     """
     ids_list: list[str] | None = None
+    folder_ctx: DriveFolderContext | None = None
     if file_ids:
         ids_list = [x.strip() for x in file_ids.split(",") if x.strip()]
     else:
         folder_id = resolve_drive_folder_id(folder_id)
+        if folder_id:
+            built = build_drive_folder_context(folder_id)
+            if built:
+                folder_ctx = DriveFolderContext(**built)
     try:
         raw = list_docs_metadata(folder_id=folder_id, file_ids=ids_list)
     except DriveClientError as e:
@@ -601,7 +633,7 @@ async def drive_files(
     async def enrich(conn):
         doc_ids = [f["id"] for f in raw]
         index_by_id = get_document_index_by_doc_ids(conn, doc_ids)
-        return _build_drive_file_list(raw, index_by_id)
+        return _build_drive_file_list(raw, index_by_id, folder=folder_ctx)
 
     return await with_db_conn_retry(request, enrich)
 

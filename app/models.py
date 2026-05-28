@@ -149,11 +149,25 @@ class DriveFileListSummary(BaseModel):
     stale: int = Field(..., description="Indexed but Drive doc changed since last ingest")
 
 
+class DriveFolderContext(BaseModel):
+    """Resolved folder location for Drive list/ingest UI."""
+
+    id: str = Field(..., description="Drive folder id")
+    name: str | None = Field(default=None, description="Folder name from Drive")
+    path: str | None = Field(default=None, description="Parent breadcrumb from Drive API")
+    is_default: bool = Field(default=False, description="True when folder is the team inbox default")
+    display_path: str = Field(..., description="Human-readable path for UI")
+
+
 class DriveFileListResponse(BaseModel):
     """Response from listing Drive files (metadata only)."""
 
     files: list[DriveFileMeta] = Field(..., description="List of ingestable Drive file metadata")
     summary: DriveFileListSummary = Field(..., description="Index status counts")
+    folder: DriveFolderContext | None = Field(
+        default=None,
+        description="Folder context when listing by folder_id",
+    )
 
 
 class SimilarTitleMatch(BaseModel):

@@ -66,9 +66,18 @@ export interface DriveFileListSummary {
   stale: number
 }
 
+export interface DriveFolderContext {
+  id: string
+  name?: string | null
+  path?: string | null
+  is_default: boolean
+  display_path: string
+}
+
 export interface DriveFileListResponse {
   files: DriveFileMeta[]
   summary: DriveFileListSummary
+  folder?: DriveFolderContext | null
 }
 
 export interface IngestResponse {

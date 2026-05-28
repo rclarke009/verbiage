@@ -27,6 +27,7 @@ Copy `.env.example` to `.env` and set:
 | `LLM_TIMEOUT_SECONDS`, `LLM_RATE_LIMIT_SECONDS`, etc. | No | See `.env.example` and `app/config.py`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_REDIRECT_URI` | No | Only for Google Drive ingest. |
 | `GOOGLE_DRIVE_DEFAULT_FOLDER_ID` | No | Team ingest inbox folder (raw id or full `drive.google.com/.../folders/...` URL). Used when API/UI omit `folder_id`. Exposed to the SPA via **GET /config** as `google_drive_default_folder_id`. |
+| `GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL` | No | Human-readable path/label for the team inbox shown in the **Google Drive** tab (e.g. `Shared drives / Team / Ready for AI Ingest`). Exposed via **GET /config** as `google_drive_default_folder_label`. |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Required for SPA + auth API | Returned (public fields only) via **GET /config** for the React app; required for login. |
 | `SUPABASE_JWT_SECRET` | Required for protected routes | Server verifies JWT access tokens (`Authorization: Bearer`). Without this, authenticated endpoints return **503**. Keep secret server-side only. |
 | `SUPABASE_SERVICE_ROLE_KEY` | No | Needed for **POST /auth/signup** when using the managed sign-up flow; never expose to the browser. |
@@ -150,7 +151,7 @@ To ingest Google Docs, PDFs, and Word (.docx) from Drive:
 1. Create OAuth credentials in Google Cloud Console (Web application, redirect URI `http://localhost:8000/auth/google/callback`).
 2. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
 3. Open `http://localhost:8000/auth/google` in a browser, complete OAuth, and add the shown `GOOGLE_REFRESH_TOKEN` to `.env`.
-4. Set **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** to your team inbox folder (folder id or full Drive URL). On **Render**, add the same variable in the service **Environment** tab. The **Google Drive** tab pre-fills this inbox and lists files on open.
+4. Set **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** to your team inbox folder (folder id or full Drive URL). Optionally set **`GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL`** to a friendly path shown in the Drive tab. On **Render**, add the same variables in the service **Environment** tab. The **Google Drive** tab pre-fills this inbox, shows the active folder path, and lists files on open.
 5. Ensure the **Google account used for OAuth** can access that folder (share the folder with that account if someone else owns it).
 6. **List** with **`GET /drive/files`** (defaults to inbox when `folder_id` is omitted) or use the **Google Drive** tab — each file includes **`index_status`** and summary counts.
 7. Call **`POST /ingest/google-drive`** for selected or unindexed docs.
