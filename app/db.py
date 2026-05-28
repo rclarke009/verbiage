@@ -193,6 +193,42 @@ def create_db(conn: PgConnection) -> None:
             END $$;
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS ingest_batches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                total INT NOT NULL DEFAULT 0,
+                pending INT NOT NULL DEFAULT 0,
+                running INT NOT NULL DEFAULT 0,
+                succeeded INT NOT NULL DEFAULT 0,
+                failed INT NOT NULL DEFAULT 0,
+                skipped INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ingest_jobs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                batch_id UUID NOT NULL REFERENCES ingest_batches(id) ON DELETE CASCADE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                kind TEXT NOT NULL,
+                doc_id TEXT NOT NULL,
+                payload JSONB NOT NULL,
+                result JSONB,
+                error TEXT,
+                attempts INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status_created ON ingest_jobs(status, created_at);"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingest_jobs_batch ON ingest_jobs(batch_id);"
+        )
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS signup_allowlist (
                 email TEXT PRIMARY KEY,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -569,5 +605,233 @@ def list_doc_title_pairs(conn: PgConnection) -> list[tuple[str, str | None]]:
     try:
         cur.execute("SELECT doc_id, title FROM documents")
         return [(r[0], r[1]) for r in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+# --- Ingest job queue ---
+
+INGEST_JOB_KIND_GOOGLE_DRIVE = "google_drive"
+
+
+def create_ingest_batch(conn: PgConnection, kind: str, total: int) -> str:
+    """Create a batch row; initial counters assume all jobs pending."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO ingest_batches (
+                kind, status, total, pending, running, succeeded, failed, skipped
+            ) VALUES (%s, 'pending', %s, %s, 0, 0, 0, 0)
+            RETURNING id::text
+            """,
+            (kind, total, total),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        return row[0]
+    finally:
+        cur.close()
+
+
+def insert_ingest_jobs(
+    conn: PgConnection,
+    batch_id: str,
+    jobs: list[tuple[str, str, dict]],
+) -> list[str]:
+    """Insert jobs as (doc_id, kind, payload). Returns job ids."""
+    if not jobs:
+        return []
+    cur = conn.cursor()
+    try:
+        ids: list[str] = []
+        for doc_id, kind, payload in jobs:
+            cur.execute(
+                """
+                INSERT INTO ingest_jobs (batch_id, kind, doc_id, payload, status)
+                VALUES (%s::uuid, %s, %s, %s, 'pending')
+                RETURNING id::text
+                """,
+                (batch_id, kind, doc_id, Json(payload)),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            ids.append(row[0])
+        return ids
+    finally:
+        cur.close()
+
+
+def claim_next_ingest_job(conn: PgConnection) -> dict[str, Any] | None:
+    """Claim one pending job (SKIP LOCKED). Caller must commit."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE ingest_jobs
+            SET status = 'running', updated_at = now(), attempts = attempts + 1
+            WHERE id = (
+                SELECT id FROM ingest_jobs
+                WHERE status = 'pending'
+                ORDER BY created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            RETURNING id::text, batch_id::text, kind, doc_id, payload, attempts
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        payload = row[4]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        return {
+            "id": row[0],
+            "batch_id": row[1],
+            "kind": row[2],
+            "doc_id": row[3],
+            "payload": payload,
+            "attempts": row[5],
+        }
+    finally:
+        cur.close()
+
+
+def finish_ingest_job(
+    conn: PgConnection,
+    job_id: str,
+    status: str,
+    result: dict | None = None,
+    error: str | None = None,
+) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE ingest_jobs
+            SET status = %s, result = %s, error = %s, updated_at = now()
+            WHERE id = %s::uuid
+            """,
+            (status, Json(result) if result is not None else None, error, job_id),
+        )
+    finally:
+        cur.close()
+
+
+def refresh_batch_counts(conn: PgConnection, batch_id: str) -> None:
+    """Recompute batch counters and terminal status from child jobs."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE ingest_batches b SET
+                pending = sub.pending,
+                running = sub.running,
+                succeeded = sub.succeeded,
+                failed = sub.failed,
+                skipped = sub.skipped,
+                status = CASE
+                    WHEN sub.running > 0 OR sub.pending > 0 THEN
+                        CASE WHEN sub.running > 0 THEN 'running' ELSE 'pending' END
+                    WHEN sub.failed > 0 AND sub.succeeded = 0 AND sub.skipped = 0 THEN 'failed'
+                    ELSE 'completed'
+                END,
+                updated_at = now()
+            FROM (
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                    COUNT(*) FILTER (WHERE status = 'running') AS running,
+                    COUNT(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+                    COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                    COUNT(*) FILTER (WHERE status = 'skipped') AS skipped
+                FROM ingest_jobs
+                WHERE batch_id = %s::uuid
+            ) sub
+            WHERE b.id = %s::uuid
+            """,
+            (batch_id, batch_id),
+        )
+    finally:
+        cur.close()
+
+
+def get_ingest_batch(conn: PgConnection, batch_id: str) -> dict[str, Any] | None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id::text, kind, status, total, pending, running, succeeded, failed, skipped,
+                   created_at, updated_at
+            FROM ingest_batches WHERE id = %s::uuid
+            """,
+            (batch_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "kind": row[1],
+            "status": row[2],
+            "total": row[3],
+            "pending": row[4],
+            "running": row[5],
+            "succeeded": row[6],
+            "failed": row[7],
+            "skipped": row[8],
+            "created_at": row[9],
+            "updated_at": row[10],
+        }
+    finally:
+        cur.close()
+
+
+def get_ingest_batch_errors(conn: PgConnection, batch_id: str, limit: int = 10) -> list[str]:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT doc_id, error FROM ingest_jobs
+            WHERE batch_id = %s::uuid AND status = 'failed' AND error IS NOT NULL
+            ORDER BY updated_at DESC
+            LIMIT %s
+            """,
+            (batch_id, limit),
+        )
+        return [f"{r[0]}: {r[1]}" for r in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def update_document_for_drive_reingest(
+    conn: PgConnection,
+    doc_id: str,
+    title: str | None,
+    source: str | None,
+    full_text: str,
+    source_modified_at: int | None,
+    source_url: str | None,
+    source_filename: str | None,
+) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE documents SET
+                title = %s, source = %s, full_text = %s, source_modified_at = %s,
+                source_url = %s, source_filename = %s
+            WHERE doc_id = %s
+            """,
+            (
+                title,
+                source,
+                full_text,
+                source_modified_at,
+                source_url,
+                source_filename,
+                doc_id,
+            ),
+        )
     finally:
         cur.close()

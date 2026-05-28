@@ -79,6 +79,9 @@ LLM_RATE_LIMIT_SECONDS = int(os.getenv("LLM_RATE_LIMIT_SECONDS", 60))
 
 # Health: /health/ready (DB); /health/deep (DB + embed; optional LLM via HEALTH_DEEP_CHECK_LLM)
 HEALTH_DEEP_TIMEOUT = int(os.getenv("HEALTH_DEEP_TIMEOUT", "5"))
+# Ingest background worker (Postgres job queue)
+INGEST_WORKER_ENABLED = os.getenv("INGEST_WORKER_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+
 HEALTH_DEEP_CHECK_LLM = os.getenv("HEALTH_DEEP_CHECK_LLM", "").lower() in ("1", "true", "yes")
 
 

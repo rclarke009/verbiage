@@ -249,7 +249,7 @@ Set the shared **ready-for-TrueAI** folder so operators are not copying folder i
 
 ```bash
 # Folder id or full URL — also set on Render in production
-GOOGLE_DRIVE_DEFAULT_FOLDER_ID=12FGnoHObEnFRQNEUHtHla2Ajx33xauhc
+GOOGLE_DRIVE_DEFAULT_FOLDER_ID=1HUgl4ryKyijBOP4_nJkJCCT3mvLdKPih
 ```
 
 - **`GET /config`** returns `google_drive_default_folder_id` (parsed id) for the SPA.
@@ -354,3 +354,17 @@ The app uses **one** Google account for Drive: credentials live on the server (`
 ## Similar titles (advisory duplicate check)
 
 **`GET /documents/similar-titles?proposed=<name>&limit=5&min_ratio=0.82`** (requires `Authorization: Bearer <Supabase access token>`) returns existing documents whose titles are fuzzily similar to `proposed`. The web UI uses this before ingesting queued PDFs or selected Drive files so you can skip near-duplicates.
+
+
+### Async Google Drive ingest
+
+`POST /ingest/google-drive` returns **202 Accepted** with `{ "batch_id", "total", "job_ids" }` and enqueues one background job per Google Doc. Poll progress:
+
+```bash
+curl -s "$API/ingest/batches/<batch_id>" -H "Authorization: Bearer $TOKEN"
+```
+
+Batch `status` is `pending` → `running` → `completed` (or `failed` if every job failed). Counters: `pending`, `running`, `succeeded`, `failed`, `skipped`. Stale Drive docs are re-indexed in the worker; up-to-date docs are skipped.
+
+Disable the in-process worker with `INGEST_WORKER_ENABLED=0` (jobs remain queued until re-enabled).
+
