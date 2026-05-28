@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field, model_validator
 from typing import Literal
 
 class ChunkingOptions(BaseModel):
-    strategy: Literal["chars", "sentences"] = "chars"
-    chunk_size: int = Field(default=800, description= "Chunk size")
-    chunk_overlap: int = Field(default=100, description="Chunk overlap")
+    strategy: Literal["paragraph", "chars", "sentences"] = "paragraph"
+    chunk_size: int = Field(default=1200, description="Chunk size")
+    chunk_overlap: int = Field(default=150, description="Chunk overlap")
 
     @model_validator(mode="after")
     def check_chunking_bounds(self)->"ChunkingOptions":
@@ -27,6 +27,7 @@ class IngestRequest (BaseModel):
     title: str | None = None
     source: str | None = None
     source_url: str | None = Field(default=None, description="Optional URL to the full report")
+    source_filename: str | None = Field(default=None, description="Original filename if known")
     chunking_options: ChunkingOptions | None = None
 
     @model_validator(mode="after")
@@ -73,6 +74,7 @@ class RetrievedChunk(BaseModel):
         default=None,
         description="Resolved URL to open the full report (stored or derived for Google Drive)",
     )
+    section_label: str | None = Field(default=None, description="Detected report section heading")
 
 class AskResponse(BaseModel):
     answer: str = Field(...,description="Answer from system")
@@ -88,6 +90,9 @@ class DocumentSummary(BaseModel):
         default=None,
         description="Resolved URL to open the full report, if any",
     )
+    source_filename: str | None = Field(default=None, description="Original upload or Drive filename")
+    embedding_model: str | None = Field(default=None, description="Embedding model used for this document")
+    chunking_config: dict | None = Field(default=None, description="Chunking options used at last index")
     created_at: int = Field(..., description="Unix timestamp (ingest time)")
     source_modified_at: int | None = Field(
         default=None,
@@ -95,6 +100,10 @@ class DocumentSummary(BaseModel):
     )
     num_chunks: int = Field(..., description="Number of chunks")
     snippet: str | None = Field(default=None, description="First ~250 chars of first chunk")
+
+
+class ReindexRequest(BaseModel):
+    chunking_options: ChunkingOptions | None = None
 
 
 class DocumentsListResponse(BaseModel):
@@ -124,12 +133,27 @@ class DriveFileMeta(BaseModel):
     name: str | None = Field(default=None, description="File name")
     mimeType: str | None = Field(default=None, description="MIME type")
     modifiedTime: str | None = Field(default=None, description="Last modified (RFC3339)")
+    index_status: Literal["not_indexed", "indexed", "stale"] = Field(
+        default="not_indexed",
+        description="Whether this Drive file is in the document index",
+    )
+    num_chunks: int | None = Field(default=None, description="Chunk count when indexed or stale")
+
+
+class DriveFileListSummary(BaseModel):
+    """Counts by index status for a Drive file listing."""
+
+    total: int = Field(..., description="Total Google Docs in listing")
+    indexed: int = Field(..., description="Already indexed and up to date")
+    not_indexed: int = Field(..., description="Not yet in the index")
+    stale: int = Field(..., description="Indexed but Drive doc changed since last ingest")
 
 
 class DriveFileListResponse(BaseModel):
     """Response from listing Drive files (metadata only)."""
 
     files: list[DriveFileMeta] = Field(..., description="List of Google Docs metadata")
+    summary: DriveFileListSummary = Field(..., description="Index status counts")
 
 
 class SimilarTitleMatch(BaseModel):

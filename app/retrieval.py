@@ -9,9 +9,11 @@ from app.similarity import cosine_similarity
 from app.source_url import resolved_source_url
 
 
-def retrieve_top_k(conn, query_vec, top_k, doc_id=None) -> list[RetrievedChunk]:
+def retrieve_top_k(
+    conn, query_vec, top_k, doc_id=None, embedding_model: str | None = None
+) -> list[RetrievedChunk]:
     """Postgres similarity search over the shared library; returns top_k chunks as RetrievedChunk."""
-    rows = retrieve_top_k_pg(conn, query_vec, top_k, doc_id)
+    rows = retrieve_top_k_pg(conn, query_vec, top_k, doc_id, embedding_model=embedding_model)
     return [
         RetrievedChunk(
             chunk_id=chunk_id,
@@ -21,12 +23,15 @@ def retrieve_top_k(conn, query_vec, top_k, doc_id=None) -> list[RetrievedChunk]:
             document_title=title,
             source=src,
             source_url=resolved_source_url(src, doc_id_val, src_url),
+            section_label=section_label,
         )
-        for chunk_id, doc_id_val, score, content, title, src, src_url in rows
+        for chunk_id, doc_id_val, score, content, title, src, src_url, section_label in rows
     ]
 
 
-def retrieve_top_k_in_memory(conn, query_vec, top_k, doc_id=None) -> list[RetrievedChunk]:
+def retrieve_top_k_in_memory(
+    conn, query_vec, top_k, doc_id=None, embedding_model: str | None = None
+) -> list[RetrievedChunk]:
     """In-memory similarity (get_embeddings + cosine_similarity). For tests/fallback."""
     all_candidates = get_embeddings_for_retrieval(conn, doc_id)
     candidates = all_candidates[:5000]

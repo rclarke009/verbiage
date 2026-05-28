@@ -77,6 +77,11 @@ LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", 3))
 LLM_TOKEN_LIMIT = int(os.getenv("LLM_TOKEN_LIMIT", 10))
 LLM_RATE_LIMIT_SECONDS = int(os.getenv("LLM_RATE_LIMIT_SECONDS", 60))
 
+# Health: /health/ready (DB); /health/deep (DB + embed; optional LLM via HEALTH_DEEP_CHECK_LLM)
+HEALTH_DEEP_TIMEOUT = int(os.getenv("HEALTH_DEEP_TIMEOUT", "5"))
+HEALTH_DEEP_CHECK_LLM = os.getenv("HEALTH_DEEP_CHECK_LLM", "").lower() in ("1", "true", "yes")
+
+
 def _google_env(name: str, default: str = "") -> str:
     """Strip whitespace and a single pair of outer quotes (common .env paste mistakes)."""
     raw = os.getenv(name, default) or ""
@@ -92,6 +97,7 @@ GOOGLE_REFRESH_TOKEN = _google_env("GOOGLE_REFRESH_TOKEN")
 GOOGLE_REDIRECT_URI = _google_env(
     "GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback"
 )
+GOOGLE_DRIVE_DEFAULT_FOLDER_ID = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_ID")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
 # SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used

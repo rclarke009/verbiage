@@ -25,13 +25,13 @@ from psycopg2 import pool as psycopg2_pool
 from app.db import (
     create_db,
     delete_by_doc_id,
-    delete_document,
+    delete_document as remove_document_from_db,
     doc_exist,
     email_in_signup_allowlist,
+    get_document_full_text,
+    get_document_index_by_doc_ids,
     get_valid_conn,
-    insert_chunk,
     insert_document,
-    insert_embedding,
     is_connection_error,
     list_documents,
     list_doc_title_pairs,
@@ -48,30 +48,42 @@ from app.models import (
     SimilarTitlesResponse,
     DriveFileListResponse,
     DriveFileMeta,
+    DriveFileListSummary,
     IngestGoogleDriveRequest,
     IngestGoogleDriveResponse,
     IngestRequest,
     IngestResponse,
+    ReindexRequest,
     SignupRequest,
     SignupResponse,
 )
 from app.rate_limit import TokenBucket
-from app.chunking import chunk_text_chars
-from app.embedding_usage_estimate import embedding_metering
+from app.indexing import index_document, reindex_document
 from app.embeddings import HttpEmbedder
 from app.job_store import JobStore
 from app.worker import worker_loop
 from app.retrieval import retrieve_top_k
 from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
-from app.drive_client import list_and_export_docs, list_docs_metadata, test_connection, DriveClientError
+from app.drive_client import (
+    list_and_export_docs,
+    list_docs_metadata,
+    test_connection,
+    DriveClientError,
+    compute_index_status,
+    _drive_modified_to_unix,
+    parse_drive_folder_id,
+    resolve_drive_folder_id,
+)
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
+from app.health import build_deep_response, build_ready_response
 from app.config import (
     DATABASE_CONNECTION_KWARGS,
     DATABASE_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
+    GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
     GOOGLE_REDIRECT_URI,
     METRICS_ENABLED,
     METRICS_TOKEN,
@@ -263,16 +275,17 @@ async def ingest_text(
     chunking_options: ChunkingOptions,
     source_modified_at: int | None = None,
     source_url: str | None = None,
+    source_filename: str | None = None,
 ) -> IngestResponse:
     """
-    Shared ingest: chunk text, insert document + chunks, embed, insert embeddings, commit.
+    Shared ingest: store full text + metadata, chunk, embed, and persist.
     Raises ValueError('doc_id already exists') if doc_id is duplicate.
     Rollback (delete_by_doc_id) on embedding failure.
     """
     if doc_exist(conn, doc_id):
         raise ValueError("doc_id already exists")
     opts = chunking_options
-    chunks = chunk_text_chars(text, opts.chunk_size, opts.chunk_overlap)
+    config_dict = opts.model_dump()
     insert_document(
         conn,
         doc_id,
@@ -281,33 +294,19 @@ async def ingest_text(
         source,
         source_modified_at=source_modified_at,
         source_url=source_url,
+        full_text=text,
+        source_filename=source_filename,
+        chunking_config=config_dict,
     )
-    for chunk in chunks:
-        chunk_id = f"{doc_id}:{chunk.chunk_index}"
-        insert_chunk(
-            conn, chunk_id, doc_id, chunk.chunk_index, chunk.content,
-            chunk.start_offset, chunk.end_offset,
-        )
     embedder = HttpEmbedder()
     try:
-        vectors = await embedder.embed_many([c.content for c in chunks])
+        result = await index_document(conn, doc_id, text, opts, embedder=embedder)
     except Exception as e:
         delete_by_doc_id(conn, doc_id)
         logger.exception("embedding failed", exc_info=e)
         raise
-    for chunk, vector in zip(chunks, vectors):
-        chunk_id = f"{doc_id}:{chunk.chunk_index}"
-        insert_embedding(conn, chunk_id, embedder.model, vector, embedder.dim)
     conn.commit()
-    chars_total, toks_estimate = embedding_metering([c.content for c in chunks])
-    return IngestResponse(
-        doc_id=doc_id,
-        num_chunks=len(chunks),
-        embedding_model=embedder.model,
-        dim=embedder.dim,
-        embedding_chars_total=chars_total,
-        embedding_tokens_estimate=toks_estimate,
-    )
+    return result
 
 
 _SIGNUP_FORBIDDEN = "Sign up is not allowed for this email or invite code."
@@ -332,6 +331,7 @@ def get_config():
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
         "signup_invite_enabled": bool(SIGNUP_INVITE_CODE),
         "public_app_url": PUBLIC_APP_URL or "",
+        "google_drive_default_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_DEFAULT_FOLDER_ID) or "",
     }
 
 
@@ -431,6 +431,7 @@ async def ingest(
                 ingest_request.text,
                 ingest_request.chunking_options,
                 source_url=ingest_request.source_url,
+                source_filename=ingest_request.source_filename,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -458,8 +459,8 @@ async def ingest_file(
     doc_id: str | None = File(default=None),
     title: str | None = File(default=None),
     source: str | None = File(default=None),
-    chunk_size: int = File(default=800),
-    chunk_overlap: int = File(default=100),
+    chunk_size: int = File(default=1200),
+    chunk_overlap: int = File(default=150),
     source_modified_at: str | None = Form(default=None),
     source_url: str | None = Form(default=None),
     user_id: str = Depends(get_current_user),
@@ -516,6 +517,7 @@ async def ingest_file(
                 opts,
                 source_modified_at=resolved_source_modified_at,
                 source_url=resolved_source_url,
+                source_filename=filename,
             )
         except ValueError as e:
             if "already exists" in str(e):
@@ -543,8 +545,53 @@ async def drive_test(user_id: str = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 
+def _build_drive_file_list(
+    raw: list[dict],
+    index_by_id: dict[str, tuple[int | None, int]],
+) -> DriveFileListResponse:
+    """Attach index_status to Drive metadata using documents table lookup."""
+    files: list[DriveFileMeta] = []
+    indexed = not_indexed = stale = 0
+    for f in raw:
+        fid = f["id"]
+        meta = index_by_id.get(fid)
+        drive_ts = _drive_modified_to_unix(f.get("modifiedTime"))
+        if meta:
+            source_modified_at, num_chunks = meta
+            status = compute_index_status(True, drive_ts, source_modified_at)
+        else:
+            status = compute_index_status(False, drive_ts, None)
+            num_chunks = None
+        if status == "indexed":
+            indexed += 1
+        elif status == "stale":
+            stale += 1
+        else:
+            not_indexed += 1
+        files.append(
+            DriveFileMeta(
+                id=fid,
+                name=f.get("name"),
+                mimeType=f.get("mimeType"),
+                modifiedTime=f.get("modifiedTime"),
+                index_status=status,
+                num_chunks=num_chunks if meta else None,
+            )
+        )
+    return DriveFileListResponse(
+        files=files,
+        summary=DriveFileListSummary(
+            total=len(files),
+            indexed=indexed,
+            not_indexed=not_indexed,
+            stale=stale,
+        ),
+    )
+
+
 @app.get("/drive/files", response_model=DriveFileListResponse)
 async def drive_files(
+    request: Request,
     folder_id: str | None = None,
     file_ids: str | None = None,
     user_id: str = Depends(get_current_user),
@@ -556,12 +603,19 @@ async def drive_files(
     ids_list: list[str] | None = None
     if file_ids:
         ids_list = [x.strip() for x in file_ids.split(",") if x.strip()]
+    else:
+        folder_id = resolve_drive_folder_id(folder_id)
     try:
         raw = list_docs_metadata(folder_id=folder_id, file_ids=ids_list)
-        files = [DriveFileMeta(**f) for f in raw]
-        return DriveFileListResponse(files=files)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+    async def enrich(conn):
+        doc_ids = [f["id"] for f in raw]
+        index_by_id = get_document_index_by_doc_ids(conn, doc_ids)
+        return _build_drive_file_list(raw, index_by_id)
+
+    return await with_db_conn_retry(request, enrich)
 
 
 @app.post("/ingest/google-drive", response_model=IngestGoogleDriveResponse)
@@ -575,7 +629,10 @@ async def ingest_google_drive(
     Duplicate doc_id is skipped and counted; other errors are recorded and processing continues.
     """
     try:
-        docs = list_and_export_docs(folder_id=body.folder_id, file_ids=body.file_ids)
+        folder_id = body.folder_id
+        if not body.file_ids:
+            folder_id = resolve_drive_folder_id(folder_id)
+        docs = list_and_export_docs(folder_id=folder_id, file_ids=body.file_ids)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     default_opts = ChunkingOptions()
@@ -598,6 +655,7 @@ async def ingest_google_drive(
                     default_opts,
                     source_modified_at=doc.source_modified_at,
                     source_url=gdoc_url,
+                    source_filename=doc.title,
                 )
                 ingested += 1
                 doc_ids.append(doc.doc_id)
@@ -662,7 +720,7 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
                 "source_url": c.source_url or "",
                 "source_type": kind,
                 "page": 0,
-                "section": c.chunk_id or "",
+                "section": c.section_label or c.chunk_id or "",
             }
         )
     return payload
@@ -688,7 +746,8 @@ async def ask(
 
         t_retrieve = time.perf_counter()
         top_chunks = retrieve_top_k(
-            conn, query_vec, ask_request.top_k, ask_request.doc_id
+            conn, query_vec, ask_request.top_k, ask_request.doc_id,
+            embedding_model=embedder.model,
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
         record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
@@ -735,6 +794,7 @@ async def ask_stream(
             query_vec,
             ask_request.top_k,
             ask_request.doc_id,
+            embedding_model=embedder.model,
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
         record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
@@ -796,6 +856,9 @@ def get_documents(
                     source_modified_at=r[6],
                     num_chunks=r[4],
                     snippet=r[5],
+                    source_filename=r[8],
+                    embedding_model=r[9],
+                    chunking_config=r[10],
                 )
                 for r in rows
             ]
@@ -804,14 +867,50 @@ def get_documents(
     return with_db_conn_retry_sync(request, do_list)
 
 
+@app.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
+async def reindex_document_endpoint(
+    doc_id: str,
+    request: Request,
+    body: ReindexRequest | None = None,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Re-chunk and re-embed a document from stored full_text (no re-upload).
+    Optional body overrides chunking_options.
+    """
+    async def do_reindex(conn):
+        full_text = get_document_full_text(conn, doc_id)
+        if full_text is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if not full_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Document has no stored full_text; re-ingest from source instead.",
+            )
+        opts = (
+            body.chunking_options
+            if body and body.chunking_options is not None
+            else ChunkingOptions()
+        )
+        try:
+            result = await reindex_document(conn, doc_id, full_text, chunking_options=opts)
+        except Exception as e:
+            logger.exception("reindex failed for %s", doc_id, exc_info=e)
+            raise HTTPException(status_code=503, detail="Reindex failed") from e
+        conn.commit()
+        return result
+
+    return await with_db_conn_retry(request, do_reindex)
+
+
 @app.delete("/documents/{doc_id}")
-def delete_document(
+def delete_document_route(
     doc_id: str,
     request: Request,
     user_id: str = Depends(get_current_user),
 ):
     def do_delete(conn):
-        if not delete_document(conn, doc_id):
+        if not remove_document_from_db(conn, doc_id):
             raise HTTPException(status_code=404, detail="Document not found")
         return {"ok": True}
 
@@ -855,6 +954,16 @@ def get_similar_titles(
 @app.get("/health")
 def health():
     return {"healthy": True}
+
+
+@app.get("/health/ready")
+def health_ready(request: Request):
+    return build_ready_response(request)
+
+
+@app.get("/health/deep")
+async def health_deep(request: Request):
+    return await build_deep_response(request)
 
 
 if METRICS_ENABLED:

@@ -37,6 +37,9 @@ export interface DocumentSummary {
   title?: string | null
   source?: string | null
   source_url?: string | null
+  source_filename?: string | null
+  embedding_model?: string | null
+  chunking_config?: Record<string, unknown> | null
   created_at: number
   source_modified_at?: number | null
   num_chunks: number
@@ -52,10 +55,20 @@ export interface DriveFileMeta {
   name?: string | null
   mimeType?: string | null
   modifiedTime?: string | null
+  index_status?: 'not_indexed' | 'indexed' | 'stale'
+  num_chunks?: number | null
+}
+
+export interface DriveFileListSummary {
+  total: number
+  indexed: number
+  not_indexed: number
+  stale: number
 }
 
 export interface DriveFileListResponse {
   files: DriveFileMeta[]
+  summary: DriveFileListSummary
 }
 
 export interface IngestResponse {

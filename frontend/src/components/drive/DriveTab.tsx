@@ -1,19 +1,83 @@
-import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { driveListFiles, driveTest, ingestGoogleDrive } from '../../api/drive'
+import { useAuth } from '../../context/AuthContext'
 import { apiOrigin } from '../../lib/api'
-import type { DriveFileMeta, IngestGoogleDriveResponse } from '../../types'
+import {
+  DRIVE_FOLDER_STORAGE_KEY,
+  driveFolderUrl,
+  parseDriveFolderInput,
+  resolveDriveFolderForApi,
+} from '../../lib/driveFolder'
+import type { DriveFileListSummary, DriveFileMeta, IngestGoogleDriveResponse } from '../../types'
 
 import type { CSSProperties } from 'react'
 
+function formatListSummary(summary: DriveFileListSummary): string {
+  return (
+    `Found ${summary.total} Google Doc(s) — ` +
+    `${summary.indexed} indexed, ${summary.not_indexed} not indexed, ${summary.stale} stale.`
+  )
+}
+
+function defaultSelection(files: DriveFileMeta[]): Set<string> {
+  return new Set(files.filter(f => f.index_status !== 'indexed').map(f => f.id))
+}
+
+function IndexStatusBadge({ file }: { file: DriveFileMeta }) {
+  const status = file.index_status ?? 'not_indexed'
+  const styles: Record<string, CSSProperties> = {
+    not_indexed: { background: '#f6f8fa', color: '#57606a', border: '1px solid #d0d7de' },
+    indexed: { background: '#dafbe1', color: '#1a7f37', border: '1px solid #aceebb' },
+    stale: { background: '#fff8c5', color: '#9a6700', border: '1px solid #fae17d' },
+  }
+  const labels: Record<string, string> = {
+    not_indexed: 'Not indexed',
+    indexed: 'Indexed',
+    stale: 'Stale',
+  }
+  const title =
+    status === 'stale'
+      ? 'Drive doc changed since last ingest'
+      : status === 'indexed' && file.num_chunks != null
+        ? `${file.num_chunks} chunks in index`
+        : undefined
+
+  return (
+    <span
+      title={title}
+      style={{
+        ...styles[status],
+        fontSize: 11,
+        fontWeight: 600,
+        borderRadius: 4,
+        padding: '2px 8px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {labels[status]}
+      {status === 'indexed' && file.num_chunks != null ? ` · ${file.num_chunks}` : ''}
+    </span>
+  )
+}
+
 export function DriveTab() {
-  const [folderId, setFolderId] = useState('')
+  const { publicConfig } = useAuth()
+  const teamInboxId = publicConfig?.google_drive_default_folder_id ?? ''
+  const [folderInput, setFolderInput] = useState('')
+  const [folderParseError, setFolderParseError] = useState('')
   const [files, setFiles] = useState<DriveFileMeta[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const base = apiOrigin()
+  const queryClient = useQueryClient()
+  const initDoneRef = useRef(false)
+  const autoListedRef = useRef(false)
+
+  const apiFolderId = () => resolveDriveFolderForApi(folderInput, teamInboxId)
+  const effectiveFolderId = apiFolderId()
 
   const testMutation = useMutation({
     mutationFn: () => driveTest(),
@@ -28,15 +92,17 @@ export function DriveTab() {
   })
 
   const listMutation = useMutation({
-    mutationFn: () => driveListFiles(folderId || undefined),
+    mutationFn: () => driveListFiles(apiFolderId()),
     onSuccess: data => {
-      setFiles(data.files ?? [])
-      setSelected(new Set())
+      const fileList = data.files ?? []
+      setFiles(fileList)
+      setSelected(defaultSelection(fileList))
       setErr('')
-      setMsg(`Found ${data.files?.length ?? 0} Google Doc(s).`)
+      setMsg(data.summary ? formatListSummary(data.summary) : `Found ${fileList.length} Google Doc(s).`)
     },
     onError: (e: Error) => {
       setFiles([])
+      setSelected(new Set())
       setMsg('')
       setErr(e.message)
     },
@@ -45,15 +111,27 @@ export function DriveTab() {
   const ingestMutation = useMutation({
     mutationFn: () =>
       ingestGoogleDrive({
-        folder_id: folderId.trim() || null,
+        folder_id: apiFolderId() ?? null,
         file_ids: selected.size ? Array.from(selected) : null,
       }),
     onSuccess: (r: IngestGoogleDriveResponse) => {
       setErr('')
-      setMsg(
+      const ingestMsg =
         `Ingest finished: ${r.ingested} new, ${r.skipped} skipped.` +
-          (r.errors.length ? ` (${r.errors.length} error rows — check server logs).` : ''),
-      )
+        (r.errors.length ? ` (${r.errors.length} error rows — check server logs).` : '')
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+      listMutation.mutate(undefined, {
+        onSuccess: data => {
+          setMsg(
+            data.summary
+              ? `${ingestMsg} ${formatListSummary(data.summary)}`
+              : `${ingestMsg} Found ${data.files?.length ?? 0} Google Doc(s).`,
+          )
+        },
+        onError: () => {
+          setMsg(ingestMsg)
+        },
+      })
     },
     onError: (e: Error) => {
       setMsg('')
@@ -61,7 +139,51 @@ export function DriveTab() {
     },
   })
 
-  const canIngestQuick = !!(folderId.trim() || selected.size)
+  useEffect(() => {
+    if (!publicConfig || initDoneRef.current) return
+    initDoneRef.current = true
+    const stored = localStorage.getItem(DRIVE_FOLDER_STORAGE_KEY)
+    setFolderInput(stored || teamInboxId || '')
+  }, [publicConfig, teamInboxId])
+
+  useEffect(() => {
+    if (!initDoneRef.current || autoListedRef.current || !publicConfig) return
+    const id = resolveDriveFolderForApi(folderInput, teamInboxId)
+    if (!id) return
+    autoListedRef.current = true
+    listMutation.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when folder resolves after init
+  }, [folderInput, publicConfig, teamInboxId])
+
+  const commitFolderInput = () => {
+    const { id, error } = parseDriveFolderInput(folderInput)
+    if (error) {
+      setFolderParseError(error)
+      return
+    }
+    setFolderParseError('')
+    if (id) {
+      setFolderInput(id)
+      if (teamInboxId && id === teamInboxId) {
+        localStorage.removeItem(DRIVE_FOLDER_STORAGE_KEY)
+      } else if (id) {
+        localStorage.setItem(DRIVE_FOLDER_STORAGE_KEY, id)
+      }
+    } else if (!folderInput.trim()) {
+      localStorage.removeItem(DRIVE_FOLDER_STORAGE_KEY)
+    }
+  }
+
+  const resetToTeamInbox = () => {
+    localStorage.removeItem(DRIVE_FOLDER_STORAGE_KEY)
+    setFolderInput(teamInboxId)
+    setFolderParseError('')
+    listMutation.mutate()
+  }
+
+  const canIngestQuick = !!(effectiveFolderId || selected.size)
+  const showResetInbox =
+    !!teamInboxId && folderInput.trim() !== '' && folderInput.trim() !== teamInboxId
 
   const toggle = (id: string) => {
     setSelected(prev => {
@@ -84,6 +206,13 @@ export function DriveTab() {
         </a>{' '}
         in your browser while the API origin matches <code>GOOGLE_REDIRECT_URI</code>; copy the shown
         value into your environment.
+        {teamInboxId ? (
+          <>
+            {' '}
+            The team ingest inbox is pre-configured; paste another folder link only when ingesting
+            elsewhere.
+          </>
+        ) : null}
       </p>
 
       <div style={{ marginBottom: 14 }}>
@@ -98,16 +227,43 @@ export function DriveTab() {
       </div>
 
       <label style={{ fontSize: 13, color: '#24292f', display: 'block', marginBottom: 8 }}>
-        Optional folder ID (narrows listing and ingest folder mode)
+        Inbox folder (paste link or ID)
         <input
-          value={folderId}
-          onChange={e => setFolderId(e.target.value)}
-          placeholder="Google Drive folder id"
+          value={folderInput}
+          onChange={e => {
+            setFolderInput(e.target.value)
+            setFolderParseError('')
+          }}
+          onBlur={commitFolderInput}
+          placeholder={
+            teamInboxId
+              ? 'Team inbox (default) — paste another folder to override'
+              : 'Paste drive.google.com/.../folders/… or folder id'
+          }
           style={inputStyle}
         />
       </label>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+      {folderParseError && (
+        <p style={{ fontSize: 12, color: '#cf222e', marginTop: -4, marginBottom: 12 }}>{folderParseError}</p>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+        {effectiveFolderId && (
+          <a
+            href={driveFolderUrl(effectiveFolderId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 12, color: '#0969da' }}
+          >
+            Open in Drive
+          </a>
+        )}
+        {showResetInbox && (
+          <button type="button" onClick={resetToTeamInbox} style={btnSecondary}>
+            Reset to team inbox
+          </button>
+        )}
         <button type="button" onClick={() => listMutation.mutate()} disabled={listMutation.isPending} style={btnPrimary}>
           {listMutation.isPending ? 'Listing…' : 'List Docs'}
         </button>
@@ -115,7 +271,11 @@ export function DriveTab() {
           type="button"
           onClick={() => {
             if (!canIngestQuick) {
-              if (!window.confirm('No folder ID and nothing selected — the server default scope applies. Continue?'))
+              if (
+                !window.confirm(
+                  'No folder and nothing selected — ingest may scan all of Drive. Continue?',
+                )
+              )
                 return
             }
             ingestMutation.mutate()
@@ -129,7 +289,7 @@ export function DriveTab() {
 
       {!canIngestQuick && (
         <p style={{ fontSize: 12, color: '#57606a', marginBottom: 12 }}>
-          Select files below or paste a folder id to avoid unintended wide imports.
+          Select files below or configure a folder (team inbox or paste a link).
         </p>
       )}
 
@@ -154,23 +314,27 @@ export function DriveTab() {
             borderRadius: 8,
           }}
         >
-          {files.map(f => (
-            <label
-              key={f.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 12px',
-                borderBottom: '1px solid #f0f0f0',
-                fontSize: 13,
-              }}
-            >
-              <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
-              <span style={{ flex: 1 }}>{f.name || f.id}</span>
-              <span style={{ color: '#57606a', fontSize: 11 }}>{f.mimeType ?? ''}</span>
-            </label>
-          ))}
+          {files.map(f => {
+            const isIndexed = f.index_status === 'indexed'
+            return (
+              <label
+                key={f.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 12px',
+                  borderBottom: '1px solid #f0f0f0',
+                  fontSize: 13,
+                  opacity: isIndexed ? 0.75 : 1,
+                }}
+              >
+                <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
+                <span style={{ flex: 1 }}>{f.name || f.id}</span>
+                <IndexStatusBadge file={f} />
+              </label>
+            )
+          })}
         </div>
       )}
     </div>

@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
     build: deployStatic ? { outDir: '../static', emptyOutDir: true } : {},
     server: {
       proxy: {
-        '^/(config|health|ingest(?:/file|/google-drive)?|ask(?:/stream)?|documents|drive|auth)': {
+        '^/(config|health(?:/ready|/deep)?|ingest(?:/file|/google-drive)?|ask(?:/stream)?|documents|drive|auth)': {
           target: proxyTarget,
           changeOrigin: true,
         },

@@ -26,6 +26,7 @@ Copy `.env.example` to `.env` and set:
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_OPENAI_MODEL` | No | Ollama base/model; OpenAI model (default: `gpt-4o-mini`). See `.env.example`. |
 | `LLM_TIMEOUT_SECONDS`, `LLM_RATE_LIMIT_SECONDS`, etc. | No | See `.env.example` and `app/config.py`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_REDIRECT_URI` | No | Only for Google Drive ingest. |
+| `GOOGLE_DRIVE_DEFAULT_FOLDER_ID` | No | Team ingest inbox folder (raw id or full `drive.google.com/.../folders/...` URL). Used when API/UI omit `folder_id`. Exposed to the SPA via **GET /config** as `google_drive_default_folder_id`. |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Required for SPA + auth API | Returned (public fields only) via **GET /config** for the React app; required for login. |
 | `SUPABASE_JWT_SECRET` | Required for protected routes | Server verifies JWT access tokens (`Authorization: Bearer`). Without this, authenticated endpoints return **503**. Keep secret server-side only. |
 | `SUPABASE_SERVICE_ROLE_KEY` | No | Needed for **POST /auth/signup** when using the managed sign-up flow; never expose to the browser. |
@@ -117,9 +118,10 @@ See **[`frontend/.env.example`](frontend/.env.example)** for optional frontend e
 
 ## Verify
 
-1. **Health:** `curl -s http://localhost:8000/health` → `{"healthy": true}` (**no auth**).
-2. **`/config`:** `curl -s http://localhost:8000/config` → public Supabase anon fields for the SPA (**no auth**).
-3. **Protected API** (**`/ingest`**, **`/documents`**, **`/ask`**): require **`Authorization: Bearer <Supabase JWT>`** once auth is configured. Use the SPA, or acquire a token and pass the header — see **`setup_and_testing.md`** curl examples (**adjust for auth**).
+1. **Health (liveness):** `curl -s http://localhost:8000/health` → `{"healthy": true}` (**no auth**).
+2. **Readiness:** `curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health/ready` → `200` when Postgres is reachable, `503` when not. Use **`/health/ready`** as the Render/load-balancer health check path.
+3. **`/config`:** `curl -s http://localhost:8000/config` → public Supabase anon fields for the SPA (**no auth**).
+4. **Protected API** (**`/ingest`**, **`/documents`**, **`/ask`**): require **`Authorization: Bearer <Supabase JWT>`** once auth is configured. Use the SPA, or acquire a token and pass the header — see **`setup_and_testing.md`** curl examples (**adjust for auth**).
 
 You can also upload a PDF via the SPA (**Documents** tab) or **POST /ingest/file** (multipart: `file`, optional `doc_id`, `title`, `source`, `chunk_size`, `chunk_overlap`).
 
@@ -148,9 +150,20 @@ To ingest Google Docs from Drive:
 1. Create OAuth credentials in Google Cloud Console (Web application, redirect URI `http://localhost:8000/auth/google/callback`).
 2. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
 3. Open `http://localhost:8000/auth/google` in a browser, complete OAuth, and add the shown `GOOGLE_REFRESH_TOKEN` to `.env`.
-4. Call `POST /ingest/google-drive` with optional `folder_id` or `file_ids`.
+4. Set **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** to your team inbox folder (folder id or full Drive URL). On **Render**, add the same variable in the service **Environment** tab. The **Google Drive** tab pre-fills this inbox and lists docs on open.
+5. Ensure the **Google account used for OAuth** can access that folder (share the folder with that account if someone else owns it).
+6. **List** with **`GET /drive/files`** (defaults to inbox when `folder_id` is omitted) or use the **Google Drive** tab — each file includes **`index_status`** and summary counts.
+7. Call **`POST /ingest/google-drive`** for selected or unindexed docs.
 
 Full steps: [setup_and_testing.md](setup_and_testing.md#google-drive-ingest-read-only).
+
+---
+
+## Document library and reindex
+
+- **Shared corpus:** Authenticated users share one document index (see **Documents** tab and **`GET /documents`**).
+- **Stored text:** Ingest saves **`full_text`** plus metadata (`source_filename`, `source_url`, `chunking_config`, `embedding_model`) for re-processing without re-upload.
+- **Reindex:** **`POST /documents/{doc_id}/reindex`** re-chunks and re-embeds from stored `full_text` (optional `chunking_options` body). Use when chunk size, strategy, or embedding model changes — not when Drive file content changed (see stale note in setup_and_testing Drive section).
 
 ---
 

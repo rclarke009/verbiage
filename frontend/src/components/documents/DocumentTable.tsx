@@ -22,7 +22,7 @@ export function DocumentTable({ documents, onDelete, deleting }: Props) {
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ background: '#f6f8fa', textAlign: 'left' }}>
-          {['Title / ID', 'Source', 'Chunks', 'Updated', ''].map(h => (
+          {['Title / ID', 'Source', 'Chunks', 'Embed model', 'Updated', ''].map(h => (
             <th
               key={h}
               style={{ padding: '8px 10px', borderBottom: '1px solid #d0d7de', fontWeight: 600 }}
@@ -51,9 +51,15 @@ export function DocumentTable({ documents, onDelete, deleting }: Props) {
                   </a>
                 )}
                 <div style={{ fontSize: 11, color: '#57606a' }}>{doc.doc_id}</div>
+                {doc.source_filename && doc.source_filename !== label && (
+                  <div style={{ fontSize: 11, color: '#57606a' }}>{doc.source_filename}</div>
+                )}
               </td>
               <td style={{ padding: '8px 10px', color: '#555' }}>{sourceLabel(doc)}</td>
               <td style={{ padding: '8px 10px' }}>{doc.num_chunks}</td>
+              <td style={{ padding: '8px 10px', color: '#57606a', fontSize: 11 }}>
+                {doc.embedding_model || '—'}
+              </td>
               <td style={{ padding: '8px 10px', color: '#57606a', fontSize: 11 }}>
                 {typeof ts === 'number' ? new Date(ts * 1000).toLocaleDateString() : '—'}
               </td>
