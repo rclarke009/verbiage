@@ -25,7 +25,7 @@ from psycopg2 import pool as psycopg2_pool
 from app.db import (
     create_db,
     delete_by_doc_id,
-    delete_document_for_user,
+    delete_document,
     doc_exist,
     email_in_signup_allowlist,
     get_valid_conn,
@@ -261,7 +261,6 @@ async def ingest_text(
     source: str | None,
     text: str,
     chunking_options: ChunkingOptions,
-    user_id: str | None = None,
     source_modified_at: int | None = None,
     source_url: str | None = None,
 ) -> IngestResponse:
@@ -280,7 +279,6 @@ async def ingest_text(
         int(time.time()),
         title,
         source,
-        user_id=user_id,
         source_modified_at=source_modified_at,
         source_url=source_url,
     )
@@ -432,8 +430,6 @@ async def ingest(
                 ingest_request.source,
                 ingest_request.text,
                 ingest_request.chunking_options,
-                user_id=user_id,
-                source_modified_at=None,
                 source_url=ingest_request.source_url,
             )
         except ValueError as e:
@@ -518,7 +514,6 @@ async def ingest_file(
                 resolved_source,
                 text,
                 opts,
-                user_id=user_id,
                 source_modified_at=resolved_source_modified_at,
                 source_url=resolved_source_url,
             )
@@ -601,7 +596,6 @@ async def ingest_google_drive(
                     doc.source,
                     doc.text,
                     default_opts,
-                    user_id=user_id,
                     source_modified_at=doc.source_modified_at,
                     source_url=gdoc_url,
                 )
@@ -694,7 +688,7 @@ async def ask(
 
         t_retrieve = time.perf_counter()
         top_chunks = retrieve_top_k(
-            conn, query_vec, ask_request.top_k, ask_request.doc_id, user_id=user_id
+            conn, query_vec, ask_request.top_k, ask_request.doc_id
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
         record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
@@ -741,7 +735,6 @@ async def ask_stream(
             query_vec,
             ask_request.top_k,
             ask_request.doc_id,
-            user_id=user_id,
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
         record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
@@ -791,7 +784,7 @@ def get_documents(
     user_id: str = Depends(get_current_user),
 ):
     def do_list(conn):
-        rows = list_documents(conn, user_id=user_id)
+        rows = list_documents(conn)
         return DocumentsListResponse(
             documents=[
                 DocumentSummary(
@@ -818,7 +811,7 @@ def delete_document(
     user_id: str = Depends(get_current_user),
 ):
     def do_delete(conn):
-        if not delete_document_for_user(conn, doc_id, user_id):
+        if not delete_document(conn, doc_id):
             raise HTTPException(status_code=404, detail="Document not found")
         return {"ok": True}
 
@@ -833,7 +826,7 @@ def get_similar_titles(
     min_ratio: float = 0.82,
     user_id: str = Depends(get_current_user),
 ):
-    """Advisory fuzzy match of proposed name against this user's document titles."""
+    """Advisory fuzzy match of proposed name against all document titles in the shared library."""
     if not proposed.strip():
         return SimilarTitlesResponse(matches=[])
     if limit < 1 or limit > 20:
@@ -842,7 +835,7 @@ def get_similar_titles(
         raise HTTPException(status_code=400, detail="min_ratio must be between 0.5 and 1.0")
 
     def do_similar(conn):
-        pairs = list_doc_title_pairs(conn, user_id)
+        pairs = list_doc_title_pairs(conn)
         raw = find_similar_titles(
             proposed,
             pairs,

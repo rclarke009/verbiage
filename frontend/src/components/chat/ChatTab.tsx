@@ -15,7 +15,7 @@ export function ChatTab() {
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
       {messages.length === 0 && (
         <div style={{ color: '#888', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
-          <p>Ask anything about your ingested engineering reports.</p>
+          <p>Ask anything about ingested engineering reports.</p>
           <p style={{ fontSize: 12 }}>Answers are grounded in retrieved document passages.</p>
         </div>
       )}

@@ -108,7 +108,7 @@ def create_db(conn: PgConnection) -> None:
             CREATE INDEX IF NOT EXISTS idx_embeddings_embedding_hnsw
             ON embeddings USING hnsw (embedding vector_cosine_ops);
         """)
-        # Add user_id for Supabase Auth (per-user documents); idempotent for existing DBs
+        # Legacy user_id column (shared library; queries ignore it); idempotent for existing DBs
         cur.execute("""
             DO $$
             BEGIN
@@ -265,9 +265,8 @@ def retrieve_top_k_pg(
     query_vec: list[float],
     top_k: int,
     doc_id: str | None = None,
-    user_id: str | None = None,
 ) -> list[tuple[str, str, float, str, str | None, str | None, str | None]]:
-    """Postgres similarity search. Returns (chunk_id, doc_id, score, content, title, source, source_url). Uses <=> (cosine distance). If user_id is set, only that user's documents are considered."""
+    """Postgres similarity search over the shared document library. Returns (chunk_id, doc_id, score, content, title, source, source_url). Uses <=> (cosine distance)."""
     _ensure_pgvector(conn)
     sql = """
         SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content,
@@ -278,9 +277,6 @@ def retrieve_top_k_pg(
     """
     conditions: list[str] = []
     params: list[Any] = [query_vec]
-    if user_id is not None:
-        conditions.append("d.user_id = %s")
-        params.append(user_id)
     if doc_id is not None:
         conditions.append("c.doc_id = %s")
         params.append(doc_id)
@@ -310,41 +306,21 @@ def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
         cur.close()
 
 
-def delete_document_for_user(conn: PgConnection, doc_id: str, user_id: str) -> bool:
-    """
-    Delete a document only if owned by user_id (documents.user_id). Returns True if a row was removed.
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "SELECT 1 FROM documents WHERE doc_id = %s AND user_id = %s",
-            (doc_id, user_id),
-        )
-        if not cur.fetchone():
-            return False
-        cur.execute(
-            "DELETE FROM embeddings WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE doc_id = %s)",
-            (doc_id,),
-        )
-        cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
-        cur.execute(
-            "DELETE FROM documents WHERE doc_id = %s AND user_id = %s",
-            (doc_id, user_id),
-        )
-        conn.commit()
-        return True
-    finally:
-        cur.close()
+def delete_document(conn: PgConnection, doc_id: str) -> bool:
+    """Delete a document from the shared library by doc_id. Returns True if a row was removed."""
+    if not doc_exist(conn, doc_id):
+        return False
+    delete_by_doc_id(conn, doc_id)
+    return True
 
 
 def list_documents(
     conn: PgConnection,
     snippet_max_len: int = 250,
-    user_id: str | None = None,
 ) -> list[tuple[str, str | None, str | None, int, int, str | None, int | None, str | None]]:
     """
     Returns list of (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at, source_url).
-    Ordered by created_at desc. If user_id is set, only that user's documents are returned.
+    Ordered by created_at desc (shared library — all documents).
     """
     sql = """
         SELECT
@@ -357,15 +333,11 @@ def list_documents(
             d.source_modified_at,
             d.source_url
         FROM documents d
+        ORDER BY d.created_at DESC
     """
-    params: list[Any] = []
-    if user_id is not None:
-        sql += " WHERE d.user_id = %s"
-        params.append(user_id)
-    sql += " ORDER BY d.created_at DESC"
     cur = conn.cursor()
     try:
-        cur.execute(sql, params)
+        cur.execute(sql)
         rows = cur.fetchall()
         result = []
         for (
@@ -414,17 +386,11 @@ def get_document_source_fields(
         cur.close()
 
 
-def list_doc_title_pairs(
-    conn: PgConnection,
-    user_id: str,
-) -> list[tuple[str, str | None]]:
-    """(doc_id, title) for the user; used for fuzzy title matching."""
+def list_doc_title_pairs(conn: PgConnection) -> list[tuple[str, str | None]]:
+    """(doc_id, title) for all documents; used for fuzzy title matching."""
     cur = conn.cursor()
     try:
-        cur.execute(
-            "SELECT doc_id, title FROM documents WHERE user_id = %s",
-            (user_id,),
-        )
+        cur.execute("SELECT doc_id, title FROM documents")
         return [(r[0], r[1]) for r in cur.fetchall()]
     finally:
         cur.close()
