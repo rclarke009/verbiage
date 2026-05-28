@@ -151,7 +151,7 @@ To ingest Google Docs, PDFs, and Word (.docx) from Drive:
 1. Create OAuth credentials in Google Cloud Console (Web application, redirect URI `http://localhost:8000/auth/google/callback`).
 2. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
 3. Open `http://localhost:8000/auth/google` in a browser, complete OAuth, and add the shown `GOOGLE_REFRESH_TOKEN` to `.env`.
-4. Set **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** to your team inbox folder (folder id or full Drive URL). Optionally set **`GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL`** to a friendly path shown in the Drive tab. On **Render**, add the same variables in the service **Environment** tab. The **Google Drive** tab pre-fills this inbox, shows the active folder path, and lists files on open.
+4. Set **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** to your team inbox folder (folder id or full Drive URL). Optionally set **`GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL`** to a friendly path shown in the Drive tab. On **Render**, add the same variables in the service **Environment** tab. The **Google Drive** tab pre-fills this inbox, shows the active folder path, and lists files on open. OAuth and env setup steps are tucked under **Connection or setup problems?** so everyday users see only the default-folder guidance.
 5. Ensure the **Google account used for OAuth** can access that folder (share the folder with that account if someone else owns it).
 6. **List** with **`GET /drive/files`** (defaults to inbox when `folder_id` is omitted) or use the **Google Drive** tab — each file includes **`index_status`** and summary counts.
 7. Call **`POST /ingest/google-drive`** for selected or unindexed docs.
