@@ -14,9 +14,18 @@ import type { DriveFileListSummary, DriveFileMeta, IngestBatchStatusResponse } f
 
 import type { CSSProperties } from 'react'
 
+function driveFileTypeLabel(mimeType?: string | null): string {
+  if (!mimeType) return ''
+  if (mimeType === 'application/vnd.google-apps.document') return 'GDoc'
+  if (mimeType === 'application/pdf') return 'PDF'
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    return 'DOCX'
+  return ''
+}
+
 function formatListSummary(summary: DriveFileListSummary): string {
   return (
-    `Found ${summary.total} Google Doc(s) — ` +
+    `Found ${summary.total} ingestable file(s) — ` +
     `${summary.indexed} indexed, ${summary.not_indexed} not indexed, ${summary.stale} stale.`
   )
 }
@@ -98,7 +107,7 @@ export function DriveTab() {
       setFiles(fileList)
       setSelected(defaultSelection(fileList))
       setErr('')
-      setMsg(data.summary ? formatListSummary(data.summary) : `Found ${fileList.length} Google Doc(s).`)
+      setMsg(data.summary ? formatListSummary(data.summary) : `Found ${fileList.length} ingestable file(s).`)
     },
     onError: (e: Error) => {
       setFiles([])
@@ -144,7 +153,7 @@ export function DriveTab() {
           setMsg(
             data.summary
               ? `${ingestMsg} ${formatListSummary(data.summary)}`
-              : `${ingestMsg} Found ${data.files?.length ?? 0} Google Doc(s).`,
+              : `${ingestMsg} Found ${data.files?.length ?? 0} ingestable file(s).`,
           )
         },
         onError: () => {
@@ -226,7 +235,8 @@ export function DriveTab() {
           /auth/google
         </a>{' '}
         in your browser while the API origin matches <code>GOOGLE_REDIRECT_URI</code>; copy the shown
-        value into your environment.
+        value into your environment. Supported file types: Google Docs, PDF, and Word (.docx). Max
+        download size 50 MB per file.
         {teamInboxId ? (
           <>
             {' '}
@@ -286,7 +296,7 @@ export function DriveTab() {
           </button>
         )}
         <button type="button" onClick={() => listMutation.mutate()} disabled={listMutation.isPending} style={btnPrimary}>
-          {listMutation.isPending ? 'Listing…' : 'List Docs'}
+          {listMutation.isPending ? 'Listing…' : 'List files'}
         </button>
         <button
           type="button"
@@ -355,7 +365,21 @@ export function DriveTab() {
                 }}
               >
                 <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
-                <span style={{ flex: 1 }}>{f.name || f.id}</span>
+                <span style={{ flex: 1 }}>
+                  {f.name || f.id}
+                  {driveFileTypeLabel(f.mimeType) ? (
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 11,
+                        color: '#57606a',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {driveFileTypeLabel(f.mimeType)}
+                    </span>
+                  ) : null}
+                </span>
                 <IndexStatusBadge file={f} />
               </label>
             )

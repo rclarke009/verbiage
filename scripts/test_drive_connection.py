@@ -27,8 +27,14 @@ def main() -> int:
     import argparse
     from app.drive_client import test_connection, list_docs_metadata, DriveClientError
 
-    parser = argparse.ArgumentParser(description="Test Google Drive connection and optionally list Google Docs")
-    parser.add_argument("--folder-id", default=None, help="If set, list Google Docs in this folder")
+    parser = argparse.ArgumentParser(
+        description="Test Google Drive connection and optionally list ingestable files"
+    )
+    parser.add_argument(
+        "--folder-id",
+        default=None,
+        help="If set, list Google Docs, PDFs, and DOCX in this folder",
+    )
     args = parser.parse_args()
 
     try:
@@ -42,11 +48,17 @@ def main() -> int:
         try:
             files = list_docs_metadata(folder_id=args.folder_id)
             if not files:
-                print("MYDEBUG → No Google Docs in this folder.")
+                print("MYDEBUG → No ingestable files in this folder.")
             else:
                 for f in files:
                     modified = (f.get("modifiedTime") or "")[:10]
-                    print("MYDEBUG →", f.get("id", ""), f.get("name", ""), modified)
+                    print(
+                        "MYDEBUG →",
+                        f.get("id", ""),
+                        f.get("name", ""),
+                        f.get("mimeType", ""),
+                        modified,
+                    )
         except DriveClientError as e:
             print("MYDEBUG → List failed:", e, file=sys.stderr)
             return 1

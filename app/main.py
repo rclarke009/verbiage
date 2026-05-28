@@ -585,7 +585,7 @@ async def drive_files(
     user_id: str = Depends(get_current_user),
 ):
     """
-    List Google Docs metadata (no export). Optional folder_id or comma-separated file_ids.
+    List ingestable Drive files (Google Docs, PDF, DOCX). Optional folder_id or file_ids.
     Requires authenticated user.
     """
     ids_list: list[str] | None = None
@@ -617,7 +617,7 @@ async def ingest_google_drive(
     user_id: str = Depends(get_current_user),
 ):
     """
-    Enqueue Google Docs from Drive for background ingest (read-only metadata list only).
+    Enqueue ingestable Drive files for background ingest (metadata list only).
     Poll GET /ingest/batches/{batch_id} for progress. Stale docs are re-indexed in the worker.
     """
     try:
@@ -629,7 +629,7 @@ async def ingest_google_drive(
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     if not raw:
-        raise HTTPException(status_code=400, detail="No Google Docs found to ingest")
+        raise HTTPException(status_code=400, detail="No ingestable files found in Drive")
 
     jobs_to_insert: list[tuple[str, str, dict]] = []
     for f in raw:

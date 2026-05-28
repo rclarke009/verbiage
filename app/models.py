@@ -127,7 +127,7 @@ class IngestGoogleDriveResponse(BaseModel):
 
 
 class DriveFileMeta(BaseModel):
-    """Metadata for a Google Doc (list only, no content)."""
+    """Metadata for an ingestable Drive file (list only, no content)."""
 
     id: str = Field(..., description="Drive file id")
     name: str | None = Field(default=None, description="File name")
@@ -143,7 +143,7 @@ class DriveFileMeta(BaseModel):
 class DriveFileListSummary(BaseModel):
     """Counts by index status for a Drive file listing."""
 
-    total: int = Field(..., description="Total Google Docs in listing")
+    total: int = Field(..., description="Total ingestable Drive files in listing")
     indexed: int = Field(..., description="Already indexed and up to date")
     not_indexed: int = Field(..., description="Not yet in the index")
     stale: int = Field(..., description="Indexed but Drive doc changed since last ingest")
@@ -152,7 +152,7 @@ class DriveFileListSummary(BaseModel):
 class DriveFileListResponse(BaseModel):
     """Response from listing Drive files (metadata only)."""
 
-    files: list[DriveFileMeta] = Field(..., description="List of Google Docs metadata")
+    files: list[DriveFileMeta] = Field(..., description="List of ingestable Drive file metadata")
     summary: DriveFileListSummary = Field(..., description="Index status counts")
 
 

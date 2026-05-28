@@ -16,7 +16,12 @@ from app.db import (
     get_valid_conn,
     refresh_batch_counts,
 )
-from app.drive_client import DriveClientError, compute_index_status, export_drive_doc
+from app.drive_client import (
+    DriveClientError,
+    compute_index_status,
+    drive_source_url_for_mime,
+    fetch_drive_file,
+)
 from app.ingest_core import ingest_new_document, reingest_existing_document
 from app.models import ChunkingOptions, IngestResponse
 
@@ -39,11 +44,11 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
     drive_file_id = payload.get("drive_file_id") or doc_id
 
     try:
-        doc = export_drive_doc(drive_file_id)
+        doc = fetch_drive_file(drive_file_id)
     except DriveClientError as e:
         return "failed", None, str(e)
 
-    gdoc_url = f"https://docs.google.com/document/d/{doc.doc_id}/edit"
+    source_url = drive_source_url_for_mime(doc.doc_id, doc.mime_type)
     drive_modified = doc.source_modified_at
 
     conn = get_valid_conn(pool)
@@ -62,7 +67,7 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
                 doc.text,
                 DEFAULT_CHUNKING,
                 source_modified_at=doc.source_modified_at,
-                source_url=gdoc_url,
+                source_url=source_url,
                 source_filename=doc.title,
             )
         else:
@@ -74,7 +79,7 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
                 doc.text,
                 DEFAULT_CHUNKING,
                 source_modified_at=doc.source_modified_at,
-                source_url=gdoc_url,
+                source_url=source_url,
                 source_filename=doc.title,
             )
         conn.commit()
