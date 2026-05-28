@@ -8,7 +8,7 @@ Originally built to generate suggested verbiage from prior case documentation. *
 
 ## What it does
 
-- **Ingest** — PDF upload, pasted text, or Google Docs (read-only Drive export)
+- **Ingest** — PDF upload, pasted text, or Drive files (Google Docs, PDF, .docx via read-only Drive)
 - **Index** — Paragraph-first chunking; canonical `full_text` stored for reindex without re-upload
 - **Ask** — Semantic retrieval + LLM answers with cited sources and report links
 - **Manage** — Shared document library (all signed-in users); list, filter, delete
@@ -54,7 +54,7 @@ After sign-in:
 |-----|---------|
 | **Ask** | Chat over the shared library with source citations |
 | **Documents** | Index table, PDF upload, search, delete |
-| **Google Drive** | Team inbox (env default); status badges; paste another folder to override; ingest selected docs |
+| **Google Drive** | Team inbox (env default); list Docs/PDF/DOCX; status badges; ingest selected files |
 
 ---
 
@@ -69,7 +69,7 @@ Interactive docs: **http://localhost:8000/docs** when the server is running.
 | `GET /documents` | Shared library listing |
 | `POST /documents/{doc_id}/reindex` | Re-chunk/re-embed from stored `full_text` |
 | `GET /drive/files` | Drive folder list + `index_status` / `summary` |
-| `POST /ingest/google-drive` | Export and ingest Google Docs |
+| `POST /ingest/google-drive` | Fetch and ingest Drive files (GDoc, PDF, DOCX) |
 | `POST /ask`, `POST /ask/stream` | RAG Q&A |
 
 Most routes require `Authorization: Bearer <Supabase access token>`.

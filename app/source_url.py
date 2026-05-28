@@ -1,4 +1,6 @@
-"""Resolve stored or derived URL for a document (e.g. Google Doc open link from doc_id)."""
+"""Resolve stored or derived URL for a document (e.g. Google Drive open link from doc_id)."""
+
+from app.drive_client import drive_file_view_url
 
 
 def resolved_source_url(
@@ -8,11 +10,11 @@ def resolved_source_url(
 ) -> str | None:
     """
     Return the effective report URL. Stored value wins; for legacy Google Drive
-    documents without a stored URL, derive the standard Google Docs open link.
+    documents without a stored URL, derive the Drive file view link.
     """
     s = (stored or "").strip()
     if s:
         return s
     if (source or "").strip() == "google_drive" and doc_id:
-        return f"https://docs.google.com/document/d/{doc_id}/edit"
+        return drive_file_view_url(doc_id)
     return None

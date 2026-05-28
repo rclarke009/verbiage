@@ -92,7 +92,7 @@ Sign in, then use the header tabs:
 
 - **Ask** — Chat-style Q&A over the shared library. Answers include cited source chunks with links to the original report when `source_url` is known (e.g. Google Docs).
 - **Documents** — Full index of ingested reports: title, source, chunk count, embedding model, link to original, filter search, PDF upload dropzone, and delete. Calls **`GET /documents`**.
-- **Google Drive** — List Google Docs in a folder (optional folder ID), see **index status** per file (Indexed / Not indexed / Stale), auto-select files that need ingest, then run **Ingest**. Uses **`GET /drive/files`** and **`POST /ingest/google-drive`**.
+- **Google Drive** — List ingestable files in a folder (Google Docs, PDF, Word `.docx`; optional folder ID), see **index status** per file (Indexed / Not indexed / Stale), auto-select files that need ingest, then run **Ingest**. Max **50 MB** per file download. Uses **`GET /drive/files`** and **`POST /ingest/google-drive`**.
 
 Optional **Photo analysis (preview)** tab appears when **`VITE_FEATURE_VISION=true`** in the frontend env.
 
@@ -102,7 +102,7 @@ Optional **Photo analysis (preview)** tab appears when **`VITE_FEATURE_VISION=tr
 2. Sign in with Supabase.
 3. **Documents** — upload a PDF or note an existing row in the table.
 4. **Ask** — ask a question related to that content; expand source citations.
-5. **Google Drive** (if OAuth is configured) — paste a folder ID, **List Docs**, confirm status badges, **Ingest** selected rows, re-list to refresh counts.
+5. **Google Drive** (if OAuth is configured) — paste a folder ID, **List files**, confirm status badges, **Ingest** selected rows, re-list to refresh counts.
 
 ---
 
@@ -202,7 +202,7 @@ curl -s -X POST "http://localhost:8000/ask" \
 
 ## Google Drive ingest (read-only)
 
-You can ingest **Google Docs** from Drive by authorizing once with OAuth, then calling **POST /ingest/google-drive**. The app only requests read-only access (`drive.readonly`).
+You can ingest **Google Docs, PDFs, and Word (.docx)** from Drive by authorizing once with OAuth, then calling **POST /ingest/google-drive**. The app only requests read-only access (`drive.readonly`). Each file download is capped at **50 MB**. Image-only PDFs fail extraction (same as PDF upload).
 
 ### 1. Google Cloud project and OAuth client
 
@@ -262,9 +262,9 @@ To find a folder id: open the folder in [Google Drive](https://drive.google.com)
 
 ### 3. List Drive folder with index status
 
-**GET /drive/files** lists Google Docs metadata (no export). Query params (optional):
+**GET /drive/files** lists ingestable file metadata (Google Docs, PDF, DOCX; no download). Query params (optional):
 
-- **`folder_id`** — only Docs in this Drive folder.
+- **`folder_id`** — only files in this Drive folder.
 - **`file_ids`** — comma-separated file IDs (if set, `folder_id` is ignored).
 
 Each file includes **`index_status`**: `not_indexed`, `indexed`, or `stale`. **Stale** means the doc is in the index but Drive **`modifiedTime`** is newer than **`source_modified_at`** from the last ingest (content may have changed). The response also includes **`summary`** counts (`total`, `indexed`, `not_indexed`, `stale`) and **`num_chunks`** when the file is indexed or stale.
@@ -297,14 +297,14 @@ Example response shape (abbreviated):
 
 ### 4. Ingest from Drive
 
-**POST /ingest/google-drive** lists and exports Google Docs, then ingests them (chunk + embed + store). Request body (all optional):
+**POST /ingest/google-drive** enqueues background jobs to fetch and ingest ingestable Drive files (chunk + embed + store). Request body (all optional):
 
 - **folder_id** — only list files in this Drive folder.
-- **file_ids** — only these file IDs (Google Doc IDs). If set, `folder_id` is ignored.
+- **file_ids** — only these file IDs. If set, `folder_id` is ignored.
 
-If both are omitted, the app lists Google Docs from the root of the authenticated user’s Drive.
+If both are omitted, the app uses **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`** when set, otherwise lists from the root of the authenticated user’s Drive.
 
-Example (ingest all Docs in a folder):
+Example (ingest all ingestable files in a folder):
 
 ```bash
 curl -s -X POST "http://localhost:8000/ingest/google-drive" \
@@ -358,7 +358,7 @@ The app uses **one** Google account for Drive: credentials live on the server (`
 
 ### Async Google Drive ingest
 
-`POST /ingest/google-drive` returns **202 Accepted** with `{ "batch_id", "total", "job_ids" }` and enqueues one background job per Google Doc. Poll progress:
+`POST /ingest/google-drive` returns **202 Accepted** with `{ "batch_id", "total", "job_ids" }` and enqueues one background job per ingestable file. Poll progress:
 
 ```bash
 curl -s "$API/ingest/batches/<batch_id>" -H "Authorization: Bearer $TOKEN"

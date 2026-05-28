@@ -1,6 +1,6 @@
 """
 Google Drive read-only client for ingestion.
-Uses OAuth2 with drive.readonly scope. Lists and exports Google Docs as plain text.
+Uses OAuth2 with drive.readonly scope. Lists and fetches Google Docs, PDFs, and DOCX.
 """
 
 import logging
@@ -20,16 +20,55 @@ from app.config import (
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
     GOOGLE_REFRESH_TOKEN,
 )
+from app.docx_extract import extract_text_from_docx
+from app.pdf_extract import extract_text_from_pdf
 
 logger = logging.getLogger(__name__)
 
-# v1: only Google Docs (export as text/plain)
 GOOGLE_DOCS_MIME = "application/vnd.google-apps.document"
+PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 EXPORT_MIME_PLAIN = "text/plain"
+
+DRIVE_INGEST_MIMES: tuple[str, ...] = (
+    GOOGLE_DOCS_MIME,
+    PDF_MIME,
+    DOCX_MIME,
+)
+
+MAX_DRIVE_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 _DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")
 _DRIVE_RAW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _DRIVE_DOC_IN_URL_RE = re.compile(r"/document/d/|/file/d/")
+
+
+def is_drive_ingestable_mime(mime_type: str | None) -> bool:
+    """True when Drive file MIME is supported for list/ingest."""
+    return (mime_type or "").strip() in DRIVE_INGEST_MIMES
+
+
+def drive_mime_query_clause() -> str:
+    """Drive API q fragment: (mimeType = '…' or …)."""
+    parts = [f"mimeType = '{m}'" for m in DRIVE_INGEST_MIMES]
+    return "(" + " or ".join(parts) + ")"
+
+
+def drive_file_view_url(file_id: str) -> str:
+    """Open link for PDF, DOCX, and other binary Drive files."""
+    return f"https://drive.google.com/file/d/{file_id}/view"
+
+
+def drive_google_doc_url(file_id: str) -> str:
+    """Open link for native Google Docs."""
+    return f"https://docs.google.com/document/d/{file_id}/edit"
+
+
+def drive_source_url_for_mime(file_id: str, mime_type: str | None) -> str:
+    """Preferred report URL for a Drive file by MIME type."""
+    if mime_type == GOOGLE_DOCS_MIME:
+        return drive_google_doc_url(file_id)
+    return drive_file_view_url(file_id)
 
 
 def parse_drive_folder_id(value: str | None) -> str | None:
@@ -102,6 +141,7 @@ class DriveDoc:
     text: str
     source: str = "google_drive"
     source_modified_at: int | None = None
+    mime_type: str | None = None
 
 
 class DriveClientError(Exception):
@@ -153,8 +193,8 @@ def list_docs_metadata(
     file_ids: list[str] | None = None,
 ) -> list[dict]:
     """
-    List Google Docs metadata (no export). Returns list of dicts with id, name,
-    mimeType, and optionally modifiedTime. Same filtering as list_and_export_docs.
+    List ingestable Drive file metadata (no download). Google Docs, PDF, and DOCX.
+    Returns list of dicts with id, name, mimeType, and optionally modifiedTime.
     """
     creds = _get_credentials()
     service = build("drive", "v3", credentials=creds)
@@ -169,11 +209,11 @@ def list_docs_metadata(
                     .get(fileId=fid, fields=fields)
                     .execute()
                 )
-                if meta.get("mimeType") == GOOGLE_DOCS_MIME:
+                if is_drive_ingestable_mime(meta.get("mimeType")):
                     result.append(meta)
                 else:
                     logger.warning(
-                        "Skipping non-Doc file %s (mimeType=%s)",
+                        "Skipping unsupported file %s (mimeType=%s)",
                         fid,
                         meta.get("mimeType"),
                     )
@@ -181,7 +221,7 @@ def list_docs_metadata(
                 logger.warning("Could not get file %s: %s", fid, e)
         return result
 
-    q_parts = [f"mimeType = '{GOOGLE_DOCS_MIME}'"]
+    q_parts = [drive_mime_query_clause()]
     if folder_id:
         q_parts.append(f"'{folder_id}' in parents")
     q = " and ".join(q_parts)
@@ -207,100 +247,56 @@ def list_docs_metadata(
     return result
 
 
-def list_and_export_docs(
-    folder_id: str | None = None,
-    file_ids: list[str] | None = None,
-) -> list[DriveDoc]:
-    """
-    List Drive files (optionally in folder_id or only file_ids) and export
-    Google Docs to plain text. Returns list of DriveDoc for ingest.
+def _extract_text_from_bytes(mime_type: str, data: bytes, name: str) -> str:
+    """Run MIME-appropriate text extraction on downloaded bytes."""
+    try:
+        if mime_type == PDF_MIME:
+            return extract_text_from_pdf(data)
+        if mime_type == DOCX_MIME:
+            return extract_text_from_docx(data)
+    except ValueError as e:
+        raise DriveClientError(f"Could not extract text from {name}: {e}") from e
+    raise DriveClientError(f"Unsupported mimeType for extraction: {mime_type}")
 
-    - If file_ids is provided, only those files are considered (folder_id ignored).
-    - If folder_id is provided and file_ids is None, list files in that folder.
-    - If both None, list from root (q not restricted by parent).
-    """
-    creds = _get_credentials()
-    service = build("drive", "v3", credentials=creds)
 
-    if file_ids:
-        files_to_export = []
-        for fid in file_ids:
-            try:
-                meta = (
-                    service.files()
-                    .get(fileId=fid, fields="id,name,mimeType,modifiedTime")
-                    .execute()
-                )
-                if meta.get("mimeType") == GOOGLE_DOCS_MIME:
-                    files_to_export.append(
-                        (
-                            meta["id"],
-                            meta.get("name", fid),
-                            _drive_modified_to_unix(meta.get("modifiedTime")),
-                        )
-                    )
-                else:
-                    logger.warning("Skipping non-Doc file %s (mimeType=%s)", fid, meta.get("mimeType"))
-            except Exception as e:
-                logger.warning("Could not get file %s: %s", fid, e)
-    else:
-        # Build query: only Google Docs; optionally in folder
-        q_parts = [f"mimeType = '{GOOGLE_DOCS_MIME}'"]
-        if folder_id:
-            q_parts.append(f"'{folder_id}' in parents")
-        q = " and ".join(q_parts)
+def _fetch_google_doc_text(service, file_id: str, name: str) -> str:
+    try:
+        content = service.files().export_media(
+            fileId=file_id, mimeType=EXPORT_MIME_PLAIN
+        ).execute()
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        text = text.strip()
+        if not text:
+            raise DriveClientError(f"Empty export for {file_id} ({name})")
+        return text
+    except DriveClientError:
+        raise
+    except Exception as e:
+        raise DriveClientError(f"Export failed for {name}: {e}") from e
 
-        files_to_export = []
-        page_token = None
-        while True:
-            resp = (
-                service.files()
-                .list(
-                    q=q,
-                    pageSize=100,
-                    fields="nextPageToken, files(id, name, modifiedTime)",
-                    pageToken=page_token,
-                )
-                .execute()
+
+def _download_drive_bytes(service, file_id: str, name: str) -> bytes:
+    try:
+        content = service.files().get_media(fileId=file_id).execute()
+        if not isinstance(content, bytes):
+            content = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        if len(content) > MAX_DRIVE_DOWNLOAD_BYTES:
+            raise DriveClientError(
+                f"File {name} exceeds max download size "
+                f"({MAX_DRIVE_DOWNLOAD_BYTES // (1024 * 1024)} MB)"
             )
-            for f in resp.get("files", []):
-                files_to_export.append(
-                    (
-                        f["id"],
-                        f.get("name", f["id"]),
-                        _drive_modified_to_unix(f.get("modifiedTime")),
-                    )
-                )
-            page_token = resp.get("nextPageToken")
-            if not page_token:
-                break
+        return content
+    except DriveClientError:
+        raise
+    except Exception as e:
+        raise DriveClientError(f"Download failed for {name}: {e}") from e
 
-    result: list[DriveDoc] = []
-    for file_id, name, modified_unix in files_to_export:
-        try:
-            content = service.files().export_media(fileId=file_id, mimeType=EXPORT_MIME_PLAIN).execute()
-            text = content.decode("utf-8") if isinstance(content, bytes) else content
-            text = text.strip()
-            if not text:
-                logger.warning("Empty export for %s (%s); skipping", file_id, name)
-                continue
-            result.append(
-                DriveDoc(
-                    doc_id=file_id,
-                    title=name or file_id,
-                    text=text,
-                    source="google_drive",
-                    source_modified_at=modified_unix,
-                )
-            )
-        except Exception as e:
-            logger.warning("Export failed for %s (%s): %s", file_id, name, e)
-            raise DriveClientError(f"Export failed for {name}: {e}") from e
 
-    return result
-
-def export_drive_doc(file_id: str) -> DriveDoc:
-    """Export a single Google Doc to plain text (used by async ingest worker)."""
+def fetch_drive_file(file_id: str) -> DriveDoc:
+    """
+    Fetch a single ingestable Drive file and return text for ingest.
+    Used by the async ingest worker.
+    """
     creds = _get_credentials()
     service = build("drive", "v3", credentials=creds)
     try:
@@ -312,30 +308,53 @@ def export_drive_doc(file_id: str) -> DriveDoc:
     except Exception as e:
         raise DriveClientError(f"Could not get file {file_id}: {e}") from e
 
-    if meta.get("mimeType") != GOOGLE_DOCS_MIME:
+    mime_type = meta.get("mimeType")
+    if not is_drive_ingestable_mime(mime_type):
         raise DriveClientError(
-            f"File {file_id} is not a Google Doc (mimeType={meta.get('mimeType')})"
+            f"File {file_id} is not an ingestable type (mimeType={mime_type})"
         )
 
     name = meta.get("name", file_id)
     modified_unix = _drive_modified_to_unix(meta.get("modifiedTime"))
-    try:
-        content = service.files().export_media(
-            fileId=file_id, mimeType=EXPORT_MIME_PLAIN
-        ).execute()
-        text = content.decode("utf-8") if isinstance(content, bytes) else content
-        text = text.strip()
-        if not text:
-            raise DriveClientError(f"Empty export for {file_id} ({name})")
-        return DriveDoc(
-            doc_id=file_id,
-            title=name or file_id,
-            text=text,
-            source="google_drive",
-            source_modified_at=modified_unix,
-        )
-    except DriveClientError:
-        raise
-    except Exception as e:
-        raise DriveClientError(f"Export failed for {name}: {e}") from e
 
+    if mime_type == GOOGLE_DOCS_MIME:
+        text = _fetch_google_doc_text(service, file_id, name)
+    else:
+        data = _download_drive_bytes(service, file_id, name)
+        text = _extract_text_from_bytes(mime_type, data, name)
+
+    return DriveDoc(
+        doc_id=file_id,
+        title=name or file_id,
+        text=text,
+        source="google_drive",
+        source_modified_at=modified_unix,
+        mime_type=mime_type,
+    )
+
+
+def list_and_export_docs(
+    folder_id: str | None = None,
+    file_ids: list[str] | None = None,
+) -> list[DriveDoc]:
+    """
+    List Drive files and fetch text for ingest (sync path).
+
+    - If file_ids is provided, only those files are considered (folder_id ignored).
+    - If folder_id is provided and file_ids is None, list files in that folder.
+    - If both None, list from root (q not restricted by parent).
+    """
+    metas = list_docs_metadata(folder_id=folder_id, file_ids=file_ids)
+    result: list[DriveDoc] = []
+    for meta in metas:
+        fid = meta["id"]
+        try:
+            result.append(fetch_drive_file(fid))
+        except DriveClientError:
+            raise
+    return result
+
+
+def export_drive_doc(file_id: str) -> DriveDoc:
+    """Backward-compatible alias for fetch_drive_file."""
+    return fetch_drive_file(file_id)
