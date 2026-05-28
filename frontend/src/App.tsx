@@ -72,7 +72,7 @@ function AppInner() {
       >
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0969da', margin: '0 0 6px 0' }}>TrueAI</h1>
-          <p style={{ margin: 0, color: '#57606a', fontSize: 13 }}>RAG on your ingested reports</p>
+          <p style={{ margin: 0, color: '#57606a', fontSize: 13 }}>RAG on the shared report library</p>
         </div>
         <LoginPanel />
       </header>
