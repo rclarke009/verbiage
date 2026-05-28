@@ -21,6 +21,7 @@ export interface PublicAppConfig {
   supabase_anon_key: string
   signup_invite_enabled: boolean
   public_app_url: string
+  google_drive_default_folder_id: string
 }
 
 interface AuthCtx {
@@ -52,6 +53,7 @@ async function fetchPublicConfig(): Promise<PublicAppConfig> {
     supabase_anon_key: String(raw.supabase_anon_key ?? ''),
     signup_invite_enabled: Boolean(raw.signup_invite_enabled),
     public_app_url: String(raw.public_app_url ?? ''),
+    google_drive_default_folder_id: String(raw.google_drive_default_folder_id ?? ''),
   }
 }
 

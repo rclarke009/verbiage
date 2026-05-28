@@ -4,21 +4,59 @@ Uses OAuth2 with drive.readonly scope. Lists and exports Google Docs as plain te
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
+from app.config import (
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
+    GOOGLE_REFRESH_TOKEN,
+)
 
 logger = logging.getLogger(__name__)
 
 # v1: only Google Docs (export as text/plain)
 GOOGLE_DOCS_MIME = "application/vnd.google-apps.document"
 EXPORT_MIME_PLAIN = "text/plain"
+
+_DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")
+_DRIVE_RAW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_DRIVE_DOC_IN_URL_RE = re.compile(r"/document/d/|/file/d/")
+
+
+def parse_drive_folder_id(value: str | None) -> str | None:
+    """
+    Extract a Drive folder id from a raw id or folder URL.
+    Returns None for empty input, document/file URLs, or unparseable values.
+    """
+    if not value or not value.strip():
+        return None
+    s = value.strip()
+    if _DRIVE_DOC_IN_URL_RE.search(s) and not _DRIVE_FOLDER_IN_URL_RE.search(s):
+        return None
+    folder_match = _DRIVE_FOLDER_IN_URL_RE.search(s)
+    if folder_match:
+        return folder_match.group(1)
+    if _DRIVE_RAW_ID_RE.fullmatch(s):
+        return s
+    return None
+
+
+def resolve_drive_folder_id(explicit: str | None) -> str | None:
+    """Use explicit folder when provided; otherwise env GOOGLE_DRIVE_DEFAULT_FOLDER_ID."""
+    if explicit is not None and explicit.strip():
+        return parse_drive_folder_id(explicit)
+    if GOOGLE_DRIVE_DEFAULT_FOLDER_ID:
+        return parse_drive_folder_id(GOOGLE_DRIVE_DEFAULT_FOLDER_ID)
+    return None
 
 
 def _drive_modified_to_unix(modified_time: str | None) -> int | None:
@@ -35,6 +73,24 @@ def _drive_modified_to_unix(modified_time: str | None) -> int | None:
         return int(dt.timestamp())
     except ValueError:
         return None
+
+
+IndexStatus = Literal["not_indexed", "indexed", "stale"]
+
+
+def compute_index_status(
+    in_db: bool,
+    drive_modified_unix: int | None,
+    source_modified_at: int | None,
+) -> IndexStatus:
+    """Compare Drive modifiedTime to last-ingested source_modified_at."""
+    if not in_db:
+        return "not_indexed"
+    if drive_modified_unix is None or source_modified_at is None:
+        return "indexed"
+    if drive_modified_unix > source_modified_at:
+        return "stale"
+    return "indexed"
 
 
 @dataclass

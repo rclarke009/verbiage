@@ -36,8 +36,22 @@ Implementation decisions and prompts for building the app. Use this when impleme
 
 ---
 
+## Chunking strategy for reports
+
+**Decision:** Paragraph-first hybrid chunking (default strategy `paragraph`).
+
+- **Normalize** line endings; split on blank lines into paragraphs.
+- **Section headers** detected via numbered lines (`1. Overview`), ALL CAPS short lines, and title-case headings; label attached to following chunks as `[Section: …]` prefix and `chunks.section_label`.
+- **Merge** paragraphs up to **1200** characters with **150** overlap (defaults on `ChunkingOptions`).
+- **Oversized paragraphs** split at sentence boundaries; legacy `chars` strategy remains for tests.
+
+**Canonical text:** `documents.full_text` in Supabase Postgres stores extracted text for re-chunk/re-embed via `POST /documents/{doc_id}/reindex` without re-uploading PDFs or re-exporting Drive.
+
+**Metadata on `documents`:** `source_filename`, `source_url`, `chunking_config` (JSON), `embedding_model`. Retrieval filters `embeddings.model` to the active embedder so mixed-model indexes do not pollute search.
+
+---
+
 ## Placeholder for future notes
 
-- Chunking strategy for reports (by section? by chars?)
 - Verbiage-specific system prompt for POST /ask
 - Any env vars or config for embed/LLM (see Models above)

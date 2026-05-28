@@ -68,6 +68,7 @@ PYTHONPATH=. pytest tests/ -q
 ```
 
 - **`tests/test_metrics.py`** — Prometheus middleware and RAG metric helpers (no database).
+- **`tests/test_drive_index_status.py`** — Drive folder `index_status` computation (indexed / stale / not_indexed).
 - Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
 
 Operational scraping and env vars for **`/metrics`** are described in **[setup.md](setup.md)** (*Prometheus metrics (optional)*).
@@ -81,29 +82,27 @@ You can open the UI in two ways:
 1. **Production-style / Docker:** **`http://localhost:8000/`** — loads the SPA built into `static/`.
 2. **Development:** Vite (**`npm run dev`** in `frontend/`) with API on **`:8000`** — proxies API routes; detailed steps in **`setup.md`** (§ *Local development: Vite + uvicorn*).
 
-Protected API routes (**`/ingest`**, **`/documents`**, **`/ask`**, …) expect **`Authorization: Bearer <Supabase access token>`**. The SPA signs in via Supabase; **`setup_and_testing`** curl snippets below omit that header unless noted — pass a token after sign-in, or use public routes (**`/health`**, **`/config`**).
+Protected API routes (**`/ingest`**, **`/documents`**, **`/ask`**, **`/drive/*`**, …) expect **`Authorization: Bearer <Supabase access token>`**. The SPA signs in via Supabase; curl snippets below omit that header unless noted — pass a token after sign-in, or use public routes (**`/health`**, **`/health/ready`**, **`/config`**). For production load balancers (e.g. Render), set the health check path to **`/health/ready`** (Postgres `SELECT 1`), not **`/health`** (process liveness only).
 
-### Reference — older static shell UX
+**Shared library:** All signed-in users see and search the same ingested document corpus (list, ask, ingest, delete). Auth gates access; there is no per-user document partition.
 
-After starting the API, **`http://localhost:8000/`** historically served a single-page shell; the React SPA restores similar workflows:
+### Tabs (React SPA — TrueAI)
 
-### Tabs
+Sign in, then use the header tabs:
 
-- **Ingest** — Paste report text or upload a PDF; optionally set doc ID, title, source, and chunk size/overlap. Submit to run ingest. Success or error message appears below the form.
-- **Ask** — Enter a question (e.g. for overview or detailed verbiage). Optionally limit the search to one document (dropdown). Submit to get an answer and expandable “Source chunks.” The document dropdown is filled from the list of ingested documents and is refreshed after each ingest.
+- **Ask** — Chat-style Q&A over the shared library. Answers include cited source chunks with links to the original report when `source_url` is known (e.g. Google Docs).
+- **Documents** — Full index of ingested reports: title, source, chunk count, embedding model, link to original, filter search, PDF upload dropzone, and delete. Calls **`GET /documents`**.
+- **Google Drive** — List Google Docs in a folder (optional folder ID), see **index status** per file (Indexed / Not indexed / Stale), auto-select files that need ingest, then run **Ingest**. Uses **`GET /drive/files`** and **`POST /ingest/google-drive`**.
 
-The last selected tab is remembered in the browser (localStorage) for the next visit.
-
-### Documents list (on demand)
-
-Click **Documents** in the header to open a **drawer** from the right. It calls `GET /documents` and shows ingested docs: doc_id, title, source, chunk count, and a short snippet. Close the drawer with the × or by clicking the overlay. The list is not visible until you open it, so the main view stays focused on Ingest or Ask.
+Optional **Photo analysis (preview)** tab appears when **`VITE_FEATURE_VISION=true`** in the frontend env.
 
 ### Quick test flow
 
-1. Open http://localhost:8000/.
-2. Switch to the **Ingest** tab, paste some text, set a title and doc_id if you like, then submit.
-3. Click **Documents** to confirm the new doc appears in the list; close the drawer.
-4. Switch to the **Ask** tab, type a question that relates to the ingested text, then submit. Check the answer and “Source chunks.”
+1. Open the app (production **`http://localhost:8000/`** or dev **`http://127.0.0.1:5173/`** with Vite — see [setup.md](setup.md)).
+2. Sign in with Supabase.
+3. **Documents** — upload a PDF or note an existing row in the table.
+4. **Ask** — ask a question related to that content; expand source citations.
+5. **Google Drive** (if OAuth is configured) — paste a folder ID, **List Docs**, confirm status badges, **Ingest** selected rows, re-list to refresh counts.
 
 ---
 
@@ -115,15 +114,30 @@ Base URL assumed: `http://localhost:8000`. Use `-s` for quieter output.
 
 ```bash
 curl -s "http://localhost:8000/health"
+curl -s "http://localhost:8000/health/ready"
+# Optional deep probe (DB + embed; may call OpenAI if OPENAI_API_KEY is set):
+# curl -s "http://localhost:8000/health/deep"
 ```
 
 ### List documents (GET)
 
-Returns ingested documents (doc_id, title, source, created_at, num_chunks, optional snippet). Same data used by the Web UI “Documents” drawer.
+Returns all documents in the shared library. Each item includes at least: `doc_id`, `title`, `source`, `created_at`, `num_chunks`, optional `snippet` (first chunk preview), plus `source_url`, `source_filename`, `source_modified_at`, `embedding_model`, and `chunking_config` when stored.
 
 ```bash
 curl -s "http://localhost:8000/documents"
 ```
+
+### Reindex document (POST)
+
+Re-chunk and re-embed from stored **`full_text`** without re-uploading the PDF or re-exporting Drive. Optional JSON body overrides **`chunking_options`** (strategy, chunk_size, chunk_overlap).
+
+```bash
+curl -s -X POST "http://localhost:8000/documents/runbook-1/reindex" \
+  -H "Content-Type: application/json" \
+  -d '{"chunking_options": {"strategy": "paragraph", "chunk_size": 1200, "chunk_overlap": 150}}'
+```
+
+Empty body uses default chunking. Returns the same shape as ingest (`doc_id`, `num_chunks`, `embedding_model`, …). Fails with **404** if the doc is missing or **400** if `full_text` was never stored (re-ingest from source instead).
 
 ### Ingest (POST)
 
@@ -227,9 +241,61 @@ Sign in with the Google account that has access to the Drive files you want to i
 GOOGLE_REFRESH_TOKEN="1//0abc..."
 ```
 
-Add that line to your `.env` (or set the env var), then restart the app.
+Add that line to your `.env` (or set the env variable), then restart the app.
 
-### 3. Ingest from Drive
+### Team ingest inbox (recommended)
+
+Set the shared **ready-for-TrueAI** folder so operators are not copying folder ids every time:
+
+```bash
+# Folder id or full URL — also set on Render in production
+GOOGLE_DRIVE_DEFAULT_FOLDER_ID=12FGnoHObEnFRQNEUHtHla2Ajx33xauhc
+```
+
+- **`GET /config`** returns `google_drive_default_folder_id` (parsed id) for the SPA.
+- **`GET /drive/files`** and **`POST /ingest/google-drive`** use this folder when `folder_id` is omitted (unless `file_ids` is set).
+- The **Google Drive** tab pre-fills the inbox, **auto-lists** on open, accepts a pasted folder URL to override, and offers **Reset to team inbox**.
+
+**Folder access:** The Google account that completed **`/auth/google`** (stored in `GOOGLE_REFRESH_TOKEN`) must be able to open the inbox folder. If a manager owns the folder, they must **share** it with that account (Viewer is enough for read-only ingest).
+
+To find a folder id: open the folder in [Google Drive](https://drive.google.com) and copy the URL — the id is the segment after `/folders/`.
+
+### 3. List Drive folder with index status
+
+**GET /drive/files** lists Google Docs metadata (no export). Query params (optional):
+
+- **`folder_id`** — only Docs in this Drive folder.
+- **`file_ids`** — comma-separated file IDs (if set, `folder_id` is ignored).
+
+Each file includes **`index_status`**: `not_indexed`, `indexed`, or `stale`. **Stale** means the doc is in the index but Drive **`modifiedTime`** is newer than **`source_modified_at`** from the last ingest (content may have changed). The response also includes **`summary`** counts (`total`, `indexed`, `not_indexed`, `stale`) and **`num_chunks`** when the file is indexed or stale.
+
+The **Google Drive** tab in the SPA uses this endpoint: status badges, summary banner, auto-select of **not indexed** and **stale** rows, and re-list after ingest.
+
+```bash
+curl -s "http://localhost:8000/drive/files?folder_id=YOUR_DRIVE_FOLDER_ID"
+```
+
+Example response shape (abbreviated):
+
+```json
+{
+  "files": [
+    {
+      "id": "abc123",
+      "name": "Roof Report 2024",
+      "mimeType": "application/vnd.google-apps.document",
+      "modifiedTime": "2024-06-01T12:00:00.000Z",
+      "index_status": "indexed",
+      "num_chunks": 42
+    }
+  ],
+  "summary": { "total": 1, "indexed": 1, "not_indexed": 0, "stale": 0 }
+}
+```
+
+**Note:** Ingesting a **stale** doc still hits duplicate detection today (same Drive file id → skipped). Re-sync from Drive after content changes is a planned follow-up; use **reindex** when only chunking/embedding strategy changes, not when Drive text changed.
+
+### 4. Ingest from Drive
 
 **POST /ingest/google-drive** lists and exports Google Docs, then ingests them (chunk + embed + store). Request body (all optional):
 

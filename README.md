@@ -1,155 +1,107 @@
-# RAG Document Analysis Backend
+# TrueAI — RAG report library
 
-FastAPI-based RAG backend for document ingestion, embeddings, pgvector search, and contextual Q&A workflows.
+FastAPI + React app for ingesting storm-damage (and similar) reports, embedding them in **Postgres with pgvector**, and answering questions with retrieved context and an LLM.
 
-The system ingests report documents, generates embeddings, stores them in **Postgres with pgvector**, and retrieves relevant context to generate suggested report language using an LLM.
-
-Originally built to generate suggested verbiage for storm damage reports by analyzing prior case documentation.
-
-**Production:** Hosted on [Render](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) (service dashboard).
+Originally built to generate suggested verbiage from prior case documentation. **Production:** [Render dashboard](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) · live app linked from [overview.md](overview.md).
 
 ---
 
-# System Overview
+## What it does
 
-This project demonstrates an end-to-end **RAG architecture** combining:
+- **Ingest** — PDF upload, pasted text, or Google Docs (read-only Drive export)
+- **Index** — Paragraph-first chunking; canonical `full_text` stored for reindex without re-upload
+- **Ask** — Semantic retrieval + LLM answers with cited sources and report links
+- **Manage** — Shared document library (all signed-in users); list, filter, delete
+- **Drive workflow** — Team inbox via **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`**; list folder with **Indexed / Not indexed / Stale** status; paste another folder URL to override
 
-- document ingestion and chunking  
-- embedding generation  
-- vector similarity search  
-- LLM-assisted response generation  
-- stateless API design suitable for deployment environments  
-
-The backend can run using either **OpenAI APIs** or **local models via Ollama**.
+Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama**. Auth: **Supabase JWT** on protected routes.
 
 ---
 
-# Key Features
+## Quick start
 
-## Document Ingestion
+**Detailed setup:** [setup.md](setup.md) · **Testing & curl:** [setup_and_testing.md](setup_and_testing.md)
 
-- Upload PDF or text content  
-- Documents are chunked and embedded  
-- Embeddings stored in Postgres using pgvector  
+### Docker
 
-## Vector Retrieval
+```bash
+cd verbiage
+cp .env.example .env
+# Set OPENAI_API_KEY and/or configure Ollama; DATABASE_URL is set by Compose
+docker-compose up --build
+```
 
-- Semantic similarity search over stored document chunks  
-- Relevant context retrieved for each query  
+Open **http://localhost:8000/** for the built SPA. Stop with `docker-compose down`.
 
-## LLM Response Generation
+### Local dev (API + Vite hot reload)
 
-- Generates structured suggested text using retrieved context  
-- Supports OpenAI or local Ollama models  
+Two terminals — API on `:8000`, Vite on `:5173` (proxies API). See [setup.md](setup.md#local-development-vite--uvicorn-hot-reload-spa).
 
-## Query Interface
-
-- Ask questions about previously ingested documents  
-- Returns contextual responses based on similar prior content  
-
-## Optional Web UI
-
-- Lightweight interface for document ingestion and querying  
-- Useful for testing and demonstrations  
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # DATABASE_URL required
+uvicorn app.main:app --reload
+```
 
 ---
 
-# Architecture
+## Web UI (SPA)
 
-Typical request flow:
+After sign-in:
 
-1. Document is uploaded or text is ingested  
-2. Content is chunked and embedded  
-3. Embeddings stored in Postgres using pgvector  
-4. User submits a query  
-5. Similar document chunks retrieved via vector search  
-6. LLM generates contextual response using retrieved context  
+| Tab | Purpose |
+|-----|---------|
+| **Ask** | Chat over the shared library with source citations |
+| **Documents** | Index table, PDF upload, search, delete |
+| **Google Drive** | Team inbox (env default); status badges; paste another folder to override; ingest selected docs |
 
 ---
 
-# Technology Stack
+## API highlights
+
+Interactive docs: **http://localhost:8000/docs** when the server is running.
+
+| Route | Notes |
+|-------|--------|
+| `GET /health` | Liveness (process up) |
+| `GET /health/ready` | Readiness (Postgres) — use for Render/LB health checks |
+| `GET /documents` | Shared library listing |
+| `POST /documents/{doc_id}/reindex` | Re-chunk/re-embed from stored `full_text` |
+| `GET /drive/files` | Drive folder list + `index_status` / `summary` |
+| `POST /ingest/google-drive` | Export and ingest Google Docs |
+| `POST /ask`, `POST /ask/stream` | RAG Q&A |
+
+Most routes require `Authorization: Bearer <Supabase access token>`.
+
+---
+
+## Architecture
+
+1. Document uploaded, pasted, or exported from Drive  
+2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded  
+3. Vectors stored in pgvector; retrieval filtered by active embedding model  
+4. User question → top-k chunks → LLM response with citations  
+
+Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md).
+
+---
+
+## Stack
 
 | Layer | Technology |
-|------|------------|
-| API | FastAPI |
-| Database | PostgreSQL |
-| Vector Store | pgvector |
-| Embeddings | OpenAI or Ollama |
-| LLM | OpenAI or Ollama |
-| Language | Python |
+|-------|------------|
+| API | FastAPI, Python |
+| UI | React, Vite, TanStack Query |
+| Database | PostgreSQL + pgvector (Supabase in production) |
+| Auth | Supabase JWT |
+| Embeddings / LLM | OpenAI or Ollama |
+| Drive | Google Drive API (read-only OAuth) |
 
 ---
 
-## Deployment Model
+## Health & ops
 
-The service is designed as a **containerized backend API** suitable for local development or deployment environments.
-
-The repository includes Docker configuration that runs:
-
-- FastAPI application
-- PostgreSQL with pgvector enabled
-
-Environment configuration follows **12-factor application principles** and is managed through environment variables.
-
-The only required configuration is an API key for the LLM provider.
-
----
-
-## Run with Docker
-
-**Prerequisites:** Docker and Docker Compose. You provide your own `OPENAI_API_KEY` in `.env` (no key in the repo).
-
-```bash
-cd verbiage
-cp .env.example .env
-# Edit .env and set OPENAI_API_KEY=sk-... (DATABASE_URL is set by Docker Compose)
-docker-compose up --build
-```
-
-Then open **http://localhost:8000/** for the web UI. The Compose stack runs Postgres with pgvector and the app; the app creates tables on startup. To stop: `docker-compose down`.
-
----
-
-## Run with Docker
-
-**Prerequisites:** Docker and Docker Compose. You provide your own `OPENAI_API_KEY` in `.env` (no key in the repo).
-
-```bash
-cd verbiage
-cp .env.example .env
-# Edit .env and set OPENAI_API_KEY=sk-... (DATABASE_URL is set by Docker Compose)
-docker-compose up --build
-```
-
-Then open **http://localhost:8000/** for the web UI. The Compose stack runs Postgres with pgvector and the app; the app creates tables on startup. To stop: `docker-compose down`.
-
----
-
-## API summary
-
-See the API docs at http://localhost:8000/docs when the server is running.
-
----
-
-# Purpose
-
-This project demonstrates practical engineering patterns for building AI-enabled backend systems:
-
-- Retrieval-Augmented Generation (RAG)
-- vector database integration with pgvector
-- containerized AI service deployment
-- configurable inference providers (OpenAI or local models)
-
----
-
-# Future Extensions
-
-Potential improvements include:
-
-- automated document ingestion pipelines  
-- additional vector search optimizations  
-- streaming responses  
-- expanded document source integrations
-
-
-
+- Set load-balancer health check to **`/health/ready`**, not `/health`.
+- Optional **`GET /health/deep`** probes DB + embed (avoid high-frequency polling — may call OpenAI).
+- Optional Prometheus **`GET /metrics`** — see [setup.md](setup.md#prometheus-metrics-optional).

@@ -8,9 +8,11 @@ connection_factory=NoPrepareConnection when creating the pool for such URLs.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import psycopg2
+from psycopg2.extras import Json
 from psycopg2 import extensions
 from pgvector.psycopg2 import register_vector
 
@@ -146,6 +148,51 @@ def create_db(conn: PgConnection) -> None:
             END $$;
         """)
         cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'full_text'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN full_text TEXT NOT NULL DEFAULT '';
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'source_filename'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN source_filename TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'chunking_config'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN chunking_config JSONB;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'embedding_model'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN embedding_model TEXT;
+                END IF;
+            END $$;
+        """)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'chunks'
+                      AND column_name = 'section_label'
+                ) THEN
+                    ALTER TABLE chunks ADD COLUMN section_label TEXT;
+                END IF;
+            END $$;
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS signup_allowlist (
                 email TEXT PRIMARY KEY,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -180,14 +227,58 @@ def insert_document(
     user_id: str | None = None,
     source_modified_at: int | None = None,
     source_url: str | None = None,
+    full_text: str = "",
+    source_filename: str | None = None,
+    chunking_config: dict | None = None,
+    embedding_model: str | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO documents(doc_id, title, source, created_at, user_id, source_modified_at, source_url) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (doc_id, title, source, created_at, user_id, source_modified_at, source_url),
+            "INSERT INTO documents("
+            "doc_id, title, source, created_at, user_id, source_modified_at, source_url, "
+            "full_text, source_filename, chunking_config, embedding_model"
+            ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                doc_id,
+                title,
+                source,
+                created_at,
+                user_id,
+                source_modified_at,
+                source_url,
+                full_text,
+                source_filename,
+                Json(chunking_config) if chunking_config is not None else None,
+                embedding_model,
+            ),
         )
+    finally:
+        cur.close()
+
+
+def update_document_indexing_metadata(
+    conn: PgConnection,
+    doc_id: str,
+    chunking_config: dict,
+    embedding_model: str,
+) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE documents SET chunking_config = %s, embedding_model = %s WHERE doc_id = %s",
+            (Json(chunking_config), embedding_model, doc_id),
+        )
+    finally:
+        cur.close()
+
+
+def get_document_full_text(conn: PgConnection, doc_id: str) -> str | None:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT full_text FROM documents WHERE doc_id = %s", (doc_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
     finally:
         cur.close()
 
@@ -200,12 +291,23 @@ def insert_chunk(
     content: str,
     start_offset: int,
     end_offset: int,
+    section_label: str | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO chunks(chunk_id, doc_id, chunk_index, content, start_offset, end_offset) VALUES (%s,%s,%s,%s,%s,%s)",
-            (chunk_id, doc_id, chunk_index, content, start_offset, end_offset),
+            "INSERT INTO chunks("
+            "chunk_id, doc_id, chunk_index, content, start_offset, end_offset, section_label"
+            ") VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (
+                chunk_id,
+                doc_id,
+                chunk_index,
+                content,
+                start_offset,
+                end_offset,
+                section_label,
+            ),
         )
     finally:
         cur.close()
@@ -238,6 +340,32 @@ def doc_exist(conn: PgConnection, doc_id: str) -> bool:
         cur.close()
 
 
+def get_document_index_by_doc_ids(
+    conn: PgConnection, doc_ids: list[str]
+) -> dict[str, tuple[int | None, int]]:
+    """
+    Returns doc_id -> (source_modified_at, num_chunks) for documents in doc_ids.
+    """
+    if not doc_ids:
+        return {}
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT
+                d.doc_id,
+                d.source_modified_at,
+                (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.doc_id) AS num_chunks
+            FROM documents d
+            WHERE d.doc_id = ANY(%s)
+            """,
+            (doc_ids,),
+        )
+        return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+    finally:
+        cur.close()
+
+
 def get_embeddings_for_retrieval(
     conn: PgConnection, doc_id: str | None = None
 ) -> list[tuple[str, str, list[float], str]]:
@@ -265,18 +393,22 @@ def retrieve_top_k_pg(
     query_vec: list[float],
     top_k: int,
     doc_id: str | None = None,
-) -> list[tuple[str, str, float, str, str | None, str | None, str | None]]:
-    """Postgres similarity search over the shared document library. Returns (chunk_id, doc_id, score, content, title, source, source_url). Uses <=> (cosine distance)."""
+    embedding_model: str | None = None,
+) -> list[tuple[str, str, float, str, str | None, str | None, str | None, str | None]]:
+    """Postgres similarity search over the shared document library. Returns (chunk_id, doc_id, score, content, title, source, source_url, section_label). Uses <=> (cosine distance)."""
     _ensure_pgvector(conn)
     sql = """
         SELECT c.chunk_id, c.doc_id, 1 - (e.embedding <=> %s::vector) AS score, c.content,
-               d.title, d.source, d.source_url
+               d.title, d.source, d.source_url, c.section_label
         FROM embeddings e
         JOIN chunks c ON e.chunk_id = c.chunk_id
         JOIN documents d ON d.doc_id = c.doc_id
     """
     conditions: list[str] = []
     params: list[Any] = [query_vec]
+    if embedding_model is not None:
+        conditions.append("e.model = %s")
+        params.append(embedding_model)
     if doc_id is not None:
         conditions.append("c.doc_id = %s")
         params.append(doc_id)
@@ -292,7 +424,8 @@ def retrieve_top_k_pg(
         cur.close()
 
 
-def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
+def delete_chunks_for_doc(conn: PgConnection, doc_id: str) -> None:
+    """Remove chunks and embeddings for a document; keep the documents row (for reindex)."""
     cur = conn.cursor()
     try:
         cur.execute(
@@ -300,6 +433,14 @@ def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
             (doc_id,),
         )
         cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
+    finally:
+        cur.close()
+
+
+def delete_by_doc_id(conn: PgConnection, doc_id: str) -> None:
+    cur = conn.cursor()
+    try:
+        delete_chunks_for_doc(conn, doc_id)
         cur.execute("DELETE FROM documents WHERE doc_id = %s", (doc_id,))
         conn.commit()
     finally:
@@ -317,9 +458,24 @@ def delete_document(conn: PgConnection, doc_id: str) -> bool:
 def list_documents(
     conn: PgConnection,
     snippet_max_len: int = 250,
-) -> list[tuple[str, str | None, str | None, int, int, str | None, int | None, str | None]]:
+) -> list[
+    tuple[
+        str,
+        str | None,
+        str | None,
+        int,
+        int,
+        str | None,
+        int | None,
+        str | None,
+        str | None,
+        str | None,
+        dict | None,
+    ]
+]:
     """
-    Returns list of (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at, source_url).
+    Returns list of (doc_id, title, source, created_at, num_chunks, snippet,
+    source_modified_at, source_url, source_filename, embedding_model, chunking_config).
     Ordered by created_at desc (shared library — all documents).
     """
     sql = """
@@ -331,7 +487,10 @@ def list_documents(
             (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.doc_id) AS num_chunks,
             (SELECT c.content FROM chunks c WHERE c.doc_id = d.doc_id ORDER BY c.chunk_index LIMIT 1) AS first_content,
             d.source_modified_at,
-            d.source_url
+            d.source_url,
+            d.source_filename,
+            d.embedding_model,
+            d.chunking_config
         FROM documents d
         ORDER BY d.created_at DESC
     """
@@ -349,6 +508,9 @@ def list_documents(
             first_content,
             source_modified_at,
             source_url,
+            source_filename,
+            embedding_model,
+            chunking_config,
         ) in rows:
             snippet = None
             if first_content:
@@ -356,8 +518,23 @@ def list_documents(
                     first_content[:snippet_max_len]
                     + ("..." if len(first_content) > snippet_max_len else "")
                 )
+            config_dict = chunking_config
+            if isinstance(chunking_config, str):
+                config_dict = json.loads(chunking_config)
             result.append(
-                (doc_id, title, source, created_at, num_chunks, snippet, source_modified_at, source_url)
+                (
+                    doc_id,
+                    title,
+                    source,
+                    created_at,
+                    num_chunks,
+                    snippet,
+                    source_modified_at,
+                    source_url,
+                    source_filename,
+                    embedding_model,
+                    config_dict,
+                )
             )
         return result
     finally:

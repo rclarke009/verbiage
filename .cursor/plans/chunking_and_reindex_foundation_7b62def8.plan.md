@@ -1,160 +1,177 @@
 ---
 name: Chunking and reindex foundation
-overview: Store canonical extracted text and indexing metadata on each document in Supabase Postgres, replace naive char-window chunking with paragraph-first hybrid splitting, and add model-aware retrieval plus a reindex path so future chunking or embedding changes never require re-uploading PDFs or re-exporting Drive files.
+overview: Store canonical extracted text and indexing metadata on each document, replace naive char-window chunking with paragraph-first hybrid splitting, and add model-aware retrieval plus a reindex path so future chunking or embedding changes never require re-uploading PDFs or re-exporting Drive files.
 todos:
   - id: schema-migration
     content: Add documents.full_text, source_filename, chunking_config, embedding_model; chunks.section_label; migration + db.py create_db
-    status: pending
+    status: completed
   - id: paragraph-chunker
     content: Implement paragraph-first hybrid chunker + tests in app/chunking.py
-    status: pending
+    status: completed
   - id: indexing-refactor
     content: Split ingest into save-document + index_document; wire full_text and metadata at all ingest paths
-    status: pending
+    status: completed
   - id: reindex-endpoint
     content: Add reindex_document helper and POST /documents/{doc_id}/reindex
-    status: pending
+    status: completed
   - id: model-filter-retrieval
     content: Filter retrieve_top_k_pg by active embedding model; use section_label in SSE sources
-    status: pending
+    status: completed
   - id: api-ui-metadata
     content: Expose new fields on DocumentSummary and frontend types; update code-notes defaults
-    status: pending
+    status: completed
 isProject: false
 ---
 
 # Chunking strategy and future-proof ingest storage
 
-## Storage decision: Supabase Postgres (not Google Drive)
-
-**Extracted text lives in Supabase**, in a new `documents.full_text` column on the existing `documents` table — same Postgres database you already use for chunks and embeddings.
-
-| What | Where | Why |
-|------|-------|-----|
-| **Extracted full text** | Supabase `documents.full_text` | Fast re-chunk/re-embed; no external dependency; same DB as RAG |
-| **Chunks + embeddings** | Supabase (unchanged) | Already there |
-| **Original PDF file** | Not stored (unchanged) | Only text is extracted at upload; bytes discarded |
-| **Google Drive original** | Stays in Drive | We only export plain text at ingest; `source_url` links back to open it |
-| **Original filename** | Supabase `documents.source_filename` | Display + dedup; not a filesystem path |
-
-**Why not store text on Google Drive?**
-
-- Drive is a **source**, not your index store — re-chunking would require re-export API calls for every document.
-- Files can be deleted, trashed, or permission-revoked; your index would break.
-- Extracted text is already in Postgres as chunk content; storing `full_text` alongside metadata is consistent and simpler.
-- Your shared-library model ([shared_library_feasibility plan](shared_library_feasibility_3f819ba4.plan.md)) assumes one global corpus in Postgres — Drive folders are per-user/org and not a good canonical store.
-
-**Scale note:** Plain-text reports (typically tens of KB each) fit comfortably in Postgres TEXT. Thousands of reports is fine. If the corpus grows to tens of GB of raw text, a later optimization could move `full_text` to **Supabase Storage** (object blobs) and keep a pointer on `documents` — not needed for initial real ingest.
-
-**What we do not store:** Original PDF binaries. If download-from-app is needed later, that would be Supabase Storage or always linking via `source_url` — separate feature.
-
-```mermaid
-flowchart TB
-  subgraph sources [Ingest sources]
-    PDF[PDF upload]
-    Drive[Google Drive export]
-    Paste[Pasted text]
-  end
-  subgraph supabase [Supabase Postgres]
-    DocRow["documents\nfull_text, source_filename,\nsource_url, chunking_config"]
-    Chunks[chunks]
-    Embeds[embeddings]
-  end
-  subgraph external [External - not index store]
-    GDrive[Google Drive file]
-  end
-  PDF -->|extract once| DocRow
-  Drive -->|export text once| DocRow
-  Paste --> DocRow
-  DocRow --> Chunks --> Embeds
-  Drive -.->|source_url link only| GDrive
-```
-
----
-
 ## Recommendation: store text, not file paths
 
-**Do not rely on filesystem paths** for re-chunking. Browser PDF uploads never have a stable server path.
+**Do not rely on filesystem paths** for re-chunking. Browser PDF uploads never have a stable server path; even CLI paths break when files move.
 
 | Store | Purpose |
 |-------|---------|
-| **`documents.full_text`** | Canonical extracted text — source of truth for re-chunk and re-embed |
-| **`documents.source_filename`** | Original upload filename or Drive doc name |
+| **`documents.full_text`** (new) | Canonical extracted text — source of truth for re-chunk and re-embed |
+| **`documents.source_filename`** (new) | Original upload filename or Drive doc name (display + dedup hints) |
 | **`documents.source_url`** (existing) | Open original in Drive / SharePoint / external link |
 | **`documents.source_modified_at`** (existing) | Detect stale Drive re-sync later |
-| **`documents.chunking_config`** (JSON) | `{strategy, chunk_size, chunk_overlap}` used at last index |
-| **`documents.embedding_model`** | Active model for this doc's vectors |
+| **`documents.chunking_config`** (new JSON) | `{strategy, chunk_size, chunk_overlap}` used at last index |
+| **`documents.embedding_model`** (new) | Active model for this doc’s vectors |
+
+Drive docs can be re-exported via `doc_id`, but **`full_text` is faster, offline-safe, and matches what was actually indexed** (important if PDF extraction quality changes later).
+
+```mermaid
+flowchart LR
+  subgraph ingest [Ingest once]
+    PDF[PDF upload] --> Extract[extract_text]
+    Drive[Drive export] --> Extract
+    Paste[Pasted text] --> Extract
+    Extract --> SaveDoc["documents.full_text + metadata"]
+    SaveDoc --> Chunk[paragraph hybrid chunker]
+    Chunk --> Embed[embed chunks]
+    Embed --> Store["chunks + embeddings"]
+  end
+  subgraph reindex [Reindex later]
+    SaveDoc --> ReChunk[re-chunk from full_text]
+    ReChunk --> ReEmbed[re-embed only]
+    ReEmbed --> Store
+  end
+```
 
 ---
 
 ## 1. Schema migration
 
-New Supabase migration (and matching idempotent blocks in [app/db.py](app/db.py) `create_db`):
+New Supabase migration (and matching idempotent blocks in [`app/db.py`](app/db.py) `create_db`):
 
 **`documents` additions:**
-- `full_text TEXT NOT NULL` — for new ingests; delete test docs rather than backfill
+- `full_text TEXT NOT NULL` — for new ingests; backfill empty for any legacy test rows (you can delete test docs instead)
 - `source_filename TEXT`
-- `chunking_config JSONB`
+- `chunking_config JSONB` — e.g. `{"strategy":"paragraph","chunk_size":1200,"chunk_overlap":150}`
 - `embedding_model TEXT`
 
-**`chunks` addition:**
-- `section_label TEXT` — detected heading for citations
+**`chunks` addition (optional but useful for citations):**
+- `section_label TEXT` — detected heading for that chunk (e.g. `"Roof Damage"`), surfaced in SSE sources instead of raw `chunk_id`
 
 **`embeddings` — model-aware retrieval:**
-- Add `WHERE e.model = %s` in `retrieve_top_k_pg` using active model from `HttpEmbedder().model`
+- Add `WHERE e.model = %s` in [`retrieve_top_k_pg`](app/db.py) using active model from `HttpEmbedder().model`
+- Keep `chunk_id` as PK for now (single active vector per chunk; reindex replaces rows). Composite `(chunk_id, model)` can come later if you need zero-downtime dual-model migration.
+
+Since you have only test data: **delete test documents and re-ingest** after migration rather than complex backfills.
 
 ---
 
 ## 2. Paragraph-first hybrid chunker
 
-Replace/extend [app/chunking.py](app/chunking.py):
+Replace/extend [`app/chunking.py`](app/chunking.py) (keep `Chunk` dataclass + offsets):
 
-1. Normalize whitespace
-2. Split paragraphs on blank lines
-3. Detect section headers (numbered, ALL CAPS, title-case short lines)
-4. Merge paragraphs to target size (default **1200** chars, overlap **150**)
-5. Sentence-split oversized paragraphs with overlap
-6. Prefix `[Section: {label}]` when label exists
+**Pipeline:**
+1. **Normalize** — unify line endings; collapse 3+ newlines to 2; trim
+2. **Split paragraphs** — on `\n\n+`
+3. **Detect section headers** — lightweight heuristics on paragraph openers:
+   - Numbered: `^\d+\.\s+[A-Z]`
+   - ALL CAPS short lines
+   - Title-case lines under ~80 chars ending without period
+   - Attach detected label to subsequent chunks until next header
+4. **Merge paragraphs** into chunks until adding the next paragraph would exceed `chunk_size` (default **1200** chars, overlap **150** — better for narrative reports than current 800/100)
+5. **Oversized paragraphs** — sentence-split on `(?<=[.!?])\s+` with overlap; never hard-split mid-word
+6. **Prefix context** — prepend `[Section: {label}]` to chunk text when label exists (improves retrieval without storing duplicate metadata only in DB)
 
-Update [ChunkingOptions](app/models.py): `strategy: Literal["paragraph", "chars"]` (default `"paragraph"`).
+Update [`ChunkingOptions`](app/models.py): add `strategy: Literal["paragraph", "chars"]` (default `"paragraph"`); keep `chars` as fallback for tests.
 
-Add `tests/test_chunking.py`.
+Add unit tests in `tests/test_chunking.py` covering: multi-paragraph merge, long paragraph sentence split, section header detection, overlap continuity.
 
 ---
 
 ## 3. Refactor ingest pipeline
 
-Split into `ingest_text` (save document + metadata) and `index_document` (chunk + embed).
+Centralize in [`app/main.py`](app/main.py) (or new `app/indexing.py`):
 
-Wire `source_filename` at PDF upload, Drive ingest, and optional field on `POST /ingest`.
+```python
+# conceptual split
+async def ingest_text(...):
+    insert_document(..., full_text=text, source_filename=..., chunking_config=..., embedding_model=...)
+    await index_document(conn, doc_id, text, chunking_options, embedder)
+
+async def index_document(conn, doc_id, text, opts, embedder):
+    # delete existing chunks+embeddings for doc_id if reindex
+    chunks = chunk_text_paragraph_hybrid(text, opts)
+    insert chunks + embeddings
+    update documents.embedding_model
+```
+
+**Wire metadata at each entry point:**
+- [`POST /ingest/file`](app/main.py) — pass `filename` as `source_filename`
+- [`POST /ingest/google-drive`](app/main.py) — pass Drive `title` as `source_filename`; keep `source_url`
+- [`POST /ingest`](app/main.py) — optional `source_filename` field on `IngestRequest`
+
+Update [`insert_document`](app/db.py) and [`list_documents`](app/db.py) to read/write new columns. Expose `embedding_model`, `source_filename`, and `chunking_config` on [`DocumentSummary`](app/models.py) / frontend types (Documents tab only — no UI overhaul).
 
 ---
 
 ## 4. Reindex capability
 
-`POST /documents/{doc_id}/reindex` — re-chunk from `full_text`, re-embed, no re-upload.
+Add `reindex_document(conn, doc_id, user_id, chunking_options=None)`:
+1. Load `full_text` + ownership check
+2. Delete chunks + embeddings for `doc_id` (reuse cascade or explicit deletes from [`delete_by_doc_id`](app/db.py))
+3. Run `index_document` with current or overridden chunking options
+4. Update `chunking_config` + `embedding_model`
+
+Expose as **`POST /documents/{doc_id}/reindex`** (auth + user ownership). Optional body to override chunk_size/overlap for experiments.
+
+No UI button required in this pass; curl/admin use is enough until bulk migration UI is needed.
 
 ---
 
 ## 5. Retrieval and citations
 
-- Filter retrieval by active embedding model
-- Use `section_label` in SSE sources when present
+- Pass active embed model into [`retrieve_top_k`](app/retrieval.py) / `retrieve_top_k_pg` — prevents mixed-model search when config changes
+- In [`_sources_payload_for_sse`](app/main.py), use `section_label` when present instead of `chunk_id` in the `section` field
 
 ---
 
-## 6. Out of scope
+## 6. Config defaults
 
-- PDF binary storage (Supabase Storage — later if needed)
-- `.docx` ingest
-- Dual-model embeddings / fleet re-embed job
-- Drive re-sync on modifiedTime change
+In [`app/config.py`](app/config.py) (or keep on `ChunkingOptions` defaults):
+- `CHUNK_SIZE` default **1200**, `CHUNK_OVERLAP` **150**
+- Document chosen values in [`code-notes.md`](code-notes.md) under the previously empty “Chunking strategy for reports” note
+
+---
+
+## 7. Out of scope (follow-ups)
+
+- Storing original PDF binaries (only needed for download-from-app, not re-chunk)
+- `.docx` ingest (noted in [`code-notes.md`](code-notes.md) but not implemented)
+- Dual-model embeddings table / background fleet re-embed job (add when you actually switch models at scale)
+- Drive “re-sync if modifiedTime changed” job
 
 ---
 
 ## Test plan
 
 1. Apply migration; wipe test documents
-2. Ingest multi-section report → verify `full_text`, section labels, chunks
-3. Reindex with different chunk_size → chunk count changes, text unchanged
-4. Confirm retrieval respects active embedding model
+2. Ingest a multi-section pasted report → verify chunk count, section labels, `full_text` stored
+3. Upload PDF → verify `source_filename` matches upload name
+4. Ingest Drive doc → verify `source_url` + `source_filename`
+5. `POST /documents/{doc_id}/reindex` with different `chunk_size` → chunk count changes, `full_text` unchanged, search still works
+6. Change `EMBED_MODEL` in env, reindex one doc → retrieval only returns vectors for active model
