@@ -282,6 +282,9 @@ export function DriveTab() {
     })
   }
 
+  const selectAll = () => setSelected(new Set(files.map(f => f.id)))
+  const deselectAll = () => setSelected(new Set())
+
   const defaultFolderLinkText =
     teamInboxLabel || 'the team ingest folder in Google Drive'
 
@@ -455,7 +458,28 @@ export function DriveTab() {
       {files.length > 0 && (
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             marginTop: 12,
+          }}
+        >
+          <button type="button" onClick={selectAll} style={btnSecondary}>
+            Select all
+          </button>
+          <button type="button" onClick={deselectAll} style={btnSecondary}>
+            Deselect all
+          </button>
+          <span style={{ fontSize: 12, color: '#57606a', marginLeft: 'auto' }}>
+            {selected.size} of {files.length} selected
+          </span>
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <div
+          style={{
+            marginTop: 8,
             maxHeight: 360,
             overflow: 'auto',
             border: '1px solid #d0d7de',
