@@ -1,4 +1,4 @@
-import { apiFetch, readErrorDetail } from '../lib/api'
+import { apiFetch, apiFetchRetry, readErrorDetail } from '../lib/api'
 
 import type {
   DriveFileListResponse,
@@ -18,7 +18,7 @@ export async function driveGetFolder(folderId?: string | null): Promise<DriveFol
     folderId != null && folderId.trim()
       ? `?folder_id=${encodeURIComponent(folderId.trim())}`
       : ''
-  const res = await apiFetch(`/drive/folder${q}`)
+  const res = await apiFetchRetry(`/drive/folder${q}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<DriveFolderContext>
 }
@@ -28,7 +28,7 @@ export async function driveListFiles(folderId?: string | null): Promise<DriveFil
     folderId != null && folderId.trim()
       ? `?folder_id=${encodeURIComponent(folderId.trim())}`
       : ''
-  const res = await apiFetch(`/drive/files${q}`)
+  const res = await apiFetchRetry(`/drive/files${q}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<DriveFileListResponse>
 }

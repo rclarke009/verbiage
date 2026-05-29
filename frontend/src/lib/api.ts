@@ -50,6 +50,39 @@ export async function apiFetch(
   return fetch(url, { ...rest, headers })
 }
 
+const RETRYABLE_STATUSES = new Set([502, 503, 504])
+
+/**
+ * apiFetch with retry/backoff for transient upstream failures (502/503/504) and
+ * network errors. Useful for slow endpoints (e.g. large Drive folder listings)
+ * where the gateway may time out before the backend finishes; a later attempt
+ * typically succeeds once the upstream is warm.
+ */
+export async function apiFetchRetry(
+  path: string,
+  init: RequestInit & { anonymous?: boolean } = {},
+  opts: { retries?: number; baseDelayMs?: number } = {},
+): Promise<Response> {
+  const retries = Math.max(1, opts.retries ?? 3)
+  const baseDelayMs = opts.baseDelayMs ?? 1000
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const isLast = attempt === retries - 1
+    try {
+      const res = await apiFetch(path, init)
+      if (res.ok || !RETRYABLE_STATUSES.has(res.status) || isLast) {
+        return res
+      }
+    } catch (e) {
+      lastError = e
+      if (isLast) throw e
+    }
+    // Linear backoff: 1s, 2s, ... before the next attempt.
+    await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)))
+  }
+  throw lastError ?? new Error('Request failed after retries')
+}
+
 export async function readErrorDetail(res: Response): Promise<string> {
   try {
     const t = await res.text()
