@@ -3,6 +3,7 @@ const RAW_ID = /^[a-zA-Z0-9_-]+$/
 const DOC_IN_URL = /\/document\/d\/|\/file\/d\//
 
 export const DRIVE_FOLDER_STORAGE_KEY = 'trueai_drive_folder_id'
+export const DRIVE_STEPS_OPEN_STORAGE_KEY = 'trueai_drive_steps_open'
 
 export function parseDriveFolderInput(input: string): { id: string | null; error?: string } {
   const s = input.trim()
