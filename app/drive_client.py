@@ -37,7 +37,7 @@ DRIVE_INGEST_MIMES: tuple[str, ...] = (
     DOCX_MIME,
 )
 
-MAX_DRIVE_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_DRIVE_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_FOLDER_PATH_DEPTH = 5
 
 _DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")

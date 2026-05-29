@@ -186,6 +186,22 @@ def create_db(conn: PgConnection) -> None:
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns
                     WHERE table_schema = 'public' AND table_name = 'chunks'
+                      AND column_name = 'content_tsv'
+                ) THEN
+                    ALTER TABLE chunks ADD COLUMN content_tsv tsvector
+                        GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED;
+                END IF;
+            END $$;
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_content_tsv ON chunks USING GIN (content_tsv);"
+        )
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'chunks'
                       AND column_name = 'section_label'
                 ) THEN
                     ALTER TABLE chunks ADD COLUMN section_label TEXT;
@@ -452,6 +468,34 @@ def retrieve_top_k_pg(
         sql += " WHERE " + " AND ".join(conditions)
     sql += " ORDER BY e.embedding <=> %s::vector LIMIT %s"
     params.extend([query_vec, top_k])
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+def retrieve_top_k_lexical_pg(
+    conn: PgConnection,
+    query_text: str,
+    top_k: int,
+    doc_id: str | None = None,
+) -> list[tuple[str, str, float, str, str | None, str | None, str | None, str | None]]:
+    """Postgres full-text (lexical) search over the shared document library. Returns (chunk_id, doc_id, score, content, title, source, source_url, section_label). Uses ts_rank over content_tsv."""
+    sql = """
+        SELECT c.chunk_id, c.doc_id,
+               ts_rank(c.content_tsv, websearch_to_tsquery('english', %s)) AS score,
+               c.content, d.title, d.source, d.source_url, c.section_label
+        FROM chunks c
+        JOIN documents d ON d.doc_id = c.doc_id
+        WHERE c.content_tsv @@ websearch_to_tsquery('english', %s)
+    """
+    params: list[Any] = [query_text, query_text]
+    if doc_id is not None:
+        sql += " AND c.doc_id = %s"
+        params.append(doc_id)
+    sql += " ORDER BY score DESC LIMIT %s"
+    params.append(top_k)
     cur = conn.cursor()
     try:
         cur.execute(sql, params)

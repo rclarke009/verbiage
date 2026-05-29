@@ -550,7 +550,7 @@ export function DriveTab() {
             shown value into your environment.
           </p>
           <p style={{ marginBottom: 12 }}>
-            Supported file types: Google Docs, PDF, and Word (.docx). Max download size 50 MB per
+            Supported file types: Google Docs, PDF, and Word (.docx). Max download size 100 MB per
             file.
           </p>
           <button
