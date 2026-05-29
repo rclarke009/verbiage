@@ -12,6 +12,37 @@ _EXT_RE = re.compile(r"\.(pdf|txt|doc|docx)$", re.IGNORECASE)
 # Trailing/anywhere version token: v9, v10, V 10, v.10
 _VERSION_RE = re.compile(r"\bv\.?\s*(\d+)\b", re.IGNORECASE)
 
+_EXT_AT_END_RE = re.compile(r"\.([a-z0-9]+)$", re.IGNORECASE)
+
+_FORMAT_BY_MIME = {
+    "application/vnd.google-apps.document": "gdoc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/pdf": "pdf",
+}
+_FORMAT_BY_EXT = {"pdf": "pdf", "docx": "docx", "doc": "docx"}
+
+# When the same report exists in several formats, keep the earliest in this list.
+# Word/Google Docs extract to cleaner text than PDF (no layout/OCR loss), so they win.
+FORMAT_PREFERENCE: tuple[str, ...] = ("gdoc", "docx", "pdf", "other")
+
+
+def _file_format(f: dict, name_key: str = "name") -> str:
+    """Normalized format key ('gdoc' | 'docx' | 'pdf' | 'other') for a file dict."""
+    mime = (f.get("mimeType") or "").strip()
+    if mime in _FORMAT_BY_MIME:
+        return _FORMAT_BY_MIME[mime]
+    m = _EXT_AT_END_RE.search((f.get(name_key) or "").strip())
+    if m:
+        return _FORMAT_BY_EXT.get(m.group(1).lower(), "other")
+    return "other"
+
+
+def _format_rank(fmt: str) -> int:
+    try:
+        return FORMAT_PREFERENCE.index(fmt)
+    except ValueError:
+        return len(FORMAT_PREFERENCE)
+
 
 def normalize_for_similarity(s: str) -> str:
     s = (s or "").lower().strip()
@@ -50,10 +81,15 @@ def select_newest_versions(
     """
     Collapse same-named report versions down to the newest one.
 
-    Files are grouped by normalized base name (name minus its vN token). A group
-    is collapsed only when at least one member carries a version token; the
-    winner is the highest version, then most recent modifiedTime, then largest id
-    (deterministic). Groups with no version tokens are kept intact, so unrelated
+    Files are grouped by normalized base name (name minus its extension and vN
+    token). A group is collapsed only when at least one member carries a version
+    token; the winner is the highest version, then most recent modifiedTime, then
+    largest id (deterministic).
+
+    For no-version groups we still avoid ingesting the same report twice in
+    different file formats: when a base name appears as both, say, a .docx and a
+    .pdf, only the preferred-format file(s) are kept (see FORMAT_PREFERENCE).
+    Multiple files of that same top format are all kept, so genuinely distinct
     files that merely share a name are never silently dropped. Output order
     follows first appearance in the input.
     """
@@ -75,7 +111,13 @@ def select_newest_versions(
     for base in order:
         members = groups[base]
         if not any(version is not None for version, _ in members):
-            winners.extend(f for _, f in members)
+            files_in_group = [f for _, f in members]
+            best_rank = min(_format_rank(_file_format(f, name_key)) for f in files_in_group)
+            winners.extend(
+                f
+                for f in files_in_group
+                if _format_rank(_file_format(f, name_key)) == best_rank
+            )
             continue
         _, best = max(
             members,
