@@ -17,7 +17,9 @@ function loadStoredMessages(): Message[] {
   }
 }
 
-export function useStreamingAsk(topK = 5) {
+type RetrievalMode = 'vector' | 'lexical' | 'hybrid'
+
+export function useStreamingAsk(topK = 5, retrievalMode: RetrievalMode = 'hybrid') {
   const [messages, setMessages] = useState<Message[]>(loadStoredMessages)
   const [streaming, setStreaming] = useState(false)
 
@@ -41,6 +43,7 @@ export function useStreamingAsk(topK = 5) {
         body: JSON.stringify({
           question,
           top_k: topK,
+          retrieval_mode: retrievalMode,
         }),
       })
 
@@ -114,7 +117,7 @@ export function useStreamingAsk(topK = 5) {
         setStreaming(false)
       }
     },
-    [streaming, topK],
+    [streaming, topK, retrievalMode],
   )
 
   const clearMessages = useCallback(() => {
