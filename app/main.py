@@ -104,7 +104,7 @@ from app.config import (
     SUPABASE_URL,
 )
 from app import llm_client
-from app.similar_titles import find_similar_titles
+from app.similar_titles import find_similar_titles, select_newest_versions
 from app.monitoring.middleware import PrometheusMiddleware
 from app.monitoring.metrics import (
     record_hybrid_scores,
@@ -616,11 +616,13 @@ async def drive_files(
     request: Request,
     folder_id: str | None = None,
     file_ids: str | None = None,
+    collapse_versions: bool = True,
     user_id: str = Depends(get_current_user),
 ):
     """
     List ingestable Drive files (Google Docs, PDF, DOCX). Optional folder_id or file_ids.
-    Requires authenticated user.
+    When listing a folder, collapse_versions (default true) shows only the newest
+    version per report name. Requires authenticated user.
     """
     ids_list: list[str] | None = None
     folder_ctx: DriveFolderContext | None = None
@@ -636,6 +638,9 @@ async def drive_files(
         raw = list_docs_metadata(folder_id=folder_id, file_ids=ids_list)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if collapse_versions and not ids_list:
+        raw = select_newest_versions(raw)
 
     async def enrich(conn):
         doc_ids = [f["id"] for f in raw]
@@ -666,6 +671,9 @@ async def ingest_google_drive(
         raw = list_docs_metadata(folder_id=folder_id, file_ids=body.file_ids)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if body.collapse_versions and not body.file_ids:
+        raw = select_newest_versions(raw)
 
     if not raw:
         raise HTTPException(status_code=400, detail="No ingestable files found in Drive")

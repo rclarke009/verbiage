@@ -9,12 +9,85 @@ from difflib import SequenceMatcher
 
 _EXT_RE = re.compile(r"\.(pdf|txt|doc|docx)$", re.IGNORECASE)
 
+# Trailing/anywhere version token: v9, v10, V 10, v.10
+_VERSION_RE = re.compile(r"\bv\.?\s*(\d+)\b", re.IGNORECASE)
+
 
 def normalize_for_similarity(s: str) -> str:
     s = (s or "").lower().strip()
     s = _EXT_RE.sub("", s)
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+def parse_base_and_version(name: str) -> tuple[str, int | None]:
+    """
+    Split a filename into (normalized base, version int).
+
+    'Address 123 v10.pdf' -> ('address 123', 10). When no vN token is present,
+    version is None and base is the fully normalized name. Comparing the int
+    (not the string) is what makes v10 rank above v9.
+    """
+    stem = normalize_for_similarity(name)
+    if not stem:
+        return "", None
+    version: int | None = None
+    m = _VERSION_RE.search(stem)
+    if m:
+        version = int(m.group(1))
+        stem = _VERSION_RE.sub(" ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return stem, version
+
+
+def select_newest_versions(
+    files: list[dict],
+    *,
+    name_key: str = "name",
+    modified_key: str = "modifiedTime",
+    id_key: str = "id",
+) -> list[dict]:
+    """
+    Collapse same-named report versions down to the newest one.
+
+    Files are grouped by normalized base name (name minus its vN token). A group
+    is collapsed only when at least one member carries a version token; the
+    winner is the highest version, then most recent modifiedTime, then largest id
+    (deterministic). Groups with no version tokens are kept intact, so unrelated
+    files that merely share a name are never silently dropped. Output order
+    follows first appearance in the input.
+    """
+    groups: dict[str, list[tuple[int | None, dict]]] = {}
+    order: list[str] = []
+    extras: list[dict] = []  # ungroupable (empty base) — always kept
+
+    for f in files:
+        base, version = parse_base_and_version(f.get(name_key) or "")
+        if not base:
+            extras.append(f)
+            continue
+        if base not in groups:
+            groups[base] = []
+            order.append(base)
+        groups[base].append((version, f))
+
+    winners: list[dict] = []
+    for base in order:
+        members = groups[base]
+        if not any(version is not None for version, _ in members):
+            winners.extend(f for _, f in members)
+            continue
+        _, best = max(
+            members,
+            key=lambda vf: (
+                vf[0] if vf[0] is not None else -1,
+                vf[1].get(modified_key) or "",
+                vf[1].get(id_key) or "",
+            ),
+        )
+        winners.append(best)
+
+    return winners + extras
 
 
 def similarity_ratio(a: str, b: str) -> float:
