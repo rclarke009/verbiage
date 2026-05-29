@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 GOOGLE_DOCS_MIME = "application/vnd.google-apps.document"
 PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+FOLDER_MIME = "application/vnd.google-apps.folder"
 EXPORT_MIME_PLAIN = "text/plain"
 
 DRIVE_INGEST_MIMES: tuple[str, ...] = (
@@ -39,6 +40,8 @@ DRIVE_INGEST_MIMES: tuple[str, ...] = (
 
 MAX_DRIVE_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_FOLDER_PATH_DEPTH = 5
+# Drive `q` parents clauses are OR'd in batches to keep query strings bounded.
+DRIVE_PARENTS_PER_QUERY = 25
 
 _DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")
 _DRIVE_RAW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -253,12 +256,70 @@ def build_drive_folder_context(folder_id: str | None) -> dict | None:
     }
 
 
+def _chunked(items: list[str], size: int) -> list[list[str]]:
+    """Split a list into consecutive chunks of at most `size`."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _list_subfolder_ids(service, folder_id: str) -> list[str]:
+    """Immediate (one level deep) subfolder ids directly under folder_id."""
+    q = f"mimeType = '{FOLDER_MIME}' and '{folder_id}' in parents and trashed = false"
+    ids: list[str] = []
+    page_token = None
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=q,
+                pageSize=100,
+                fields="nextPageToken, files(id)",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for f in resp.get("files", []):
+            ids.append(f["id"])
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return ids
+
+
+def _list_files_for_query(service, q: str, fields: str) -> list[dict]:
+    """Run a paginated files().list for a single query string."""
+    out: list[dict] = []
+    page_token = None
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=q,
+                pageSize=100,
+                fields=f"nextPageToken, files({fields})",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for f in resp.get("files", []):
+            out.append(f)
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return out
+
+
 def list_docs_metadata(
     folder_id: str | None = None,
     file_ids: list[str] | None = None,
 ) -> list[dict]:
     """
     List ingestable Drive file metadata (no download). Google Docs, PDF, and DOCX.
+
+    When folder_id is given, recursion goes one level deep: files directly in the
+    folder plus files inside its immediate subfolders are returned. This matches a
+    "zfinished/<report folder>/<report>" layout where each report sits in its own
+    subfolder.
+
     Returns list of dicts with id, name, mimeType, and optionally modifiedTime.
     """
     creds = _get_credentials()
@@ -286,29 +347,22 @@ def list_docs_metadata(
                 logger.warning("Could not get file %s: %s", fid, e)
         return result
 
-    q_parts = [drive_mime_query_clause()]
-    if folder_id:
-        q_parts.append(f"'{folder_id}' in parents")
-    q = " and ".join(q_parts)
+    mime_clause = drive_mime_query_clause()
 
+    if not folder_id:
+        return _list_files_for_query(service, mime_clause, fields)
+
+    # Search the target folder and one level of subfolders.
+    parent_ids = [folder_id, *_list_subfolder_ids(service, folder_id)]
     result = []
-    page_token = None
-    while True:
-        resp = (
-            service.files()
-            .list(
-                q=q,
-                pageSize=100,
-                fields=f"nextPageToken, files({fields})",
-                pageToken=page_token,
-            )
-            .execute()
-        )
-        for f in resp.get("files", []):
-            result.append(f)
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
+    seen: set[str] = set()
+    for batch in _chunked(parent_ids, DRIVE_PARENTS_PER_QUERY):
+        parents_clause = "(" + " or ".join(f"'{pid}' in parents" for pid in batch) + ")"
+        q = f"{mime_clause} and {parents_clause}"
+        for f in _list_files_for_query(service, q, fields):
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                result.append(f)
     return result
 
 
