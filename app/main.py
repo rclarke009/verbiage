@@ -74,7 +74,7 @@ from app.retrieval import (
 from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
 from app.drive_client import (
-    list_docs_metadata,
+    list_docs_metadata_async,
     test_connection,
     DriveClientError,
     compute_index_status,
@@ -538,7 +538,7 @@ async def drive_test(user_id: str = Depends(get_current_user)):
     Requires authenticated user.
     """
     try:
-        test_connection()
+        await asyncio.to_thread(test_connection)
         return {"ok": True}
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
@@ -605,7 +605,7 @@ async def drive_folder(
             status_code=400,
             detail="No folder_id provided and no default inbox configured",
         )
-    ctx = build_drive_folder_context(resolved)
+    ctx = await asyncio.to_thread(build_drive_folder_context, resolved)
     if not ctx:
         raise HTTPException(status_code=404, detail="Folder not found")
     return DriveFolderContext(**ctx)
@@ -626,26 +626,38 @@ async def drive_files(
     """
     ids_list: list[str] | None = None
     folder_ctx: DriveFolderContext | None = None
+    folder_task: asyncio.Task | None = None
     if file_ids:
         ids_list = [x.strip() for x in file_ids.split(",") if x.strip()]
     else:
         folder_id = resolve_drive_folder_id(folder_id)
         if folder_id:
-            built = build_drive_folder_context(folder_id)
-            if built:
-                folder_ctx = DriveFolderContext(**built)
+            # Resolve the folder breadcrumb concurrently with the file listing.
+            folder_task = asyncio.create_task(
+                asyncio.to_thread(build_drive_folder_context, folder_id)
+            )
     try:
-        raw = list_docs_metadata(folder_id=folder_id, file_ids=ids_list)
+        raw = await list_docs_metadata_async(folder_id=folder_id, file_ids=ids_list)
     except DriveClientError as e:
+        if folder_task is not None:
+            folder_task.cancel()
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if folder_task is not None:
+        built = await folder_task
+        if built:
+            folder_ctx = DriveFolderContext(**built)
 
     if collapse_versions and not ids_list:
         raw = select_newest_versions(raw)
 
     async def enrich(conn):
-        doc_ids = [f["id"] for f in raw]
-        index_by_id = get_document_index_by_doc_ids(conn, doc_ids)
-        return _build_drive_file_list(raw, index_by_id, folder=folder_ctx)
+        def _run():
+            doc_ids = [f["id"] for f in raw]
+            index_by_id = get_document_index_by_doc_ids(conn, doc_ids)
+            return _build_drive_file_list(raw, index_by_id, folder=folder_ctx)
+
+        return await asyncio.to_thread(_run)
 
     return await with_db_conn_retry(request, enrich)
 
@@ -668,7 +680,7 @@ async def ingest_google_drive(
         folder_id = body.folder_id
         if not body.file_ids:
             folder_id = resolve_drive_folder_id(folder_id)
-        raw = list_docs_metadata(folder_id=folder_id, file_ids=body.file_ids)
+        raw = await list_docs_metadata_async(folder_id=folder_id, file_ids=body.file_ids)
     except DriveClientError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
@@ -695,14 +707,19 @@ async def ingest_google_drive(
         )
 
     async def do_enqueue(conn):
-        batch_id = create_ingest_batch(conn, INGEST_JOB_KIND_GOOGLE_DRIVE, len(jobs_to_insert))
-        job_ids = insert_ingest_jobs(conn, batch_id, jobs_to_insert)
-        conn.commit()
-        return IngestBatchEnqueueResponse(
-            batch_id=batch_id,
-            total=len(jobs_to_insert),
-            job_ids=job_ids,
-        )
+        def _run():
+            batch_id = create_ingest_batch(
+                conn, INGEST_JOB_KIND_GOOGLE_DRIVE, len(jobs_to_insert)
+            )
+            job_ids = insert_ingest_jobs(conn, batch_id, jobs_to_insert)
+            conn.commit()
+            return IngestBatchEnqueueResponse(
+                batch_id=batch_id,
+                total=len(jobs_to_insert),
+                job_ids=job_ids,
+            )
+
+        return await asyncio.to_thread(_run)
 
     return await with_db_conn_retry(request, do_enqueue)
 

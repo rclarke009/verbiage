@@ -3,8 +3,11 @@ Google Drive read-only client for ingestion.
 Uses OAuth2 with drive.readonly scope. Lists and fetches Google Docs, PDFs, and DOCX.
 """
 
+import asyncio
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
@@ -42,6 +45,21 @@ MAX_DRIVE_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_FOLDER_PATH_DEPTH = 5
 # Drive `q` parents clauses are OR'd in batches to keep query strings bounded.
 DRIVE_PARENTS_PER_QUERY = 25
+# Max threads used to fan out independent Drive list queries. googleapiclient
+# services are not thread-safe, so each thread builds its own service.
+DRIVE_LIST_MAX_WORKERS = 16
+
+# Cached OAuth credentials: token refresh is a network round-trip, so we refresh
+# once and reuse until expiry instead of refreshing on every call. Guarded by a
+# lock because requests run concurrently across worker threads.
+_creds_lock = threading.Lock()
+_cached_creds: "Credentials | None" = None
+
+# Dedicated pool for parallel Drive list queries so fan-out is not throttled by
+# the default loop executor (sized to ~cpu+4).
+_drive_list_executor = ThreadPoolExecutor(
+    max_workers=DRIVE_LIST_MAX_WORKERS, thread_name_prefix="drive-list"
+)
 
 _DRIVE_FOLDER_IN_URL_RE = re.compile(r"/folders/([a-zA-Z0-9_-]+)")
 _DRIVE_RAW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -156,30 +174,50 @@ class DriveClientError(Exception):
 
 
 def _get_credentials() -> Credentials:
-    """Build Credentials from config; refresh if needed. Raises if config missing."""
+    """
+    Return cached OAuth Credentials, refreshing only when invalid/expired.
+
+    The token refresh is a network round-trip, so caching avoids paying it on
+    every Drive call. Thread-safe: concurrent worker threads share the cached
+    credentials and only the refresh is serialized behind a lock.
+    """
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REFRESH_TOKEN:
         raise DriveClientError(
             "Google Drive credentials not configured. Set GOOGLE_CLIENT_ID, "
             "GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN (run one-time OAuth first)."
         )
-    creds = Credentials(
-        token=None,
-        refresh_token=GOOGLE_REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
-    )
-    try:
-        creds.refresh(Request())
-    except RefreshError as e:
-        raise DriveClientError(
-            f"Google refused the refresh token ({e!s}). "
-            "Use the same GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET that created the token; "
-            "check .env for stray quotes; revoke the app under Google Account → Security → "
-            "Third-party access if needed, then open /auth/google again."
-        ) from e
-    return creds
+    global _cached_creds
+    with _creds_lock:
+        if _cached_creds is None:
+            _cached_creds = Credentials(
+                token=None,
+                refresh_token=GOOGLE_REFRESH_TOKEN,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=GOOGLE_CLIENT_ID,
+                client_secret=GOOGLE_CLIENT_SECRET,
+                scopes=["https://www.googleapis.com/auth/drive.readonly"],
+            )
+        if not _cached_creds.valid:
+            try:
+                _cached_creds.refresh(Request())
+            except RefreshError as e:
+                _cached_creds = None
+                raise DriveClientError(
+                    f"Google refused the refresh token ({e!s}). "
+                    "Use the same GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET that created the token; "
+                    "check .env for stray quotes; revoke the app under Google Account → Security → "
+                    "Third-party access if needed, then open /auth/google again."
+                ) from e
+        return _cached_creds
+
+
+def _build_service(creds: Credentials):
+    """
+    Build a Drive v3 service. cache_discovery=False avoids the noisy
+    file_cache warning and the on-disk discovery cache. Each thread should
+    build its own service since googleapiclient/httplib2 are not thread-safe.
+    """
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def test_connection() -> bool:
@@ -188,7 +226,7 @@ def test_connection() -> bool:
     Returns True on success. Raises DriveClientError on failure.
     """
     creds = _get_credentials()
-    service = build("drive", "v3", credentials=creds)
+    service = _build_service(creds)
     service.files().list(pageSize=1, fields="files(id)").execute()
     return True
 
@@ -229,7 +267,7 @@ def get_folder_display(folder_id: str) -> dict:
     """
     try:
         creds = _get_credentials()
-        service = build("drive", "v3", credentials=creds)
+        service = _build_service(creds)
         return _folder_display_from_service(service, folder_id)
     except Exception as e:
         logger.warning("Could not get folder display for %s: %s", folder_id, e)
@@ -308,6 +346,60 @@ def _list_files_for_query(service, q: str, fields: str) -> list[dict]:
     return out
 
 
+DRIVE_METADATA_FIELDS = "id, name, mimeType, modifiedTime"
+
+
+def _list_files_by_ids(service, file_ids: list[str], fields: str) -> list[dict]:
+    """Fetch metadata for explicit file ids, skipping unsupported MIME types."""
+    result: list[dict] = []
+    for fid in file_ids:
+        try:
+            meta = service.files().get(fileId=fid, fields=fields).execute()
+            if is_drive_ingestable_mime(meta.get("mimeType")):
+                result.append(meta)
+            else:
+                logger.warning(
+                    "Skipping unsupported file %s (mimeType=%s)",
+                    fid,
+                    meta.get("mimeType"),
+                )
+        except Exception as e:
+            logger.warning("Could not get file %s: %s", fid, e)
+    return result
+
+
+def _resolve_parent_ids(service, folder_id: str) -> list[str]:
+    """Target folder plus its immediate (one-level-deep) subfolders."""
+    return [folder_id, *_list_subfolder_ids(service, folder_id)]
+
+
+def _parents_query(batch: list[str]) -> str:
+    """Drive `q` for ingestable files directly under any parent in the batch."""
+    parents_clause = "(" + " or ".join(f"'{pid}' in parents" for pid in batch) + ")"
+    return f"{drive_mime_query_clause()} and {parents_clause}"
+
+
+def _list_files_for_parents(creds: Credentials, batch: list[str], fields: str) -> list[dict]:
+    """
+    List ingestable files under a batch of parents. Builds its own service so
+    this is safe to call concurrently from multiple worker threads.
+    """
+    service = _build_service(creds)
+    return _list_files_for_query(service, _parents_query(batch), fields)
+
+
+def _dedupe_by_id(file_lists: list[list[dict]]) -> list[dict]:
+    """Flatten lists of file dicts, keeping the first occurrence per id."""
+    result: list[dict] = []
+    seen: set[str] = set()
+    for files in file_lists:
+        for f in files:
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                result.append(f)
+    return result
+
+
 def list_docs_metadata(
     folder_id: str | None = None,
     file_ids: list[str] | None = None,
@@ -320,50 +412,66 @@ def list_docs_metadata(
     "zfinished/<report folder>/<report>" layout where each report sits in its own
     subfolder.
 
+    Sync path used by the ingest worker. Request handlers should prefer
+    list_docs_metadata_async, which fans the batched queries out concurrently.
+
     Returns list of dicts with id, name, mimeType, and optionally modifiedTime.
     """
     creds = _get_credentials()
-    service = build("drive", "v3", credentials=creds)
-    fields = "id, name, mimeType, modifiedTime"
+    service = _build_service(creds)
+    fields = DRIVE_METADATA_FIELDS
 
     if file_ids:
-        result: list[dict] = []
-        for fid in file_ids:
-            try:
-                meta = (
-                    service.files()
-                    .get(fileId=fid, fields=fields)
-                    .execute()
-                )
-                if is_drive_ingestable_mime(meta.get("mimeType")):
-                    result.append(meta)
-                else:
-                    logger.warning(
-                        "Skipping unsupported file %s (mimeType=%s)",
-                        fid,
-                        meta.get("mimeType"),
-                    )
-            except Exception as e:
-                logger.warning("Could not get file %s: %s", fid, e)
-        return result
-
-    mime_clause = drive_mime_query_clause()
+        return _list_files_by_ids(service, file_ids, fields)
 
     if not folder_id:
-        return _list_files_for_query(service, mime_clause, fields)
+        return _list_files_for_query(service, drive_mime_query_clause(), fields)
 
-    # Search the target folder and one level of subfolders.
-    parent_ids = [folder_id, *_list_subfolder_ids(service, folder_id)]
-    result = []
-    seen: set[str] = set()
-    for batch in _chunked(parent_ids, DRIVE_PARENTS_PER_QUERY):
-        parents_clause = "(" + " or ".join(f"'{pid}' in parents" for pid in batch) + ")"
-        q = f"{mime_clause} and {parents_clause}"
-        for f in _list_files_for_query(service, q, fields):
-            if f["id"] not in seen:
-                seen.add(f["id"])
-                result.append(f)
-    return result
+    parent_ids = _resolve_parent_ids(service, folder_id)
+    batches = _chunked(parent_ids, DRIVE_PARENTS_PER_QUERY)
+    return _dedupe_by_id(
+        [_list_files_for_parents(creds, batch, fields) for batch in batches]
+    )
+
+
+def _resolve_parent_ids_with_creds(creds: Credentials, folder_id: str) -> list[str]:
+    """Build a service from creds and resolve the target folder's parent ids."""
+    return _resolve_parent_ids(_build_service(creds), folder_id)
+
+
+async def list_docs_metadata_async(
+    folder_id: str | None = None,
+    file_ids: list[str] | None = None,
+) -> list[dict]:
+    """
+    Async, concurrent variant of list_docs_metadata for request handlers.
+
+    Offloads blocking Drive I/O to threads so the event loop stays responsive.
+    For a folder, it refreshes credentials once, resolves subfolders, then fans
+    the independent batched parent queries out across a dedicated thread pool
+    instead of running them sequentially.
+    """
+    # Explicit ids and whole-Drive listing are simple/sequential: just offload.
+    if file_ids or not folder_id:
+        return await asyncio.to_thread(
+            list_docs_metadata, folder_id=folder_id, file_ids=file_ids
+        )
+
+    fields = DRIVE_METADATA_FIELDS
+    creds = await asyncio.to_thread(_get_credentials)
+    parent_ids = await asyncio.to_thread(
+        _resolve_parent_ids_with_creds, creds, folder_id
+    )
+    batches = _chunked(parent_ids, DRIVE_PARENTS_PER_QUERY)
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(
+            _drive_list_executor, _list_files_for_parents, creds, batch, fields
+        )
+        for batch in batches
+    ]
+    file_lists = await asyncio.gather(*tasks)
+    return _dedupe_by_id(file_lists)
 
 
 def _extract_text_from_bytes(mime_type: str, data: bytes, name: str) -> str:
@@ -417,7 +525,7 @@ def fetch_drive_file(file_id: str) -> DriveDoc:
     Used by the async ingest worker.
     """
     creds = _get_credentials()
-    service = build("drive", "v3", credentials=creds)
+    service = _build_service(creds)
     try:
         meta = (
             service.files()
