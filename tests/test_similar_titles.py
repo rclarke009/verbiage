@@ -1,6 +1,12 @@
 """Unit tests for fuzzy title matching (no DB)."""
 
-from app.similar_titles import find_similar_titles, normalize_for_similarity, similarity_ratio
+from app.similar_titles import (
+    find_similar_titles,
+    normalize_for_similarity,
+    parse_base_and_version,
+    select_newest_versions,
+    similarity_ratio,
+)
 
 
 def test_normalize_strips_extension_and_whitespace():
@@ -37,3 +43,59 @@ def test_similarity_empty_proposed():
 def test_similarity_ratio_helper():
     assert similarity_ratio("abc", "abc") == 1.0
     assert similarity_ratio("", "x") == 0.0
+
+
+def test_parse_base_and_version():
+    assert parse_base_and_version("123 Main St Roof v10.pdf") == ("123 main st roof", 10)
+    assert parse_base_and_version("123 Main St Roof v9.pdf") == ("123 main st roof", 9)
+    assert parse_base_and_version("Report v.3.docx") == ("report", 3)
+    assert parse_base_and_version("No Version Report.pdf") == ("no version report", None)
+
+
+def test_select_newest_picks_v10_over_v9():
+    # v10 must beat v9 by integer compare, not string ("v9" > "v10" lexically).
+    files = [
+        {"id": "a", "name": "123 Main St v9.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "b", "name": "123 Main St v10.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["b"]
+
+
+def test_select_newest_keeps_distinct_report_types():
+    files = [
+        {"id": "a", "name": "123 Main Roof v2.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "b", "name": "123 Main Siding v2.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert {f["id"] for f in out} == {"a", "b"}
+
+
+def test_select_newest_no_version_group_kept_intact():
+    # Same base, no version tokens -> conservative: keep all, never drop silently.
+    files = [
+        {"id": "a", "name": "Quarterly Report.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "b", "name": "Quarterly Report.pdf", "modifiedTime": "2026-02-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert {f["id"] for f in out} == {"a", "b"}
+
+
+def test_select_newest_modified_time_tiebreak_within_version():
+    # When version tokens tie, fall back to most recent modifiedTime.
+    files = [
+        {"id": "a", "name": "Report v3.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "b", "name": "Report v3.pdf", "modifiedTime": "2026-03-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["b"]
+
+
+def test_select_newest_preserves_order_and_empty_input():
+    assert select_newest_versions([]) == []
+    files = [
+        {"id": "x", "name": "Alpha v1.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "y", "name": "Beta v1.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["x", "y"]

@@ -119,6 +119,10 @@ class IngestGoogleDriveRequest(BaseModel):
 
     folder_id: str | None = Field(default=None, description="Limit to files in this folder")
     file_ids: list[str] | None = Field(default=None, description="If set, only these file IDs (folder_id ignored)")
+    collapse_versions: bool = Field(
+        default=True,
+        description="When listing a folder, ingest only the newest version per report name (e.g. v10 over v9). Ignored when file_ids is set.",
+    )
 
 
 class IngestGoogleDriveResponse(BaseModel):
