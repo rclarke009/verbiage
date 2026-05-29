@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { apiOrigin } from '../../lib/api'
 import {
   DRIVE_FOLDER_STORAGE_KEY,
+  DRIVE_STEPS_OPEN_STORAGE_KEY,
   driveFolderUrl,
   parseDriveFolderInput,
   resolveDriveFolderForApi,
@@ -106,6 +107,7 @@ export function DriveTab() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [authHelpOpen, setAuthHelpOpen] = useState(false)
+  const [stepsOpen, setStepsOpen] = useState(true)
   const base = apiOrigin()
   const queryClient = useQueryClient()
   const initDoneRef = useRef(false)
@@ -236,6 +238,11 @@ export function DriveTab() {
     if (err && looksLikeAuthError(err)) setAuthHelpOpen(true)
   }, [err])
 
+  useEffect(() => {
+    const stored = localStorage.getItem(DRIVE_STEPS_OPEN_STORAGE_KEY)
+    if (stored !== null) setStepsOpen(stored === '1')
+  }, [])
+
   const commitFolderInput = () => {
     const { id, error } = parseDriveFolderInput(folderInput)
     if (error) {
@@ -285,6 +292,60 @@ export function DriveTab() {
       <p style={{ fontSize: 13, color: '#57606a', lineHeight: 1.6, marginBottom: 14 }}>
         List and ingest completed reports from Google Drive into the document repository.
       </p>
+
+      <details
+        open={stepsOpen}
+        onToggle={e => {
+          const open = (e.target as HTMLDetailsElement).open
+          setStepsOpen(open)
+          localStorage.setItem(DRIVE_STEPS_OPEN_STORAGE_KEY, open ? '1' : '0')
+        }}
+        style={{
+          fontSize: 13,
+          color: '#24292f',
+          marginBottom: 16,
+          padding: '12px 16px',
+          background: '#f6f8fa',
+          border: '1px solid #d0d7de',
+          borderRadius: 8,
+          lineHeight: 1.5,
+        }}
+      >
+        <summary style={{ ...detailsSummaryStyle, color: '#24292f' }}>
+          How to ingest your files
+        </summary>
+        <ol style={{ margin: '10px 0 0', paddingLeft: 20 }}>
+          <li style={{ marginBottom: 6 }}>
+            <strong>Choose your files.</strong> Open the Drive folder
+            {effectiveFolderId ? (
+              <>
+                {' '}
+                (
+                <a
+                  href={driveFolderUrl(effectiveFolderId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#0969da', fontWeight: 600 }}
+                >
+                  open in Drive
+                </a>
+                )
+              </>
+            ) : null}
+            , drop your completed report(s) in, then click <strong>List files</strong> to see
+            what&rsquo;s there.
+          </li>
+          <li style={{ marginBottom: 6 }}>
+            <strong>Ingest your files.</strong> Select the report(s) you want and click{' '}
+            <strong>Ingest</strong>.
+          </li>
+          <li>
+            <strong>Get answers from them.</strong> Once indexed, those files are searched
+            automatically whenever you ask a question in the Chat tab, so the assistant can pull
+            real answers from them.
+          </li>
+        </ol>
+      </details>
 
       {teamInboxId ? (
         <p style={{ fontSize: 13, color: '#24292f', lineHeight: 1.6, marginBottom: 14 }}>
