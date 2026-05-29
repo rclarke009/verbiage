@@ -91,6 +91,52 @@ def test_select_newest_modified_time_tiebreak_within_version():
     assert [f["id"] for f in out] == ["b"]
 
 
+def test_select_newest_collapses_pdf_and_docx_same_title():
+    # Same report as both .pdf and .docx (no version): keep one, prefer docx.
+    files = [
+        {"id": "p", "name": "Storm Report.pdf", "mimeType": "application/pdf",
+         "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "d", "name": "Storm Report.docx",
+         "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         "modifiedTime": "2026-01-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["d"]
+
+
+def test_select_newest_prefers_gdoc_over_docx_and_pdf():
+    files = [
+        {"id": "p", "name": "Roof Inspection.pdf", "mimeType": "application/pdf"},
+        {"id": "g", "name": "Roof Inspection", "mimeType": "application/vnd.google-apps.document"},
+        {"id": "d", "name": "Roof Inspection.docx",
+         "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["g"]
+
+
+def test_select_newest_keeps_multiple_same_format_no_version():
+    # Two genuinely distinct same-format files sharing a name are still both kept.
+    files = [
+        {"id": "a", "name": "Quarterly Report.pdf", "mimeType": "application/pdf",
+         "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "b", "name": "Quarterly Report.pdf", "mimeType": "application/pdf",
+         "modifiedTime": "2026-02-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert {f["id"] for f in out} == {"a", "b"}
+
+
+def test_select_newest_format_dedup_falls_back_to_extension_without_mime():
+    # No mimeType present (e.g. legacy callers) -> derive format from extension.
+    files = [
+        {"id": "p", "name": "Site Survey.pdf", "modifiedTime": "2026-01-01T00:00:00Z"},
+        {"id": "d", "name": "Site Survey.docx", "modifiedTime": "2026-01-01T00:00:00Z"},
+    ]
+    out = select_newest_versions(files)
+    assert [f["id"] for f in out] == ["d"]
+
+
 def test_select_newest_preserves_order_and_empty_input():
     assert select_newest_versions([]) == []
     files = [
