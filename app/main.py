@@ -65,7 +65,12 @@ from app.embeddings import HttpEmbedder
 from app.ingest_core import ingest_new_document
 from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusResponse
 from app.ingest_worker import ingest_worker_loop
-from app.retrieval import retrieve_top_k
+from app.retrieval import (
+    FusedHit,
+    retrieve_top_k,
+    retrieve_top_k_hybrid,
+    retrieve_top_k_lexical,
+)
 from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
 from app.drive_client import (
@@ -102,6 +107,8 @@ from app import llm_client
 from app.similar_titles import find_similar_titles
 from app.monitoring.middleware import PrometheusMiddleware
 from app.monitoring.metrics import (
+    record_hybrid_scores,
+    record_lexical_scores,
     record_no_context_response,
     record_rag_phase_seconds,
     record_retrieval_scores,
@@ -438,7 +445,7 @@ async def ingest(
     return await with_db_conn_retry(request, do_ingest)
 
 
-MAX_UPLOAD_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_UPLOAD_PDF_BYTES = 100 * 1024 * 1024  # 100 MB
 # Browsers often send PDFs as application/octet-stream; allow when filename is .pdf
 ALLOWED_PDF_CONTENT_TYPES = {"application/pdf", "application/octet-stream"}
 ALLOWED_PDF_EXTENSIONS = {".pdf"}
@@ -751,6 +758,53 @@ def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> 
     )
 
 
+def _retrieve_for_ask(
+    conn,
+    ask_request: AskRequest,
+    query_vec: list[float],
+    embedding_model: str | None,
+    rag_endpoint: str,
+) -> list[RetrievedChunk]:
+    """Retrieve chunks per ask_request.retrieval_mode and record mode-appropriate metrics.
+
+    Shared by /ask and /ask/stream so the two paths can't drift. Returns the
+    RetrievedChunks used to build the prompt; for hybrid the .score is the RRF score
+    while the cosine/ts_rank components are reported to their own metrics.
+    """
+    mode = ask_request.retrieval_mode
+    if mode == "hybrid":
+        fused: list[FusedHit] = retrieve_top_k_hybrid(
+            conn,
+            query_vec,
+            ask_request.question,
+            ask_request.top_k,
+            ask_request.doc_id,
+            embedding_model=embedding_model,
+        )
+        record_hybrid_scores(
+            rag_endpoint,
+            [h.cosine_score for h in fused if h.cosine_score is not None],
+            [h.lexical_score for h in fused if h.lexical_score is not None],
+            [h.rrf_score for h in fused],
+        )
+        return [h.chunk for h in fused]
+    if mode == "lexical":
+        top_chunks = retrieve_top_k_lexical(
+            conn, ask_request.question, ask_request.top_k, ask_request.doc_id
+        )
+        record_lexical_scores(rag_endpoint, [c.score for c in top_chunks])
+        return top_chunks
+    top_chunks = retrieve_top_k(
+        conn,
+        query_vec,
+        ask_request.top_k,
+        ask_request.doc_id,
+        embedding_model=embedding_model,
+    )
+    record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
+    return top_chunks
+
+
 def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
     payload = []
     for c in top_chunks:
@@ -791,12 +845,10 @@ async def ask(
         query_vec = query_vectors[0]
 
         t_retrieve = time.perf_counter()
-        top_chunks = retrieve_top_k(
-            conn, query_vec, ask_request.top_k, ask_request.doc_id,
-            embedding_model=embedder.model,
+        top_chunks = _retrieve_for_ask(
+            conn, ask_request, query_vec, embedder.model, rag_endpoint
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
-        record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
 
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
         if prompt is None:
@@ -835,15 +887,10 @@ async def ask_stream(
         record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         query_vec = query_vectors[0]
         t_retrieve = time.perf_counter()
-        top_chunks = retrieve_top_k(
-            conn,
-            query_vec,
-            ask_request.top_k,
-            ask_request.doc_id,
-            embedding_model=embedder.model,
+        top_chunks = _retrieve_for_ask(
+            conn, ask_request, query_vec, embedder.model, rag_endpoint
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
-        record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
         return rate_limiter, prompt, top_chunks
 

@@ -26,6 +26,12 @@ from app.config import RAG_SIMILARITY_ALERT_THRESHOLD
 # Buckets for cosine similarity scores in [0, 1] from pgvector (1 - distance).
 _SIM_BUCKETS = tuple(round(i * 0.05, 2) for i in range(1, 21))
 
+# ts_rank (lexical) is unbounded but typically small; spread buckets across the low range.
+_LEXICAL_BUCKETS = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
+
+# RRF with 2 lists at k=60 maxes near 2/61 ~= 0.0328; bucket finely down low.
+_RRF_BUCKETS = (0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.05)
+
 # RAG phases can include slow LLM calls; extend past default Prometheus buckets (~10s).
 _PHASE_BUCKETS = (
     0.005,
@@ -104,6 +110,22 @@ RAG_RETRIEVAL_LOW_QUALITY_TOTAL = Counter(
     ["endpoint"],
 )
 
+# --- Hybrid retrieval (RRF fusion of vector + lexical); recorded only on hybrid asks ---
+RAG_RETRIEVAL_TOP_LEXICAL = Histogram(
+    "rag_retrieval_top_lexical_score",
+    "ts_rank of the best lexical match among the fused chunks per hybrid ask request. "
+    "Absent when the top fused results came only from vector search.",
+    ["endpoint"],
+    buckets=_LEXICAL_BUCKETS,
+)
+
+RAG_RETRIEVAL_TOP_RRF = Histogram(
+    "rag_retrieval_top_rrf_score",
+    "RRF score of the top fused chunk per hybrid ask request.",
+    ["endpoint"],
+    buckets=_RRF_BUCKETS,
+)
+
 RAG_NO_CONTEXT_RESPONSE_TOTAL = Counter(
     "rag_no_context_response_total",
     'Responses using the fixed "no relevant context" path (empty chunk list).',
@@ -161,6 +183,41 @@ def record_retrieval_scores(endpoint: str, scores: list[float]) -> None:
     thresh = RAG_SIMILARITY_ALERT_THRESHOLD
     if thresh is not None and top < thresh:
         RAG_RETRIEVAL_LOW_QUALITY_TOTAL.labels(endpoint=endpoint).inc()
+
+
+def record_hybrid_scores(
+    endpoint: str,
+    cosine_scores: list[float],
+    lexical_scores: list[float],
+    rrf_scores: list[float],
+) -> None:
+    """Record retrieval quality for one completed hybrid (RRF) retrieve step.
+
+    cosine_scores keep the existing cosine-scale metrics meaningful and comparable
+    to the vector-only path (option 1). lexical/rrf are tracked on their own scales.
+    Each list should contain only the scores that exist (None components dropped by
+    the caller): a lexical-only chunk contributes no cosine, a vector-only chunk no
+    ts_rank. best-first order; scores[0] is treated as the top observation.
+    """
+    record_retrieval_scores(endpoint, cosine_scores)
+    if lexical_scores:
+        RAG_RETRIEVAL_TOP_LEXICAL.labels(endpoint=endpoint).observe(
+            max(0.0, lexical_scores[0])
+        )
+    if rrf_scores:
+        RAG_RETRIEVAL_TOP_RRF.labels(endpoint=endpoint).observe(max(0.0, rrf_scores[0]))
+
+
+def record_lexical_scores(endpoint: str, scores: list[float]) -> None:
+    """Record quality for a lexical-only retrieve step (ts_rank scale).
+
+    Kept off the cosine histograms so the vector-only metrics stay comparable;
+    empty results still increment the shared empty counter.
+    """
+    if not scores:
+        RAG_RETRIEVAL_EMPTY_TOTAL.labels(endpoint=endpoint).inc()
+        return
+    RAG_RETRIEVAL_TOP_LEXICAL.labels(endpoint=endpoint).observe(max(0.0, scores[0]))
 
 
 def record_no_context_response(endpoint: str) -> None:
