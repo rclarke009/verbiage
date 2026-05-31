@@ -67,6 +67,7 @@ from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusRespons
 from app.ingest_worker import ingest_worker_loop
 from app.retrieval import (
     FusedHit,
+    resolve_auto_mode,
     retrieve_top_k,
     retrieve_top_k_hybrid,
     retrieve_top_k_lexical,
@@ -797,6 +798,8 @@ def _retrieve_for_ask(
     while the cosine/ts_rank components are reported to their own metrics.
     """
     mode = ask_request.retrieval_mode
+    if mode == "auto":
+        mode = resolve_auto_mode(ask_request.question)
     if mode == "hybrid":
         fused: list[FusedHit] = retrieve_top_k_hybrid(
             conn,

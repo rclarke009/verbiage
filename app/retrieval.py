@@ -4,6 +4,7 @@ Uses Postgres pgvector when available; retrieve_top_k_in_memory for tests/fallba
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 from app.models import RetrievedChunk
 from app.db import get_document_source_fields, get_embeddings_for_retrieval, retrieve_top_k_pg, retrieve_top_k_lexical_pg
@@ -62,6 +63,24 @@ def retrieve_top_k_in_memory(
             )
         )
     return out
+
+def resolve_auto_mode(question: str) -> Literal["vector", "lexical", "hybrid"]:
+    """Pick a concrete retrieval mode for the ``auto`` request mode based on query shape.
+
+    Conservative policy for the storm-report domain: short exact-term / identifier-style
+    lookups (a quoted phrase, or <= 2 whitespace tokens, e.g. "torn shingles", WY-2024)
+    route to ``lexical``; everything else routes to ``hybrid``. Pure ``vector`` is never
+    returned because hybrid (RRF) subsumes it on recall, so auto stays safe by default.
+    """
+    text = (question or "").strip()
+    if not text:
+        return "hybrid"
+    if '"' in text or "'" in text:
+        return "lexical"
+    if len(text.split()) <= 2:
+        return "lexical"
+    return "hybrid"
+
 
 def retrieve_top_k_lexical(
     conn, query_text: str, top_k: int, doc_id: str | None = None

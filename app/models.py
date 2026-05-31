@@ -62,9 +62,12 @@ class AskRequest(BaseModel):
     top_k: int = Field(default=5, description="Will pull the top __ matches")
     doc_id: str | None = Field(default=None, description="If set, restrict search to this document")
     use_rag: bool = True
-    retrieval_mode: Literal["vector", "lexical", "hybrid"] = Field(
-        default="vector",
-        description="vector = pgvector cosine; lexical = full-text ts_rank; hybrid = RRF fusion of both",
+    retrieval_mode: Literal["vector", "lexical", "hybrid", "auto"] = Field(
+        default="hybrid",
+        description=(
+            "vector = pgvector cosine; lexical = full-text ts_rank; hybrid = RRF fusion of both; "
+            "auto = adaptive routing per query (lexical for short exact-term lookups, hybrid otherwise)"
+        ),
     )
 
 class RetrievedChunk(BaseModel):

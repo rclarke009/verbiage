@@ -1,24 +1,86 @@
-# TrueAI — RAG report library
+# Verbiage — AI-Powered RAG for Storm Damage Reports
 
-FastAPI + React app for ingesting storm-damage (and similar) reports, embedding them in **Postgres with pgvector**, and answering questions with retrieved context and an LLM.
+**Production-grade Retrieval-Augmented Generation system** built to help engineering teams quickly find relevant language from past storm inspection reports when drafting new ones.
 
-Originally built to generate suggested verbiage from prior case documentation. **Production:** [Render dashboard](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) · live app linked from [overview.md](overview.md).
+**FastAPI + PostgreSQL (pgvector) + Hybrid Search** with a strong emphasis on reliability, grounding, and practical usability for field inspection workflows.
+
+**Production:** [Render dashboard](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) · live app linked from [overview.md](overview.md).
 
 ---
 
-## What it does
+## 🎯 Business Impact
 
-- **Ingest** — PDF upload, pasted text, or Drive files (Google Docs, PDF, .docx via read-only Drive)
-- **Index** — Paragraph-first chunking; canonical `full_text` stored for reindex without re-upload
-- **Ask** — Semantic retrieval + LLM answers with cited sources and report links
-- **Manage** — Shared document library (all signed-in users); list, filter, delete
-- **Drive workflow** — Team inbox via **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`**; list folder with **Indexed / Not indexed / Stale** status; paste another folder URL to override
+- Dramatically reduces time spent manually searching through old reports
+- Improves consistency in report language across the team
+- Enforces **strict grounding** — responses always cite real past reports or clearly state when information is insufficient
+- Supports a collaborative workflow via a shared document library + Google Drive integration
+
+---
+
+## ✨ Key Features
+
+- **Multi-source ingestion**: PDF upload, text paste, and **Google Drive** sync (Docs, PDF, DOCX via read-only Drive)
+- **Hybrid retrieval (RRF)**: The **default** retrieval mode — combines vector embeddings (semantic) + lexical full-text search, fused with Reciprocal Rank Fusion via the `FusedHit` dataclass. An opt-in **`auto`** mode adaptively routes each query (lexical for short exact-term lookups, hybrid otherwise)
+- **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
+- **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information")
+- **Production reliability**: Async ingestion/background tasks, input validation, and structured logging
+- **Flexible LLM backend**: OpenAI (production) or Ollama (local/dev)
+- **Shared library**: All signed-in users see the same document set; list, filter, delete
+- **Drive workflow**: Team inbox via **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`**, with **Indexed / Not indexed / Stale** status badges; paste another folder URL to override
 
 Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama**. Auth: **Supabase JWT** on protected routes.
 
 ---
 
-## Quick start
+## 🛠 Tech Stack
+
+| Layer            | Technology                                              |
+|------------------|--------------------------------------------------------|
+| Backend          | FastAPI, Pydantic v2, async Python                     |
+| Vector DB        | PostgreSQL + pgvector (Supabase in production)         |
+| Search           | Hybrid (embeddings + lexical) + Reciprocal Rank Fusion |
+| LLM / Embeddings | OpenAI or Ollama                                       |
+| Frontend         | React + Vite SPA (TanStack Query)                      |
+| Auth             | Supabase JWT                                           |
+| Drive            | Google Drive API (read-only OAuth)                     |
+| Deployment       | Docker, Render                                         |
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[Ingest: PDF/Drive/Text] --> B[Chunk + Store full_text]
+    B --> C[Embeddings → pgvector]
+    D[User Query] --> E[Hybrid Retrieval: Vector + Lexical]
+    E --> F["Reciprocal Rank Fusion (FusedHit)"]
+    F --> G[Build Grounded Prompt with Context]
+    G --> H[LLM Generation]
+    H --> I[Response + Citations + Validation]
+```
+
+1. Document uploaded, pasted, or exported from Drive
+2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded
+3. Vectors stored in pgvector; retrieval filtered by active embedding model
+4. User question → hybrid retrieval (vector + lexical) → RRF fusion → top-k chunks → grounded LLM response with citations
+
+Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md). Prompt engineering & grounding strategy: [build-prompts.md](build-prompts.md).
+
+---
+
+## 🔧 Recent Improvements & Lessons Learned
+
+| Improvement | Why It Was Added | Impact |
+|-------------|------------------|--------|
+| **Hybrid search + `FusedHit` RRF** | Pure semantic search struggled with specific technical queries (e.g. "hail damage in Wyoming" or "torn shingles") | Significantly better recall on domain-specific storm-damage language |
+| **Async endpoints & background tasks** | Synchronous ingestion blocked the API during large uploads (200+ reports), causing 502 errors | Much more reliable under real team usage loads |
+| **Strict grounding prompt + citations** | Reduce hallucinations and ensure answers are traceable to source reports | Builds team trust — every response either cites documents or says "Not enough information" |
+| **Canonical `full_text` storage** | Support re-indexing and chunking improvements without re-uploading | Faster iteration during development |
+
+---
+
+## 🚀 Quick Start
 
 **Detailed setup:** [setup.md](setup.md) · **Testing & curl:** [setup_and_testing.md](setup_and_testing.md)
 
@@ -76,32 +138,35 @@ Most routes require `Authorization: Bearer <Supabase access token>`.
 
 ---
 
-## Architecture
+## 🎓 Technical Decisions & Tradeoffs
 
-1. Document uploaded, pasted, or exported from Drive  
-2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded  
-3. Vectors stored in pgvector; retrieval filtered by active embedding model  
-4. User question → top-k chunks → LLM response with citations  
+- **Hybrid search (default)**: Chosen after testing showed it outperforms pure vector search on specific storm-report queries (hail, shingles, wind speeds, locations, etc.), so it's the default retrieval mode. RRF fuses the vector and lexical lists without needing comparable score scales. An opt-in `auto` mode routes short exact-term lookups to lexical and everything else to hybrid.
+- **Grounding strategy**: Explicit system prompt + source injection + validation step to maintain reliability in production.
+- **Async migration**: A lesson learned from real ingest testing — essential for production scalability when ingesting large batches of reports.
+- **Canonical `full_text`**: Lets chunking/embedding strategies evolve via reindex instead of re-upload.
 
-Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md).
+This project demonstrates full-cycle applied AI engineering: business problem → reliable RAG system → continuous iteration based on testing and user needs.
 
 ---
 
-## Stack
+## 📋 Project Structure
 
-| Layer | Technology |
-|-------|------------|
-| API | FastAPI, Python |
-| UI | React, Vite, TanStack Query |
-| Database | PostgreSQL + pgvector (Supabase in production) |
-| Auth | Supabase JWT |
-| Embeddings / LLM | OpenAI or Ollama |
-| Drive | Google Drive API (read-only OAuth) |
+- `/app` — Core FastAPI RAG logic (ingestion, chunking, retrieval, generation)
+- `/frontend` — React + Vite SPA
+- [build-prompts.md](build-prompts.md) — Prompt engineering & grounding strategy
+- [code-notes.md](code-notes.md) — Chunking, retrieval, and technical decisions
+- [setup.md](setup.md) · [setup_and_testing.md](setup_and_testing.md) — Setup, testing, and curl examples
 
 ---
 
 ## Health & ops
 
-- Set load-balancer health check to **`/health/ready`**, not `/health`.
+- Set the load-balancer health check to **`/health/ready`**, not `/health`.
 - Optional **`GET /health/deep`** probes DB + embed (avoid high-frequency polling — may call OpenAI).
 - Optional Prometheus **`GET /metrics`** — see [setup.md](setup.md#prometheus-metrics-optional).
+
+---
+
+## 📬 Contact
+
+**Rebecca Clarke** — [LinkedIn](https://www.linkedin.com/) · [Email](mailto:your-email@example.com)
