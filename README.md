@@ -20,7 +20,7 @@
 ## ✨ Key Features
 
 - **Multi-source ingestion**: PDF upload, text paste, and **Google Drive** sync (Docs, PDF, DOCX via read-only Drive)
-- **Hybrid retrieval (RRF)**: The **default** retrieval mode — combines vector embeddings (semantic) + lexical full-text search, fused with Reciprocal Rank Fusion via the `FusedHit` dataclass. An opt-in **`auto`** mode adaptively routes each query (lexical for short exact-term lookups, hybrid otherwise)
+- **Adaptive retrieval (`auto`, default)**: Each query is routed per-shape — short exact-term/identifier lookups go to lexical full-text search, everything else to **hybrid retrieval (RRF)**, which combines vector embeddings (semantic) + lexical full-text search fused with Reciprocal Rank Fusion via the `FusedHit` dataclass. `vector`, `lexical`, and `hybrid` remain selectable explicitly
 - **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
 - **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information")
 - **Production reliability**: Async ingestion/background tasks, input validation, and structured logging
@@ -140,7 +140,7 @@ Most routes require `Authorization: Bearer <Supabase access token>`.
 
 ## 🎓 Technical Decisions & Tradeoffs
 
-- **Hybrid search (default)**: Chosen after testing showed it outperforms pure vector search on specific storm-report queries (hail, shingles, wind speeds, locations, etc.), so it's the default retrieval mode. RRF fuses the vector and lexical lists without needing comparable score scales. An opt-in `auto` mode routes short exact-term lookups to lexical and everything else to hybrid.
+- **Adaptive `auto` routing (default)**: Each query is routed by shape — short exact-term/identifier lookups (`WY-2024`, quoted phrases) to lexical, everything else to hybrid. Hybrid was chosen after testing showed it outperforms pure vector search on specific storm-report queries (hail, shingles, wind speeds, locations, etc.); RRF fuses the vector and lexical lists without needing comparable score scales. Contractions/possessives (`what's`, `owner's`) are not treated as quoting, so natural-language questions stay on hybrid. `vector`/`lexical`/`hybrid` can still be requested explicitly.
 - **Grounding strategy**: Explicit system prompt + source injection + validation step to maintain reliability in production.
 - **Async migration**: A lesson learned from real ingest testing — essential for production scalability when ingesting large batches of reports.
 - **Canonical `full_text`**: Lets chunking/embedding strategies evolve via reindex instead of re-upload.

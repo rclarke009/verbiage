@@ -20,6 +20,7 @@ from app.config import DATABASE_CONNECTION_KWARGS, DATABASE_URL
 from app.embeddings import HttpEmbedder
 from app.retrieval import (
     FusedHit,
+    resolve_auto_mode,
     retrieve_top_k,
     retrieve_top_k_hybrid,
     retrieve_top_k_lexical,
@@ -117,3 +118,55 @@ def test_hybrid_fuses_and_preserves_components(conn, query_vec):
         assert (h.cosine_score is None) == (h.vector_rank is None)
         assert (h.lexical_score is None) == (h.lexical_rank is None)
         assert h.cosine_score is not None or h.lexical_score is not None
+
+
+# --- Retrieval-quality eval: real questions, auto routing, content check ---
+#
+# Each case is (question, expected_substrings). resolve_auto_mode picks the
+# mode, the routed retriever runs against the live corpus, and we assert that
+# at least one expected term shows up in the returned snippets. Tune the
+# expected_substrings to whatever your ingested corpus actually contains --
+# they're the "right answer" signal for the quality angle.
+EVAL_QUESTIONS = [
+    ("which report had the hail damage in wyoming", ["wyoming"]),
+    ("give me 3 text chunks about torn shingles", ["shingle"]),
+    ("Please provide text about water damage due to storm created opening", ["water"]),
+]
+
+
+@pytest.fixture(scope="module")
+def embedder():
+    """Shared embedder; skips the eval if the embed backend is unavailable."""
+    emb = HttpEmbedder()
+    try:
+        asyncio.run(emb.embed_many(["probe"]))
+    except Exception as e:  # invalid key, network, etc.
+        pytest.skip(f"embedding backend unavailable: {str(e)[:120]}")
+    return emb
+
+
+@pytest.mark.parametrize("question, expected_substrings", EVAL_QUESTIONS)
+def test_auto_routing_retrieval_quality(conn, embedder, question, expected_substrings):
+    mode = resolve_auto_mode(question)
+
+    if mode == "lexical":
+        chunks = retrieve_top_k_lexical(conn, question, TOP_K)
+    else:  # "hybrid" or "vector" -- both need the query embedding
+        vec = asyncio.run(embedder.embed_many([question]))[0]
+        if mode == "vector":
+            chunks = retrieve_top_k(conn, vec, TOP_K, embedding_model=embedder.model)
+        else:
+            fused = retrieve_top_k_hybrid(conn, vec, question, TOP_K, embedding_model=embedder.model)
+            chunks = [h.chunk for h in fused]
+
+    print(f"\nMYDEBUG -> mode={mode} q={question!r} -> {len(chunks)} hits")
+    for c in chunks:
+        print(f"   {c.score:.5f}  {(c.document_title or c.doc_id)[:50]} | {c.content_snippet[:80]!r}")
+
+    assert len(chunks) <= TOP_K
+    if not chunks:
+        pytest.skip(f"query matched nothing in this corpus: {question!r}")
+
+    blob = " ".join(c.content_snippet.lower() for c in chunks)
+    for sub in expected_substrings:
+        assert sub.lower() in blob, f"expected {sub!r} in retrieved snippets for {question!r}"
