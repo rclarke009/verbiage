@@ -4,7 +4,7 @@
 
 **FastAPI + PostgreSQL (pgvector) + Hybrid Search** with a strong emphasis on reliability, grounding, and practical usability for field inspection workflows.
 
-**Production:** [Render dashboard](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) · live app linked from [overview.md](overview.md).
+**Live app:** [rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com) (sign-in required) · deployed on Render. More background in [overview.md](overview.md).
 
 ---
 
@@ -21,10 +21,13 @@
 
 - **Multi-source ingestion**: PDF upload, text paste, and **Google Drive** sync (Docs, PDF, DOCX via read-only Drive)
 - **Adaptive retrieval (`auto`, default)**: Each query is routed per-shape — short exact-term/identifier lookups go to lexical full-text search, everything else to **hybrid retrieval (RRF)**, which combines vector embeddings (semantic) + lexical full-text search fused with Reciprocal Rank Fusion via the `FusedHit` dataclass. `vector`, `lexical`, and `hybrid` remain selectable explicitly
+- **Cross-encoder reranking (optional, `RERANK_ENABLED`)**: Retrieval pulls a wider candidate pool, then a cross-encoder (`ms-marco-MiniLM-L-6-v2`) reranks it down to the final top-k — sharpening the context before the prompt. Warmed on startup, loaded lazily, and a no-op when disabled (kept off in tests/CI to avoid the model load)
 - **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
-- **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information")
-- **Production reliability**: Async ingestion/background tasks, input validation, and structured logging
-- **Flexible LLM backend**: OpenAI (production) or Ollama (local/dev)
+- **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information"), plus a **pre-LLM relevance gate** — off-corpus questions are refused before any LLM call when the best chunk's cosine similarity falls below `RAG_MIN_RELEVANCE_SCORE` (deterministic, zero-spend refusals)
+- **Production reliability**: Durable **Postgres-backed ingest job queue** with a background worker (batch enqueue + status polling), input validation, and structured logging
+- **Observability**: Optional Prometheus `/metrics`, including a low-quality-retrieval counter (`rag_retrieval_low_quality_total`) for alerting when top-1 similarity is weak
+- **Flexible LLM backend**: OpenAI (production) or Ollama (local/dev); PostgreSQL (Supabase) in production or SQLite for local dev
+- **Access control**: Supabase JWT on protected routes, with **closed signup** via invite code or email allowlist and a password-reset flow
 - **Shared library**: All signed-in users see the same document set; list, filter, delete
 - **Drive workflow**: Team inbox via **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`**, with **Indexed / Not indexed / Stale** status badges; paste another folder URL to override
 
@@ -39,6 +42,7 @@ Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama*
 | Backend          | FastAPI, Pydantic v2, async Python                     |
 | Vector DB        | PostgreSQL + pgvector (Supabase in production)         |
 | Search           | Hybrid (embeddings + lexical) + Reciprocal Rank Fusion |
+| Reranking        | Cross-encoder (`ms-marco-MiniLM-L-6-v2`, optional)     |
 | LLM / Embeddings | OpenAI or Ollama                                       |
 | Frontend         | React + Vite SPA (TanStack Query)                      |
 | Auth             | Supabase JWT                                           |
@@ -55,7 +59,10 @@ flowchart TD
     B --> C[Embeddings → pgvector]
     D[User Query] --> E[Hybrid Retrieval: Vector + Lexical]
     E --> F["Reciprocal Rank Fusion (FusedHit)"]
-    F --> G[Build Grounded Prompt with Context]
+    F --> J{Relevance gate: cosine ≥ threshold?}
+    J -- No --> K[Refuse: Not enough information]
+    J -- Yes --> L[Cross-encoder rerank → top-k]
+    L --> G[Build Grounded Prompt with Context]
     G --> H[LLM Generation]
     H --> I[Response + Citations + Validation]
 ```
@@ -63,7 +70,7 @@ flowchart TD
 1. Document uploaded, pasted, or exported from Drive
 2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded
 3. Vectors stored in pgvector; retrieval filtered by active embedding model
-4. User question → hybrid retrieval (vector + lexical) → RRF fusion → top-k chunks → grounded LLM response with citations
+4. User question → hybrid retrieval (vector + lexical) → RRF fusion → relevance gate (cosine) → optional cross-encoder rerank → top-k chunks → grounded LLM response with citations
 
 Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md). Prompt engineering & grounding strategy: [build-prompts.md](build-prompts.md).
 
@@ -74,7 +81,9 @@ Implementation notes (chunking, reindex, data sources): [code-notes.md](code-not
 | Improvement | Why It Was Added | Impact |
 |-------------|------------------|--------|
 | **Hybrid search + `FusedHit` RRF** | Pure semantic search struggled with specific technical queries (e.g. "hail damage in Wyoming" or "torn shingles") | Significantly better recall on domain-specific storm-damage language |
-| **Async endpoints & background tasks** | Synchronous ingestion blocked the API during large uploads (200+ reports), causing 502 errors | Much more reliable under real team usage loads |
+| **Cross-encoder reranking** | Top-k straight from RRF still surfaced near-duplicates and loosely-related chunks | A wider candidate pool reranked by a cross-encoder sharpens the final context sent to the LLM |
+| **Pre-LLM relevance gate** | Off-corpus questions still reached the model and risked confident hallucination | Refuses below a cosine threshold *before* any LLM call — no spend, deterministic refusal |
+| **Postgres-backed ingest job queue** | Synchronous ingestion blocked the API during large uploads (200+ reports), causing 502 errors | Durable batch jobs + status polling; reliable under real team usage loads |
 | **Strict grounding prompt + citations** | Reduce hallucinations and ensure answers are traceable to source reports | Builds team trust — every response either cites documents or says "Not enough information" |
 | **Canonical `full_text` storage** | Support re-indexing and chunking improvements without re-uploading | Faster iteration during development |
 
@@ -144,7 +153,8 @@ Interactive docs: **http://localhost:8000/docs** when the server is running.
 | `GET /documents` | Shared library listing |
 | `POST /documents/{doc_id}/reindex` | Re-chunk/re-embed from stored `full_text` |
 | `GET /drive/files` | Drive folder list + `index_status` / `summary` |
-| `POST /ingest/google-drive` | Fetch and ingest Drive files (GDoc, PDF, DOCX) |
+| `POST /ingest/google-drive` | Enqueue a batch of Drive files (GDoc, PDF, DOCX) for the worker |
+| `GET /ingest/batches/{batch_id}` | Poll async ingest batch progress |
 | `POST /ask`, `POST /ask/stream` | RAG Q&A |
 
 Most routes require `Authorization: Bearer <Supabase access token>`.
@@ -154,8 +164,10 @@ Most routes require `Authorization: Bearer <Supabase access token>`.
 ## 🎓 Technical Decisions & Tradeoffs
 
 - **Adaptive `auto` routing (default)**: Each query is routed by shape — short exact-term/identifier lookups (`WY-2024`, quoted phrases) to lexical, everything else to hybrid. Hybrid was chosen after testing showed it outperforms pure vector search on specific storm-report queries (hail, shingles, wind speeds, locations, etc.); RRF fuses the vector and lexical lists without needing comparable score scales. Contractions/possessives (`what's`, `owner's`) are not treated as quoting, so natural-language questions stay on hybrid. When a query is routed to lexical because of a quoted phrase, only the quoted phrase is searched (not the verbose wrapper, whose terms would AND to no match), and if the adaptive lexical route returns nothing it falls back to hybrid — so `auto` never does worse than the hybrid default. `vector`/`lexical`/`hybrid` can still be requested explicitly.
+- **Reranking after fusion**: RRF is great at *recall* but order is rank-based, so a cross-encoder reranks a wider candidate pool by true query–document relevance before prompt assembly. Kept optional (`RERANK_ENABLED`) and lazy-loaded so tests/CI never pay the ~100MB model cost.
+- **Gate on cosine, before the LLM**: The relevance gate evaluates the cosine component regardless of retrieval mode — RRF and `ts_rank` magnitudes aren't comparable across queries, so cosine is the only signal that says anything about *absolute* relevance. Refusing below the threshold avoids both hallucinations and wasted LLM spend on off-corpus questions.
 - **Grounding strategy**: Explicit system prompt + source injection + validation step to maintain reliability in production.
-- **Async migration**: A lesson learned from real ingest testing — essential for production scalability when ingesting large batches of reports.
+- **Durable ingest queue**: A lesson learned from real ingest testing — synchronous ingestion of large batches caused 502s, so ingestion moved to a Postgres-backed job queue with a background worker and pollable batch status.
 - **Canonical `full_text`**: Lets chunking/embedding strategies evolve via reindex instead of re-upload.
 
 This project demonstrates full-cycle applied AI engineering: business problem → reliable RAG system → continuous iteration based on testing and user needs.
@@ -164,8 +176,9 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 
 ## 📋 Project Structure
 
-- `/app` — Core FastAPI RAG logic (ingestion, chunking, retrieval, generation)
+- `/app` — Core FastAPI RAG logic (ingestion, chunking, retrieval, reranking, generation)
 - `/frontend` — React + Vite SPA
+- `/tests` — Unit/integration suite + the opt-in faithfulness eval harness (`tests/eval/`)
 - [build-prompts.md](build-prompts.md) — Prompt engineering & grounding strategy
 - [code-notes.md](code-notes.md) — Chunking, retrieval, and technical decisions
 - [setup.md](setup.md) · [setup_and_testing.md](setup_and_testing.md) — Setup, testing, and curl examples
@@ -182,4 +195,4 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 
 ## 📬 Contact
 
-**Rebecca Clarke** — [LinkedIn](https://www.linkedin.com/) · [Email](mailto:your-email@example.com)
+**Rebecca Clarke** — [LinkedIn](https://www.linkedin.com/in/rclarke009/) · [Email](mailto:rivkaclarke@icloud.com)

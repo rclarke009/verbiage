@@ -38,9 +38,7 @@ Same RAG flow as the learning project; domain = storm damage reports and reusabl
 
 ## Hosting
 
-**Production app URL:** [https://rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com)
-
-The service is deployed on [Render](https://dashboard.render.com/web/srv-d6m79eftskes73dnndb0) (web service dashboard; sign-in required).
+**Production app URL:** [https://rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com) (sign-in required)
 
 ---
 

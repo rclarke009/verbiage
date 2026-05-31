@@ -66,17 +66,24 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
         }),
       })
 
+      let streamError: string | null = null
+
       try {
         const response = await fetch(urlForFetch, init)
         if (!response.ok) {
-          const t = await response.text()
-          throw new Error(t || response.statusText)
+          const t = (await response.text()).trim()
+          // statusText is empty over HTTP/2, so always fall back to the status code
+          // to avoid surfacing a bare "Error:" with no detail.
+          throw new Error(t || response.statusText || `HTTP ${response.status}`)
         }
         if (!response.body) throw new Error('No response body')
 
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        // Track the event type across read() chunks; an SSE frame can be split
+        // across network reads, and is terminated by a blank line.
+        let currentEvent = ''
 
         while (true) {
           const { done, value } = await reader.read()
@@ -86,8 +93,11 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
           const lines = buffer.split('\n')
           buffer = lines.pop() ?? ''
 
-          let currentEvent = ''
           for (const line of lines) {
+            if (line === '') {
+              currentEvent = ''
+              continue
+            }
             if (line.startsWith('event:')) {
               currentEvent = line.slice(6).trim()
             } else if (line.startsWith('data:')) {
@@ -103,6 +113,12 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
                     chunksUsed:
                       typeof data.chunks_used === 'number' ? data.chunks_used : r.chunksUsed,
                   }))
+                } else if (currentEvent === 'error') {
+                  const detail = typeof data.detail === 'string' ? data.detail : ''
+                  streamError =
+                    detail === 'retrieval_failed'
+                      ? 'Search failed while retrieving from the report library. Please try again.'
+                      : detail || 'The server reported an error while searching.'
                 }
               } catch {
                 /* ignore malformed SSE lines */
@@ -111,11 +127,12 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
           }
         }
       } catch (err) {
-        patch(r => ({
-          ...r,
-          answer: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        }))
+        const msg = err instanceof Error && err.message ? err.message : ''
+        streamError = msg || 'Something went wrong while contacting the server.'
       } finally {
+        if (streamError) {
+          patch(r => ({ ...r, answer: r.answer ? r.answer : `Error: ${streamError}` }))
+        }
         patch(r => ({ ...r, streaming: false }))
         setSearching(false)
       }
