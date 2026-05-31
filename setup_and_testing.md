@@ -69,6 +69,9 @@ PYTHONPATH=. pytest tests/ -q
 
 - **`tests/test_metrics.py`** — Prometheus middleware and RAG metric helpers (no database).
 - **`tests/test_drive_index_status.py`** — Drive folder `index_status` computation (indexed / stale / not_indexed).
+- **`tests/test_retrieval.py`** — RRF fusion, `auto` routing, and the cosine relevance gate (monkeypatched, no DB).
+- **`tests/test_reranker.py`** — cross-encoder reranking: the `Reranker` (lazy load stubbed, no model download), the `_rerank_chunks` adapter, and `_retrieve_for_ask` pool-widening + the gate-runs-before-rerank invariant.
+- **`tests/test_llm_client.py`** — LLM temperature plumbing: the configured `LLM_TEMPERATURE` default and explicit overrides reach the OpenAI/Ollama request payload (HTTP mocked).
 - Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
 - **`tests/eval/`** — faithfulness eval suite; excluded from `pytest tests/` unless `VERBIAGE_EVAL=1` is set. See **Faithfulness eval (opt-in)** below.
 
