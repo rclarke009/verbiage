@@ -63,10 +63,11 @@ class AskRequest(BaseModel):
     doc_id: str | None = Field(default=None, description="If set, restrict search to this document")
     use_rag: bool = True
     retrieval_mode: Literal["vector", "lexical", "hybrid", "auto"] = Field(
-        default="hybrid",
+        default="auto",
         description=(
-            "vector = pgvector cosine; lexical = full-text ts_rank; hybrid = RRF fusion of both; "
-            "auto = adaptive routing per query (lexical for short exact-term lookups, hybrid otherwise)"
+            "auto (default) = adaptive routing per query (lexical for short exact-term lookups, "
+            "hybrid otherwise); vector = pgvector cosine; lexical = full-text ts_rank; "
+            "hybrid = RRF fusion of both"
         ),
     )
 

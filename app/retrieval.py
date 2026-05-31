@@ -3,6 +3,7 @@ Retrieval: top-k chunks by similarity to the query vector.
 Uses Postgres pgvector when available; retrieve_top_k_in_memory for tests/fallback.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -64,18 +65,35 @@ def retrieve_top_k_in_memory(
         )
     return out
 
+# A *deliberately quoted phrase* signals exact-match intent. Double quotes
+# (straight or curly) count anywhere; single quotes count only at word
+# boundaries, so contractions and possessives ("what's", "owner's") are NOT
+# mistaken for quoting. Both quote marks must be balanced — a lone stray quote
+# does not trigger lexical routing.
+_QUOTED_PHRASE = re.compile(
+    "[\"\u201c][^\"\u201d]+[\"\u201d]"  # "double" or “curly” double-quoted span
+    "|(?:^|(?<=\\s))['\u2018][^'\u2019]+['\u2019](?=\\s|$)"  # 'single'/‘curly’ at word boundaries
+)
+
+
 def resolve_auto_mode(question: str) -> Literal["vector", "lexical", "hybrid"]:
     """Pick a concrete retrieval mode for the ``auto`` request mode based on query shape.
 
     Conservative policy for the storm-report domain: short exact-term / identifier-style
-    lookups (a quoted phrase, or <= 2 whitespace tokens, e.g. "torn shingles", WY-2024)
-    route to ``lexical``; everything else routes to ``hybrid``. Pure ``vector`` is never
-    returned because hybrid (RRF) subsumes it on recall, so auto stays safe by default.
+    lookups route to ``lexical``; everything else routes to ``hybrid``. Pure ``vector`` is
+    never returned because hybrid (RRF) subsumes it on recall, so auto stays safe by default.
+
+    A query is treated as a short exact-term lookup when it either:
+      * contains an explicit balanced quoted phrase (e.g. ``find "hail damage"``), or
+      * is <= 2 whitespace tokens (e.g. ``torn shingles``, ``WY-2024``).
+
+    Apostrophes inside words (contractions/possessives like ``what's``) are NOT treated as
+    quoting, so natural-language questions stay on ``hybrid``.
     """
     text = (question or "").strip()
     if not text:
         return "hybrid"
-    if '"' in text or "'" in text:
+    if _QUOTED_PHRASE.search(text):
         return "lexical"
     if len(text.split()) <= 2:
         return "lexical"

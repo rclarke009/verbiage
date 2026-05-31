@@ -17,9 +17,9 @@ function loadStoredMessages(): Message[] {
   }
 }
 
-type RetrievalMode = 'vector' | 'lexical' | 'hybrid'
+type RetrievalMode = 'vector' | 'lexical' | 'hybrid' | 'auto'
 
-export function useStreamingAsk(topK = 5, retrievalMode: RetrievalMode = 'hybrid') {
+export function useStreamingAsk(topK = 5, retrievalMode: RetrievalMode = 'auto') {
   const [messages, setMessages] = useState<Message[]>(loadStoredMessages)
   const [streaming, setStreaming] = useState(false)
 

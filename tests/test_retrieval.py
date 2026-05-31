@@ -1,5 +1,7 @@
 """Hybrid retrieval: RRF fusion (pure) and /ask mode routing (monkeypatched, no DB)."""
 
+import pytest
+
 import app.main as main
 from app.models import AskRequest, RetrievedChunk
 from app.retrieval import FusedHit, _rrf_fuse, resolve_auto_mode
@@ -123,8 +125,8 @@ def test_retrieve_for_ask_hybrid_mode(monkeypatch):
 # --- Default mode + adaptive "auto" routing --------------------------------
 
 
-def test_ask_request_defaults_to_hybrid():
-    assert AskRequest(question="q").retrieval_mode == "hybrid"
+def test_ask_request_defaults_to_auto():
+    assert AskRequest(question="q").retrieval_mode == "auto"
 
 
 def test_resolve_auto_mode_short_query_is_lexical():
@@ -168,3 +170,37 @@ def test_retrieve_for_ask_auto_mode_routes_short_query_to_lexical(monkeypatch):
 
     assert [c.chunk_id for c in out] == ["l"]
     assert "lexical" in calls and "hybrid" not in calls
+
+
+# --- resolve_auto_mode branch + boundary coverage (table-driven) -----------
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        # real domain questions -- all natural language, so all route to hybrid
+        ("which report had the hail damage in wyoming", "hybrid"),
+        ("give me 3 text chunks about torn shingles", "hybrid"),
+        ("Please provide text about water damage due to storm created opening", "hybrid"),
+        # token boundary: <= 2 tokens is lexical, 3 flips to hybrid
+        ("torn shingles", "lexical"),  # exactly at the 2-token limit
+        ("torn shingles wyoming", "hybrid"),  # just over -> flips
+        ("hail", "lexical"),  # single token
+        ("WY-2024", "lexical"),  # identifier-style lookup
+        # a balanced quoted phrase (single OR double) forces lexical regardless of length
+        ('find "hail damage" reports', "lexical"),
+        ("reports mentioning 'torn shingles' damage", "lexical"),
+        ("\u201csmart quoted\u201d phrase in a long natural sentence", "lexical"),  # curly double quotes
+        # contractions / possessives must NOT be mistaken for quoting -> stay hybrid
+        ("what's the hail damage in wyoming", "hybrid"),
+        ("what is the owner's roof claim about hail", "hybrid"),
+        ("what\u2019s the storm damage in wyoming", "hybrid"),  # curly apostrophe
+        # a lone / unbalanced quote is not a quoted phrase -> falls through to token count
+        ('find " hail damage on the roof in wyoming', "hybrid"),
+        # empty / whitespace-only -> hybrid (safe default)
+        ("", "hybrid"),
+        ("   ", "hybrid"),
+    ],
+)
+def test_resolve_auto_mode_cases(question, expected):
+    assert resolve_auto_mode(question) == expected
