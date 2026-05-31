@@ -7,6 +7,10 @@
 #     pytest -m eval_fast tests/eval
 #   docker compose -f docker-compose.eval.yml down -v
 
+# Dedicated project name so this stack gets its own network (verbiage_eval_default)
+# and never shares/collides with the main docker-compose.yml stack ("verbiage").
+name: verbiage_eval
+
 services:
   eval-db:
     image: pgvector/pgvector:pg15

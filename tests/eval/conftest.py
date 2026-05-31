@@ -55,24 +55,30 @@ def pytest_configure(config):
 
 
 def _compose(*args: str) -> None:
+    # --env-file /dev/null: the eval stack uses no repo .env vars; skipping it avoids
+    # docker compose interpolation warnings from $-containing secrets in .env.
     subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
+        ["docker", "compose", "--env-file", "/dev/null", "-f", str(COMPOSE_FILE), *args],
         check=True,
         cwd=str(REPO_ROOT),
     )
 
 
 def _connect(url: str):
+    """Open a raw connection, retrying only on genuine connection errors.
+
+    The pgvector adapter is intentionally NOT registered here: the `vector` type
+    does not exist until create_db() runs `CREATE EXTENSION vector`. create_db()
+    registers the adapter on this same connection afterwards (via _ensure_pgvector),
+    matching exactly how production initializes a connection in app/db.py.
+    """
     import psycopg2
-    from pgvector.psycopg2 import register_vector
 
     last_exc = None
     for _ in range(30):
         try:
-            conn = psycopg2.connect(url)
-            register_vector(conn)
-            return conn
-        except Exception as e:  # container may still be starting
+            return psycopg2.connect(url)
+        except psycopg2.OperationalError as e:  # container may still be starting
             last_exc = e
             time.sleep(1)
     raise RuntimeError(f"could not connect to eval DB at {url}: {last_exc}")

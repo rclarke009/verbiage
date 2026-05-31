@@ -70,8 +70,53 @@ PYTHONPATH=. pytest tests/ -q
 - **`tests/test_metrics.py`** — Prometheus middleware and RAG metric helpers (no database).
 - **`tests/test_drive_index_status.py`** — Drive folder `index_status` computation (indexed / stale / not_indexed).
 - Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
+- **`tests/eval/`** — faithfulness eval suite; excluded from `pytest tests/` unless `VERBIAGE_EVAL=1` is set. See **Faithfulness eval (opt-in)** below.
 
 Operational scraping and env vars for **`/metrics`** are described in **[setup.md](setup.md)** (*Prometheus metrics (optional)*).
+
+---
+
+## Faithfulness eval (opt-in)
+
+A regression harness that checks, after every retrieval/prompt tweak, whether **every claim in an answer is supported by the context that was actually retrieved**. It runs the real pipeline (`auto` routing → RRF → grounded prompt → LLM) against a frozen corpus seeded into a throwaway pgvector container, then judges each answer's claims. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest tests/` run stays fast and offline.
+
+### Prerequisites
+
+- **Docker** running (the eval DB comes up on host port **5433** via `docker-compose.eval.yml`; make sure nothing else uses 5433).
+- An **LLM + embedding backend** — same options as above: set `OPENAI_API_KEY` in `.env` (uses `text-embedding-3-small` + `gpt-4o-mini`), or run **Ollama** with `nomic-embed-text` and `llama3.1:8b` pulled.
+- Deps installed (`pip install -r requirements.txt`). The fast judge downloads `cross-encoder/nli-deberta-v3-base` (~400 MB) from Hugging Face on the **first** run, so that run needs network even on the Ollama path.
+
+### First run (warms the embedding cache)
+
+```bash
+make eval        # fast gate: local NLI judge, intended for every tweak
+```
+
+This brings the ephemeral DB up (`--wait`), seeds `tests/eval/corpus/`, runs `pytest -m eval_fast tests/eval -s`, prints a per-question scoreboard, and tears the DB down. On the first run, `tests/eval/embeddings_cache.json` is empty, so the corpus chunks and gold questions are embedded once via the live backend and written into that file.
+
+**Commit the warmed cache** so future runs are deterministic and offline (embedding calls disappear; only generation still hits the LLM):
+
+```bash
+git add tests/eval/embeddings_cache.json
+git commit -m "Warm eval embeddings cache"
+```
+
+### Routine use
+
+```bash
+make eval            # fast NLI gate (run after every tweak)
+make eval-full       # deep gate: OpenAI LLM-as-judge (needs OPENAI_API_KEY)
+make eval-warm-cache # re-embed + rewrite the cache after changing corpus/chunking/model
+```
+
+Gold questions (including deliberately **unanswerable** ones that must trigger a refusal) live in `tests/eval/gold_questions.yaml`. The bar lives in `tests/eval/test_faithfulness.py`: `FAST_MIN_FAITHFULNESS` and the `NliJudge` threshold — loosen these if sentence-level NLI proves too strict on legitimately-grounded paraphrase.
+
+### Notes / gotchas
+
+- Caching removes the **embedding** network dependency only; **generation calls the LLM every run** (that's what's being tested), so a backend must always be reachable.
+- `make eval` manages its own env (`VERBIAGE_EVAL=1`, `EVAL_DATABASE_URL`), so no `PYTHONPATH=.` prefix is needed unlike the unit tests above.
+- Port 5433 busy → `up --wait` hangs; free it or change the host port in `docker-compose.eval.yml`.
+- A failure tagged as a retriever miss (missing `must_mention` terms) points at retrieval, not generation — see the assertion messages in `tests/eval/test_faithfulness.py`.
 
 ---
 
