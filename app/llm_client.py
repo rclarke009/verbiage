@@ -23,6 +23,7 @@ from app.config import (
     OPENAI_API_KEY,
 )
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMUpstreamTimeoutError
+from app.http_client import get_async_client
 from app.monitoring.metrics import record_upstream_fallback, record_upstream_timeout
 
 logger = logging.getLogger(__name__)
@@ -42,15 +43,16 @@ async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
             }
             if temperature is not None:
                 payload["temperature"] = temperature
-            async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    OPENAI_CHAT_URL,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    },
-                    json=payload,
-                )
+            client = get_async_client()
+            resp = await client.post(
+                OPENAI_CHAT_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                },
+                json=payload,
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
             if resp.status_code == 429:
                 retry_after = resp.headers.get("retry-after")
                 logger.warning(
@@ -109,11 +111,12 @@ async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
             }
             if temperature is not None:
                 payload["options"] = {"temperature": temperature}
-            async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    url=f"{LLM_BASE_URL.rstrip('/')}/api/chat",
-                    json=payload,
-                )
+            client = get_async_client()
+            resp = await client.post(
+                url=f"{LLM_BASE_URL.rstrip('/')}/api/chat",
+                json=payload,
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
             if resp.status_code == 429:
                 raise LLMRateLimitedError("LLM rate limited")
             if resp.status_code >= 400:
@@ -184,39 +187,40 @@ async def _answer_openai_stream(prompt: str, temperature: float | None = None):
     }
     if temperature is not None:
         payload["temperature"] = temperature
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-        async with client.stream(
-            "POST",
-            OPENAI_CHAT_URL,
-            headers=headers,
-            json=payload,
-        ) as resp:
-            if resp.status_code == 429:
-                raise LLMRateLimitedError("OpenAI rate limited")
-            if resp.status_code >= 400:
-                err_txt = await resp.aread()
-                snippet = err_txt[:200].decode(errors="replace") if err_txt else "(empty)"
-                raise LLMServiceError(
-                    f"OpenAI API error {resp.status_code}: {snippet}"
-                )
-            async for line in resp.aiter_lines():
-                line = line.strip()
-                if not line or not line.startswith("data:"):
+    client = get_async_client()
+    async with client.stream(
+        "POST",
+        OPENAI_CHAT_URL,
+        headers=headers,
+        json=payload,
+        timeout=LLM_TIMEOUT_SECONDS,
+    ) as resp:
+        if resp.status_code == 429:
+            raise LLMRateLimitedError("OpenAI rate limited")
+        if resp.status_code >= 400:
+            err_txt = await resp.aread()
+            snippet = err_txt[:200].decode(errors="replace") if err_txt else "(empty)"
+            raise LLMServiceError(
+                f"OpenAI API error {resp.status_code}: {snippet}"
+            )
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line.removeprefix("data:").strip()
+            if data == "[DONE]":
+                break
+            try:
+                j = json.loads(data)
+                choice = (j.get("choices") or [None])[0]
+                if not choice:
                     continue
-                data = line.removeprefix("data:").strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    j = json.loads(data)
-                    choice = (j.get("choices") or [None])[0]
-                    if not choice:
-                        continue
-                    delta = choice.get("delta") or {}
-                    content = delta.get("content") or ""
-                    if content:
-                        yield content
-                except json.JSONDecodeError:
-                    continue
+                delta = choice.get("delta") or {}
+                content = delta.get("content") or ""
+                if content:
+                    yield content
+            except json.JSONDecodeError:
+                continue
 
 
 async def answer_with_context_stream(prompt: str, temperature: float | None = None):

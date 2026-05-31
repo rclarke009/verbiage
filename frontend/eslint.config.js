@@ -19,5 +19,16 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Allow intentionally-unused identifiers when prefixed with `_`
+      // (e.g. placeholder params in not-yet-wired stubs).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      // Fast Refresh is a dev-only HMR optimization; co-locating a hook with its
+      // provider doesn't affect correctness, so don't fail the build on it.
+      'react-refresh/only-export-components': 'warn',
+    },
   },
 ])

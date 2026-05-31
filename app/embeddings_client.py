@@ -20,6 +20,7 @@ from app.errors import (
     LLMServiceError,
     LLMUpstreamTimeoutError,
 )
+from app.http_client import get_async_client
 from app.monitoring.metrics import record_upstream_timeout
 
 logger = logging.getLogger(__name__)
@@ -36,12 +37,13 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     last_exc: BaseException | None = None
     for attempt in range(EMBED_MAX_ATTEMPTS):
         try:
-            async with httpx.AsyncClient(timeout=EMBED_TIMEOUT) as client:
-                response = await client.post(
-                    f"{EMBED_BASE_URL}/api/embed",
-                    headers={"Content-Type": "application/json"},
-                    json={"model": EMBED_MODEL, "input": texts},
-                )
+            client = get_async_client()
+            response = await client.post(
+                f"{EMBED_BASE_URL}/api/embed",
+                headers={"Content-Type": "application/json"},
+                json={"model": EMBED_MODEL, "input": texts},
+                timeout=EMBED_TIMEOUT,
+            )
             if response.status_code == 429:
                 raise LLMRateLimitedError("Embedding API rate limited")
             if response.status_code >= 400:

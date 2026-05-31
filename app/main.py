@@ -64,6 +64,7 @@ from app.models import (
 from app.rate_limit import TokenBucket
 from app.indexing import index_document, reindex_document
 from app.embeddings import HttpEmbedder
+from app.http_client import aclose_async_client, get_async_client
 from app.ingest_core import ingest_new_document
 from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusResponse
 from app.ingest_worker import ingest_worker_loop
@@ -152,7 +153,10 @@ def _create_db_pool():
         kwargs["connection_factory"] = NoPrepareConnection
     return psycopg2_pool.ThreadedConnectionPool(**kwargs)
 
-async def _warm_reranker(reranker):
+async def _warm_reranker(app):
+    # Marks readiness once the load attempt finishes so /health/ready gates traffic
+    # until the model is in memory (or the attempt has terminally failed).
+    reranker = app.state.reranker
     try:
         await asyncio.to_thread(reranker._get_model)
         logger.info("Reranker warm-up complete")
@@ -161,6 +165,10 @@ async def _warm_reranker(reranker):
     except Exception as e:
         # Warm-up is best-effort: first real rerank() will retry the load lazily.
         logger.warning("Reranker warm-up failed (will load lazily): %s", e)
+    finally:
+        # Even on failure, stop gating readiness: a permanently un-ready service is
+        # worse than falling back to the lazy load on the request path.
+        app.state.reranker_ready = True
 
 @asynccontextmanager
 async def lifespan(app):
@@ -191,6 +199,10 @@ async def lifespan(app):
 
     app.state.db_pool = db_pool
 
+    # Create the shared keep-alive HTTP client now so it binds to this event loop and the
+    # first embedding/LLM call reuses a warm connection pool instead of a fresh handshake.
+    get_async_client()
+
     app.state.rate_limiter = TokenBucket()
 
     warm_task = None
@@ -200,11 +212,13 @@ async def lifespan(app):
         # but do it on a different thread so user doesn't wait at 
         #startup and they don't wait on first request
         app.state.reranker = Reranker()            # cheap: no model load yet
+        app.state.reranker_ready = False           # /health/ready stays 503 until warm
         # Warm in the background so boot isn't blocked and the first /ask isn't penalized.
-        warm_task = asyncio.create_task(_warm_reranker(app.state.reranker))
+        warm_task = asyncio.create_task(_warm_reranker(app))
         logger.info("Reranker warm-up scheduled")
     else:
         app.state.reranker = None
+        app.state.reranker_ready = True            # nothing to load => always ready
         logger.info("Reranker disabled")
 
     ingest_task = None
@@ -229,6 +243,7 @@ async def lifespan(app):
             await ingest_task
         except asyncio.CancelledError:
             pass
+    await aclose_async_client()
     db_pool.closeall()
     logger.info("Work has stopped")
 

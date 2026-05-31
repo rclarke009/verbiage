@@ -57,6 +57,37 @@ Default: `http://localhost:8000`. The same server can serve the **built** SPA at
 
 ---
 
+## Automated checks on commit / push (git hooks)
+
+Repo-tracked hooks in **`.githooks/`** run the test gates for you so a broken commit can't slip through. **Enable them once per clone** — this writes to *this* repo's `.git/config` only, and is **not** committed, so every fresh clone (or new machine) needs it again:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Confirm it took:
+
+```bash
+git config core.hooksPath   # should print: .githooks
+```
+
+What runs:
+
+- **`pre-commit`** (on `git commit`) — backend `pytest -q`, plus frontend `npm run lint` + `npm run typecheck` + `npm test` (Vitest) **only when the commit touches `frontend/`**.
+- **`pre-push`** (on `git push`) — `make eval` (the fast faithfulness gate). If Docker isn't running it **skips** rather than blocking the push; set `VERBIAGE_REQUIRE_EVAL=1` to make a missing Docker **fail** the push instead.
+
+Bypass either for a single command with `--no-verify` (`git commit --no-verify`, `git push --no-verify`).
+
+**Undo / revert to your global (or default) hooks:**
+
+```bash
+git config --unset core.hooksPath
+```
+
+> Setting `core.hooksPath` for this repo overrides any global hooks path you have configured, for this repo only — other repos keep using your global hooks.
+
+---
+
 ## Unit tests (pytest)
 
 After **`pip install -r requirements.txt`** inside the project **`venv`**, run tests from the **repository root** with **`PYTHONPATH=.`** so the **`app`** package resolves:
@@ -72,10 +103,33 @@ PYTHONPATH=. pytest tests/ -q
 - **`tests/test_retrieval.py`** — RRF fusion, `auto` routing, and the cosine relevance gate (monkeypatched, no DB).
 - **`tests/test_reranker.py`** — cross-encoder reranking: the `Reranker` (lazy load stubbed, no model download), the `_rerank_chunks` adapter, and `_retrieve_for_ask` pool-widening + the gate-runs-before-rerank invariant.
 - **`tests/test_llm_client.py`** — LLM temperature plumbing: the configured `LLM_TEMPERATURE` default and explicit overrides reach the OpenAI/Ollama request payload (HTTP mocked).
+- **`tests/test_ask_stream.py`** — SSE wire contract for **`POST /ask/stream`**: a prepare/retrieval failure emits an `event: error` frame (`retrieval_failed`), and the no-context path emits a token refusal + empty `sources` frame without calling the LLM. These are the exact frames the SPA's `useReportSearch` hook parses. `TestClient` is used without a context manager so the app lifespan (and its real DB) never starts; `with_db_conn_retry` is patched, so no database is required.
 - Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
 - **`tests/eval/`** — faithfulness eval suite; excluded from `pytest tests/` unless `VERBIAGE_EVAL=1` is set. See **Faithfulness eval (opt-in)** below.
 
 Operational scraping and env vars for **`/metrics`** are described in **[setup.md](setup.md)** (*Prometheus metrics (optional)*).
+
+---
+
+## Frontend tests (Vitest)
+
+The SPA has a [Vitest](https://vitest.dev/) suite that runs in **jsdom** (no browser, no backend, no network). Install deps once (`npm install` inside `frontend/`), then from the **`frontend/`** directory:
+
+```bash
+cd frontend
+npm test          # run once (CI-style; what `vitest run` does)
+npm run test:watch # re-run on change while developing
+```
+
+- **`src/hooks/useReportSearch.test.ts`** — the `/ask/stream` SSE client. `fetch` is mocked to return a `ReadableStream`, so the tests assert the hook's stream parsing and error handling directly:
+  - tokens and `sources` frames accumulate into the result (happy path);
+  - an **`event: error`** frame (e.g. `retrieval_failed`) surfaces a readable message instead of being silently dropped;
+  - a non-OK response with an empty body and empty `statusText` (as over HTTP/2) renders `Error: HTTP 502`, not a bare `Error:`;
+  - an event whose type and data arrive in separate network reads still parses (the `currentEvent`-across-chunks case).
+
+These pair with the backend **`tests/test_ask_stream.py`** above so both sides of the SSE contract are pinned: if the backend renames an event or the frontend stops handling one, a test fails instead of the UI silently showing a blank error.
+
+The build typechecks exclude test files (`tsconfig.app.json`), so `npm run build` is unaffected.
 
 ---
 

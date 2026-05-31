@@ -114,9 +114,24 @@ async def check_llm_backend() -> tuple[bool, str]:
     return True, "ok"
 
 
+def check_reranker(request: Request) -> tuple[bool, str]:
+    """Not-ready while the cross-encoder is still warming up at startup.
+
+    Keeps the platform from routing traffic to a process that would otherwise have
+    to load the (memory-heavy) reranker model on the request path. Treated as ready
+    unless ``app.state.reranker_ready`` is explicitly False (disabled/loaded => ready).
+    """
+    ready = getattr(request.app.state, "reranker_ready", True)
+    if ready is False:
+        return False, "warming up"
+    return True, "ok"
+
+
 def build_ready_response(request: Request) -> JSONResponse:
-    ok, msg = check_database(request)
-    body = {"ready": ok, "checks": {"database": msg}}
+    db_ok, db_msg = check_database(request)
+    rr_ok, rr_msg = check_reranker(request)
+    ok = db_ok and rr_ok
+    body = {"ready": ok, "checks": {"database": db_msg, "reranker": rr_msg}}
     return JSONResponse(status_code=200 if ok else 503, content=body)
 
 

@@ -115,6 +115,15 @@ cp .env.example .env   # DATABASE_URL required
 uvicorn app.main:app --reload
 ```
 
+### Deploy (Render)
+
+Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml) is a [Blueprint](https://render.com/docs/blueprint-spec) that codifies the deploy settings:
+
+- **Health check** → `/health/ready`, which returns 503 until both Postgres is reachable and the cross-encoder reranker has finished warming up, so Render holds traffic off the instance until the model is loaded (instead of loading it on the request path).
+- **`RERANK_ENABLED=1`** plus **`HF_HOME` / `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE`** mirror the Dockerfile, which bakes the reranker model into the image so cold starts never re-download it.
+- Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard, never in git, and untouched by a blueprint sync.
+- Instance plan/memory is intentionally not pinned in the blueprint; size it in the dashboard (the reranker needs real RAM headroom).
+
 ---
 
 ## Faithfulness eval
@@ -149,7 +158,7 @@ Interactive docs: **http://localhost:8000/docs** when the server is running.
 | Route | Notes |
 |-------|--------|
 | `GET /health` | Liveness (process up) |
-| `GET /health/ready` | Readiness (Postgres) — use for Render/LB health checks |
+| `GET /health/ready` | Readiness (Postgres + reranker warm-up) — wired to Render's health check; returns 503 until the cross-encoder is loaded so traffic isn't routed mid-warm-up |
 | `GET /documents` | Shared library listing |
 | `POST /documents/{doc_id}/reindex` | Re-chunk/re-embed from stored `full_text` |
 | `GET /drive/files` | Drive folder list + `index_status` / `summary` |

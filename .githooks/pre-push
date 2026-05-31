@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Repo-local pre-push gate: run the fast faithfulness eval before pushing.
+#
+# Activate (same as pre-commit):  git config core.hooksPath .githooks
+# Bypass for one push:            git push --no-verify
+#
+# `make eval` spins up an ephemeral pgvector container, runs the eval_fast gate
+# (local NLI judge + committed embeddings cache), then tears the container down.
+# It needs Docker. If Docker isn't available we SKIP rather than block the push
+# -- CI is the authoritative eval gate. Set VERBIAGE_REQUIRE_EVAL=1 to instead
+# fail the push when Docker is missing.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
+
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  if [ "${VERBIAGE_REQUIRE_EVAL:-0}" = "1" ]; then
+    echo "Docker is not available and VERBIAGE_REQUIRE_EVAL=1 -- refusing to push."
+    echo "Start Docker, or push with: git push --no-verify"
+    exit 1
+  fi
+  echo "==> Docker not available; skipping faithfulness eval (make eval)."
+  echo "    Run it manually before release, or let CI handle it."
+  exit 0
+fi
+
+echo "==> running fast faithfulness eval (make eval)"
+if ! make eval; then
+  echo ""
+  echo "Faithfulness eval FAILED. Fix it, or push anyway with: git push --no-verify"
+  exit 1
+fi
+
+echo "Faithfulness eval passed."

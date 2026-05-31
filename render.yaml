@@ -1,0 +1,59 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec)
+#
+# Codifies the deploy settings that matter for this service. The most important line
+# is `healthCheckPath: /health/ready` — readiness returns 503 while the cross-encoder
+# reranker is still warming up, so Render holds traffic off the instance until the
+# model is loaded instead of routing a request that would load it on the request path.
+#
+# Secrets (DATABASE_URL, OPENAI_API_KEY, SUPABASE_*, GOOGLE_*, etc.) are intentionally
+# NOT defined here: they use `sync: false` so they stay managed in the Render dashboard
+# and a blueprint sync can never overwrite or print them.
+services:
+  - type: web
+    name: rag-document-analysis-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Readiness probe: gates traffic on DB + reranker warm-up (app/health.py).
+    healthCheckPath: /health/ready
+    envVars:
+      # Cross-encoder reranking is on in production.
+      - key: RERANK_ENABLED
+        value: "1"
+      # The reranker model is baked into the image at build time; keep the HF Hub
+      # offline at runtime so a cold start never re-downloads it. Must match the
+      # HF_HOME used in the Dockerfile.
+      - key: HF_HOME
+        value: /app/hf-cache
+      - key: HF_HUB_OFFLINE
+        value: "1"
+      - key: TRANSFORMERS_OFFLINE
+        value: "1"
+      # --- Secrets / environment-specific: managed in the dashboard, not in git ---
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: SIGNUP_INVITE_CODE
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_DRIVE_DEFAULT_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL
+        sync: false
