@@ -4,7 +4,7 @@ import pytest
 
 import app.main as main
 from app.models import AskRequest, RetrievedChunk
-from app.retrieval import FusedHit, _rrf_fuse, resolve_auto_mode
+from app.retrieval import FusedHit, _rrf_fuse, lexical_query_text, resolve_auto_mode
 
 
 def _rc(chunk_id: str, score: float) -> RetrievedChunk:
@@ -204,3 +204,76 @@ def test_retrieve_for_ask_auto_mode_routes_short_query_to_lexical(monkeypatch):
 )
 def test_resolve_auto_mode_cases(question, expected):
     assert resolve_auto_mode(question) == expected
+
+
+# --- lexical_query_text: search the quoted phrase, not the verbose wrapper ----
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        # verbose sentence wrapping a quoted phrase -> search only the phrase
+        ("please provide text from a report about 'creased shingles'", "creased shingles"),
+        ('find "hail damage" reports', "hail damage"),
+        ("\u201ccreased shingles\u201d in this report", "creased shingles"),  # curly quotes
+        # multiple quoted phrases are joined
+        ('"a phrase" and "another phrase"', "a phrase another phrase"),
+        # no quoted phrase -> returned unchanged
+        ("torn shingles", "torn shingles"),
+        ("what's the hail damage in wyoming", "what's the hail damage in wyoming"),
+        ("", ""),
+    ],
+)
+def test_lexical_query_text(question, expected):
+    assert lexical_query_text(question) == expected
+
+
+# --- lexical dispatch: phrase extraction + auto zero-hit fallback ------------
+
+
+def test_retrieve_for_ask_lexical_searches_extracted_phrase(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_lexical(conn, query_text, top_k, doc_id=None):
+        captured["text"] = query_text
+        return [_rc("l", 0.05)]
+
+    monkeypatch.setattr(main, "retrieve_top_k_lexical", fake_lexical)
+    monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: None)
+
+    req = AskRequest(question="please give text about 'creased shingles'", retrieval_mode="lexical")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert captured["text"] == "creased shingles"  # verbose wrapper stripped
+    assert [c.chunk_id for c in out] == ["l"]
+
+
+def test_retrieve_for_ask_auto_lexical_zero_hits_falls_back_to_hybrid(monkeypatch):
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(main, "retrieve_top_k_lexical", lambda *a, **k: [])  # 0 lexical hits
+    fused = [FusedHit(chunk=_rc("h", 0.03), rrf_score=0.03, cosine_score=0.8, lexical_score=0.05)]
+    monkeypatch.setattr(main, "retrieve_top_k_hybrid", lambda *a, **k: (calls.setdefault("hybrid", True), fused)[1])
+    monkeypatch.setattr(main, "record_hybrid_scores", lambda *a, **k: calls.setdefault("rec_hybrid", True))
+    monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: calls.setdefault("rec_lexical", True))
+
+    # "torn shingles" resolves (via auto) to lexical; with 0 hits it must fall back
+    req = AskRequest(question="torn shingles", retrieval_mode="auto")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert [c.chunk_id for c in out] == ["h"]  # hybrid result
+    assert "hybrid" in calls
+    assert "rec_lexical" not in calls  # lexical metric not recorded on fallback
+
+
+def test_retrieve_for_ask_explicit_lexical_zero_hits_does_not_fall_back(monkeypatch):
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(main, "retrieve_top_k_lexical", lambda *a, **k: [])
+    monkeypatch.setattr(main, "retrieve_top_k_hybrid", lambda *a, **k: calls.setdefault("hybrid", True))
+    monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: calls.setdefault("rec_lexical", True))
+
+    req = AskRequest(question="nonexistent term", retrieval_mode="lexical")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert out == []  # explicit lexical choice honored, even when empty
+    assert "hybrid" not in calls
+    assert "rec_lexical" in calls

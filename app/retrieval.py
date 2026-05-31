@@ -100,6 +100,25 @@ def resolve_auto_mode(question: str) -> Literal["vector", "lexical", "hybrid"]:
     return "hybrid"
 
 
+_QUOTE_CHARS = "\"\u201c\u201d'\u2018\u2019"
+
+
+def lexical_query_text(question: str) -> str:
+    """Text to feed the lexical retriever for a query.
+
+    When the query contains explicit quoted phrase(s), search only those phrases
+    (the user's exact-match intent) rather than the full natural-language sentence.
+    ``websearch_to_tsquery`` ANDs every content word, so a verbose wrapper like
+    ``please provide text about 'creased shingles'`` would match nothing; reducing
+    it to ``creased shingles`` recovers the intended lexical hits. Queries without a
+    quoted phrase are returned unchanged.
+    """
+    text = (question or "").strip()
+    phrases = [m.strip(_QUOTE_CHARS).strip() for m in _QUOTED_PHRASE.findall(text)]
+    phrases = [p for p in phrases if p]
+    return " ".join(phrases) if phrases else text
+
+
 def retrieve_top_k_lexical(
     conn, query_text: str, top_k: int, doc_id: str | None = None
 ) -> list[RetrievedChunk]:

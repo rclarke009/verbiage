@@ -67,6 +67,7 @@ from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusRespons
 from app.ingest_worker import ingest_worker_loop
 from app.retrieval import (
     FusedHit,
+    lexical_query_text,
     resolve_auto_mode,
     retrieve_top_k,
     retrieve_top_k_hybrid,
@@ -797,10 +798,7 @@ def _retrieve_for_ask(
     RetrievedChunks used to build the prompt; for hybrid the .score is the RRF score
     while the cosine/ts_rank components are reported to their own metrics.
     """
-    mode = ask_request.retrieval_mode
-    if mode == "auto":
-        mode = resolve_auto_mode(ask_request.question)
-    if mode == "hybrid":
+    def _hybrid() -> list[RetrievedChunk]:
         fused: list[FusedHit] = retrieve_top_k_hybrid(
             conn,
             query_vec,
@@ -816,10 +814,26 @@ def _retrieve_for_ask(
             [h.rrf_score for h in fused],
         )
         return [h.chunk for h in fused]
+
+    mode = ask_request.retrieval_mode
+    auto_routed = mode == "auto"
+    if auto_routed:
+        mode = resolve_auto_mode(ask_request.question)
+
+    if mode == "hybrid":
+        return _hybrid()
     if mode == "lexical":
         top_chunks = retrieve_top_k_lexical(
-            conn, ask_request.question, ask_request.top_k, ask_request.doc_id
+            conn,
+            lexical_query_text(ask_request.question),
+            ask_request.top_k,
+            ask_request.doc_id,
         )
+        # auto must never do worse than the hybrid default: if the adaptive lexical
+        # route finds nothing (e.g. a verbose query whose terms AND to no match),
+        # fall back to hybrid. An explicitly requested lexical mode is left as-is.
+        if not top_chunks and auto_routed:
+            return _hybrid()
         record_lexical_scores(rag_endpoint, [c.score for c in top_chunks])
         return top_chunks
     top_chunks = retrieve_top_k(
