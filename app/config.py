@@ -72,6 +72,9 @@ EMBED_MAX_ATTEMPTS = int(os.getenv("EMBED_MAX_ATTEMPTS", 3))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1:8b")
 LLM_OPENAI_MODEL = os.getenv("LLM_OPENAI_MODEL", "gpt-4o-mini")
+# Low (not zero) so borderline retrievals resolve consistently toward quoting relevant
+# passages instead of flip-flopping into spurious "not enough context" refusals.
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", 60))
 LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", 3))
 LLM_TOKEN_LIMIT = int(os.getenv("LLM_TOKEN_LIMIT", 10))
@@ -140,3 +143,8 @@ _raw_sim_thresh = os.getenv("RAG_SIMILARITY_ALERT_THRESHOLD", "").strip()
 RAG_SIMILARITY_ALERT_THRESHOLD: float | None = (
     float(_raw_sim_thresh) if _raw_sim_thresh else None
 )
+
+# Cross-encoder reranking of the retrieved candidate pool before prompt assembly.
+# Off by default: loading the ~100MB CrossEncoder is undesirable in tests/CI. Enable
+# in deployment with RERANK_ENABLED=1.
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "").lower() in ("1", "true", "yes")

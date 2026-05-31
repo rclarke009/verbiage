@@ -1,5 +1,7 @@
 """Hybrid retrieval: RRF fusion (pure) and /ask mode routing (monkeypatched, no DB)."""
 
+import asyncio
+
 import pytest
 
 import app.main as main
@@ -83,7 +85,7 @@ def test_retrieve_for_ask_vector_mode(monkeypatch):
     monkeypatch.setattr(main, "retrieve_top_k_lexical", lambda *a, **k: calls.setdefault("lexical", True))
 
     req = AskRequest(question="q", retrieval_mode="vector")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["v"]
     assert calls == {"vector": True, "rec_cosine": True}
@@ -97,7 +99,7 @@ def test_retrieve_for_ask_lexical_mode(monkeypatch):
     monkeypatch.setattr(main, "record_retrieval_scores", lambda *a, **k: calls.setdefault("rec_cosine", True))
 
     req = AskRequest(question="q", retrieval_mode="lexical")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["l"]
     assert calls == {"lexical": True, "rec_lexical": True}  # cosine metric untouched
@@ -118,7 +120,7 @@ def test_retrieve_for_ask_hybrid_mode(monkeypatch):
     monkeypatch.setattr(main, "record_retrieval_scores", lambda *a, **k: calls.setdefault("rec_cosine", True))
 
     req = AskRequest(question="q", retrieval_mode="hybrid")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["h", "x"]  # returns the fused chunks in order
     assert "hybrid" in calls
@@ -157,7 +159,7 @@ def test_retrieve_for_ask_auto_mode_routes_to_hybrid(monkeypatch):
     monkeypatch.setattr(main, "retrieve_top_k_lexical", lambda *a, **k: calls.setdefault("lexical", True))
 
     req = AskRequest(question="what hail damage was found in Wyoming", retrieval_mode="auto")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["h"]
     assert "hybrid" in calls and "lexical" not in calls
@@ -170,7 +172,7 @@ def test_retrieve_for_ask_auto_mode_routes_short_query_to_lexical(monkeypatch):
     monkeypatch.setattr(main, "retrieve_top_k_hybrid", lambda *a, **k: calls.setdefault("hybrid", True))
 
     req = AskRequest(question="torn shingles", retrieval_mode="auto")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["l"]
     assert "lexical" in calls and "hybrid" not in calls
@@ -246,7 +248,7 @@ def test_retrieve_for_ask_lexical_searches_extracted_phrase(monkeypatch):
     monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: None)
 
     req = AskRequest(question="please give text about 'creased shingles'", retrieval_mode="lexical")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert captured["text"] == "creased shingles"  # verbose wrapper stripped
     assert [c.chunk_id for c in out] == ["l"]
@@ -262,7 +264,7 @@ def test_retrieve_for_ask_auto_lexical_zero_hits_falls_back_to_hybrid(monkeypatc
 
     # "torn shingles" resolves (via auto) to lexical; with 0 hits it must fall back
     req = AskRequest(question="torn shingles", retrieval_mode="auto")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["h"]  # hybrid result
     assert "hybrid" in calls
@@ -276,7 +278,7 @@ def test_retrieve_for_ask_explicit_lexical_zero_hits_does_not_fall_back(monkeypa
     monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: calls.setdefault("rec_lexical", True))
 
     req = AskRequest(question="nonexistent term", retrieval_mode="lexical")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert out == []  # explicit lexical choice honored, even when empty
     assert "hybrid" not in calls
@@ -298,7 +300,7 @@ def test_retrieve_for_ask_vector_below_gate_returns_empty(monkeypatch):
     monkeypatch.setattr(main, "record_retrieval_scores", lambda *a, **k: None)
 
     req = AskRequest(question="off-corpus question", retrieval_mode="vector")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert out == []  # weak cosine -> dropped so the prompt builder refuses
 
@@ -312,7 +314,7 @@ def test_retrieve_for_ask_hybrid_all_cosine_below_gate_returns_empty(monkeypatch
     monkeypatch.setattr(main, "record_hybrid_scores", lambda *a, **k: None)
 
     req = AskRequest(question="off-corpus question", retrieval_mode="hybrid")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert out == []  # best cosine is below the gate -> refuse
 
@@ -324,6 +326,6 @@ def test_retrieve_for_ask_lexical_never_gated_despite_low_score(monkeypatch):
     monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: None)
 
     req = AskRequest(question="torn shingles", retrieval_mode="lexical")
-    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert [c.chunk_id for c in out] == ["l"]

@@ -16,6 +16,25 @@ export interface Message {
   chunks_used?: number
 }
 
+/** One self-contained lookup: a query and the passages it returned. Not a chat turn. */
+export interface LookupResult {
+  id: string
+  query: string
+  answer: string
+  sources: Source[]
+  chunksUsed: number
+  streaming: boolean
+}
+
+/** A passage the user kept aside to reuse while drafting a new report. */
+export interface SavedPassage {
+  id: string
+  text: string
+  query: string
+  sources: Source[]
+  savedAt: number
+}
+
 export interface RetrievedChunk {
   chunk_id: string
   doc_id: string

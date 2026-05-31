@@ -19,7 +19,7 @@ function AppInner() {
 
   const tabs = useMemo(() => {
     const base = [
-      { id: 'chat', label: 'Ask' },
+      { id: 'chat', label: 'Search' },
       { id: 'documents', label: 'Documents' },
       { id: 'drive', label: 'Google Drive' },
     ]

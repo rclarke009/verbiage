@@ -18,6 +18,7 @@ from app.config import (
     LLM_MAX_ATTEMPTS,
     LLM_MODEL,
     LLM_OPENAI_MODEL,
+    LLM_TEMPERATURE,
     LLM_TIMEOUT_SECONDS,
     OPENAI_API_KEY,
 )
@@ -152,22 +153,25 @@ async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
 async def answer_with_context(prompt: str, temperature: float | None = None) -> str:
     """Use OpenAI when OPENAI_API_KEY is set, else Ollama. If OpenAI fails and LLM_FALLBACK_TO_LOCAL is set, use Ollama.
 
-    temperature is optional and left unset (provider default) in production; the eval
-    harness pins it to 0 so the faithfulness gate scores a reproducible generation.
+    When temperature is None we fall back to LLM_TEMPERATURE (a low default) rather than
+    the provider default of 1.0, so production generations stay stable instead of
+    flip-flopping on borderline retrievals. The eval harness passes temperature=0.0
+    explicitly so the faithfulness gate scores a reproducible generation.
     """
+    temp = LLM_TEMPERATURE if temperature is None else temperature
     if OPENAI_API_KEY:
         try:
-            return await _answer_openai(prompt, temperature=temperature)
+            return await _answer_openai(prompt, temperature=temp)
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
                 logger.warning("OpenAI LLM failed, falling back to local: %s", e)
                 record_upstream_fallback("llm")
-                return await _answer_ollama(prompt, temperature=temperature)
+                return await _answer_ollama(prompt, temperature=temp)
             raise
-    return await _answer_ollama(prompt, temperature=temperature)
+    return await _answer_ollama(prompt, temperature=temp)
 
 
-async def _answer_openai_stream(prompt: str):
+async def _answer_openai_stream(prompt: str, temperature: float | None = None):
     """Stream OpenAI chat completion content deltas."""
     headers = {
         "Content-Type": "application/json",
@@ -178,6 +182,8 @@ async def _answer_openai_stream(prompt: str):
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
         async with client.stream(
             "POST",
@@ -213,11 +219,16 @@ async def _answer_openai_stream(prompt: str):
                     continue
 
 
-async def answer_with_context_stream(prompt: str):
-    """Async iterator of answer text deltas. OpenAI streamed; otherwise one chunk from non-stream APIs."""
+async def answer_with_context_stream(prompt: str, temperature: float | None = None):
+    """Async iterator of answer text deltas. OpenAI streamed; otherwise one chunk from non-stream APIs.
+
+    When temperature is None we fall back to LLM_TEMPERATURE (a low default) so the
+    streamed generation users actually see is as stable as the non-stream/eval paths.
+    """
+    temp = LLM_TEMPERATURE if temperature is None else temperature
     if OPENAI_API_KEY:
         try:
-            async for part in _answer_openai_stream(prompt):
+            async for part in _answer_openai_stream(prompt, temperature=temp):
                 yield part
             return
         except LLMRateLimitedError:
@@ -230,11 +241,11 @@ async def answer_with_context_stream(prompt: str):
             if LLM_FALLBACK_TO_LOCAL:
                 logger.warning("OpenAI streaming failed, falling back to local once: %s", e)
                 record_upstream_fallback("llm")
-                text = await _answer_ollama(prompt)
+                text = await _answer_ollama(prompt, temperature=temp)
                 if text:
                     yield text
                 return
             raise
-    text = await _answer_ollama(prompt)
+    text = await _answer_ollama(prompt, temperature=temp)
     if text:
         yield text

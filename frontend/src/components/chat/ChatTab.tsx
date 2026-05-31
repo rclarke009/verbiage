@@ -1,43 +1,44 @@
-import { useRef, useEffect } from 'react'
-import { useStreamingAsk } from '../../hooks/useStreamingAsk'
-import { MessageBubble } from './MessageBubble'
+import { useReportSearch } from '../../hooks/useReportSearch'
+import { useCollectedPassages } from '../../hooks/useCollectedPassages'
+import { ResultCard } from './ResultCard'
+import { CollectedPanel } from './CollectedPanel'
 import { ChatInput } from './ChatInput'
 
 export function ChatTab() {
-  const { messages, streaming, ask, clearMessages } = useStreamingAsk()
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  const { results, searching, search, removeResult, clearResults } = useReportSearch()
+  const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages()
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
-      {messages.length === 0 && (
-        <div style={{ color: '#888', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
-          <p>Ask anything about ingested engineering reports.</p>
-          <p style={{ fontSize: 12 }}>Answers are grounded in retrieved document passages.</p>
-        </div>
-      )}
+    <div style={{ display: 'flex', gap: 20, height: 'calc(100vh - 140px)' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <ChatInput onSubmit={search} disabled={searching} />
 
-      <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
-        {messages.map((msg, i) => <MessageBubble key={i} message={msg} />)}
-        {streaming && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1].content === '' && (
-          <div style={{ color: '#888', fontSize: 13, padding: '4px 0' }}>Searching reports…</div>
+        {results.length === 0 ? (
+          <div style={{ color: '#888', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
+            <p>Search past engineering reports for a damage type.</p>
+            <p style={{ fontSize: 12 }}>
+              Each search is independent and grounded in retrieved passages. Save the text you
+              want to reuse to your collection on the right.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, marginTop: 4 }}>
+              {results.map(r => (
+                <ResultCard key={r.id} result={r} onSave={savePassage} onRemove={removeResult} />
+              ))}
+            </div>
+            <button
+              onClick={clearResults}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: 12, padding: '4px 0' }}
+            >
+              Clear results
+            </button>
+          </>
         )}
-        <div ref={bottomRef} />
       </div>
 
-      {messages.length > 0 && (
-        <button
-          onClick={clearMessages}
-          style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: 12, padding: '4px 0' }}
-        >
-          Clear conversation
-        </button>
-      )}
-
-      <ChatInput onSubmit={ask} disabled={streaming} />
+      <CollectedPanel passages={passages} onRemove={removePassage} onClear={clearPassages} />
     </div>
   )
 }

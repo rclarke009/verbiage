@@ -38,6 +38,7 @@ _REFUSAL_PATTERNS = (
     r"do(?:es)?(?:n'?t| not) mention",
     r"no information (?:about|on|regarding|related to)",
     r"there is no (?:relevant )?information",
+    r"no source documents contain",
 )
 _REFUSAL_RE = re.compile("|".join(_REFUSAL_PATTERNS))
 
