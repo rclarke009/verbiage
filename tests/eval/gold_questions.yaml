@@ -1,0 +1,40 @@
+# Frozen gold question set for the faithfulness eval.
+#
+# category:
+#   answerable_single  -> answer should come from one report
+#   answerable_multi   -> answer legitimately draws on several reports
+#   unanswerable       -> corpus has nothing relevant; the system MUST refuse
+#                         ("I don't have relevant context ...") -- a refusal is a PASS
+#
+# must_mention: substrings expected somewhere in the retrieved context. Used only
+#   as a retrieval-quality / context-relevance signal so a low faithfulness score
+#   can be attributed to the generator vs. the retriever. Not used for unanswerable.
+
+questions:
+  - id: water_damage_storm_opening
+    question: "Please provide text about water damage due to storm created opening"
+    category: answerable_multi
+    must_mention: ["storm-created opening", "water"]
+
+  - id: alton_rd_roof
+    question: "What roof damage was found at 1060 Alton Road in Port Charlotte?"
+    category: answerable_single
+    must_mention: ["shingles"]
+
+  - id: floor_tiles_storm
+    question: "How does water from a storm-created opening affect floor tiles?"
+    category: answerable_multi
+    must_mention: ["tile", "adhering"]
+
+  - id: naples_moisture_cause
+    question: "What caused the interior moisture at 412 Gulfview Drive in Naples?"
+    category: answerable_single
+    must_mention: ["plumbing", "leak"]
+
+  - id: wyoming_hail
+    question: "What hail damage was found on roofs in Wyoming?"
+    category: unanswerable
+
+  - id: earthquake_foundation
+    question: "Summarize the earthquake and seismic foundation damage reported in the inspections."
+    category: unanswerable

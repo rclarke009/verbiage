@@ -108,6 +108,19 @@ uvicorn app.main:app --reload
 
 ---
 
+## Faithfulness eval
+
+A regression harness that answers one question after every retrieval/prompt tweak: **is every claim in an answer supported by the context that was actually retrieved?** It runs the real pipeline (`auto` routing -> RRF -> grounded prompt -> LLM) against a frozen corpus seeded into a throwaway pgvector container, then judges each answer's claims.
+
+```bash
+make eval        # fast gate: local NLI judge (sentence-transformers), run every tweak
+make eval-full   # deep gate: OpenAI LLM-as-judge, nightly/manual
+```
+
+Each `make` target brings the ephemeral DB up (`docker-compose.eval.yml`), seeds `tests/eval/corpus/`, runs the suite, prints a per-question scoreboard, and tears the DB down. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest` run stays fast and offline. Gold questions (including deliberately unanswerable ones that must trigger a refusal) live in [tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml). Generation needs an LLM backend (OpenAI key or Ollama) and an embedding backend (or a warm `tests/eval/embeddings_cache.json`; refresh with `make eval-warm-cache`).
+
+---
+
 ## Web UI (SPA)
 
 After sign-in:

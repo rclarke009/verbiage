@@ -1,0 +1,28 @@
+# Ephemeral pgvector DB for the faithfulness eval suite.
+# Throwaway: no named volume, data lives in tmpfs and is discarded on `down`.
+# Brought up/torn down by `make eval` (or the tests/eval pytest fixture).
+#
+#   docker compose -f docker-compose.eval.yml up -d --wait
+#   EVAL_DATABASE_URL=postgresql://postgres:postgres@localhost:5433/verbiage_eval \
+#     pytest -m eval_fast tests/eval
+#   docker compose -f docker-compose.eval.yml down -v
+
+services:
+  eval-db:
+    image: pgvector/pgvector:pg15
+    container_name: verbiage_eval_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: verbiage_eval
+    # Non-default host port so this never collides with the dev/prod DB on 5432.
+    ports:
+      - "5433:5432"
+    # Ephemeral storage: nothing persists across runs, so every eval starts clean.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d verbiage_eval"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
