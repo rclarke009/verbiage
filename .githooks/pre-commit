@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Repo-local pre-commit gate: backend tests + frontend lint/typecheck.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+# Bypass for one commit:    git commit --no-verify
+#
+# The heavy, Docker-backed faithfulness eval (`make eval`) is intentionally NOT
+# run here -- it's too slow for a per-commit gate. Run it manually or in CI.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
+
+# Pick a Python interpreter: explicit override > repo venv > active venv > PATH.
+if [ -n "${VERBIAGE_PYTHON:-}" ]; then
+  PY="$VERBIAGE_PYTHON"
+elif [ -x ".venv/bin/python" ]; then
+  PY=".venv/bin/python"
+elif [ -n "${VIRTUAL_ENV:-}" ]; then
+  PY="$VIRTUAL_ENV/bin/python"
+else
+  PY="$(command -v python3 || command -v python || true)"
+fi
+
+FAILED=0
+
+echo "==> backend tests (pytest)"
+if [ -n "$PY" ]; then
+  "$PY" -m pytest -q || FAILED=1
+else
+  echo "WARNING: no Python interpreter found; skipping backend tests."
+fi
+
+# Frontend checks only when the commit touches files under frontend/.
+if git diff --cached --name-only --diff-filter=ACM | grep -q '^frontend/'; then
+  echo "==> frontend lint (eslint)"
+  ( cd frontend && npm run lint ) || FAILED=1
+  echo "==> frontend typecheck (tsc)"
+  ( cd frontend && npm run typecheck ) || FAILED=1
+  echo "==> frontend tests (vitest)"
+  ( cd frontend && npm test ) || FAILED=1
+else
+  echo "==> no staged frontend changes; skipping frontend checks."
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo ""
+  echo "Pre-commit checks FAILED. Fix the issues above, or bypass with: git commit --no-verify"
+  exit 1
+fi
+
+echo "All pre-commit checks passed."

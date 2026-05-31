@@ -19,6 +19,7 @@ from app.errors import (
     LLMServiceError,
     LLMUpstreamTimeoutError,
 )
+from app.http_client import get_async_client
 from app.monitoring.metrics import record_upstream_timeout
 
 logger = logging.getLogger(__name__)
@@ -45,19 +46,20 @@ async def embed_texts_openai(texts: list[str]) -> list[list[float]]:
             all_embeddings: list[list[float]] = []
             for i in range(0, len(texts), OPENAI_BATCH_SIZE):
                 batch = texts[i : i + OPENAI_BATCH_SIZE]
-                async with httpx.AsyncClient(timeout=EMBED_TIMEOUT) as client:
-                    response = await client.post(
-                        OPENAI_EMBED_URL,
-                        headers={
-                            "Content-Type": "application/json",
-                            "Authorization": f"Bearer {OPENAI_API_KEY}",
-                        },
-                        json={
-                            "model": OPENAI_EMBED_MODEL,
-                            "input": batch,
-                            "dimensions": OPENAI_EMBED_DIMENSIONS,
-                        },
-                    )
+                client = get_async_client()
+                response = await client.post(
+                    OPENAI_EMBED_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    },
+                    json={
+                        "model": OPENAI_EMBED_MODEL,
+                        "input": batch,
+                        "dimensions": OPENAI_EMBED_DIMENSIONS,
+                    },
+                    timeout=EMBED_TIMEOUT,
+                )
                 if response.status_code == 429:
                     logger.warning("OpenAI embedding API returned 429 (rate limited)")
                     raise LLMRateLimitedError("OpenAI embedding API rate limited")

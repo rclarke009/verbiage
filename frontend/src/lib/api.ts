@@ -39,7 +39,7 @@ export async function apiFetch(
   const { anonymous, ...rest } = init
   const url = joinUrl(apiOrigin(), path)
   const headers = new Headers(rest.headers)
-  let body = rest.body
+  const body = rest.body
   if (!(body instanceof FormData) && body !== undefined && !headers.has('Content-Type')) {
     if (typeof body === 'string') headers.set('Content-Type', 'application/json')
   }

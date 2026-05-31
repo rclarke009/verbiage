@@ -26,6 +26,11 @@ function loadStoredResults(): LookupResult[] {
 
 type RetrievalMode = 'vector' | 'lexical' | 'hybrid' | 'auto'
 
+// Abort the stream if no bytes arrive for this long. The backend can die mid-stream
+// (e.g. an OOM-killed worker); Render's proxy may hold the connection open, so the
+// reader would otherwise hang forever with no error and the UI would spin indefinitely.
+const STREAM_STALL_TIMEOUT_MS = 60000
+
 /**
  * Stateless report search. Each call to `search` is an independent lookup — no
  * conversation history is sent to the backend (it embeds only the query). Results
@@ -56,6 +61,7 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
       }
 
       const urlForFetch = `${apiOrigin()}/ask/stream`
+      const controller = new AbortController()
       const init = await getAuthFetchInit({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,11 +70,28 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
           top_k: topK,
           retrieval_mode: retrievalMode,
         }),
+        signal: controller.signal,
       })
 
       let streamError: string | null = null
+      // Watchdog: reset on every byte received. If it fires, the stream has stalled
+      // (server likely died mid-response) and we abort so the reader stops hanging.
+      let stalled = false
+      let stallTimer: ReturnType<typeof setTimeout> | undefined
+      const armStallTimer = () => {
+        if (stallTimer) clearTimeout(stallTimer)
+        stallTimer = setTimeout(() => {
+          stalled = true
+          controller.abort()
+        }, STREAM_STALL_TIMEOUT_MS)
+      }
+      const clearStallTimer = () => {
+        if (stallTimer) clearTimeout(stallTimer)
+        stallTimer = undefined
+      }
 
       try {
+        armStallTimer()
         const response = await fetch(urlForFetch, init)
         if (!response.ok) {
           const t = (await response.text()).trim()
@@ -88,6 +111,7 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
+          armStallTimer()
           buffer += decoder.decode(value, { stream: true })
 
           const lines = buffer.split('\n')
@@ -127,9 +151,15 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
           }
         }
       } catch (err) {
-        const msg = err instanceof Error && err.message ? err.message : ''
-        streamError = msg || 'Something went wrong while contacting the server.'
+        if (stalled) {
+          streamError =
+            'The server stopped responding. It may have timed out or restarted mid-request. Please try again.'
+        } else {
+          const msg = err instanceof Error && err.message ? err.message : ''
+          streamError = msg || 'Something went wrong while contacting the server.'
+        }
       } finally {
+        clearStallTimer()
         if (streamError) {
           patch(r => ({ ...r, answer: r.answer ? r.answer : `Error: ${streamError}` }))
         }

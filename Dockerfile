@@ -10,9 +10,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Persisted HuggingFace cache: the reranker model is baked into the image below so
+# cold starts load it from local disk instead of re-downloading from the HF Hub on
+# every boot (which was slow and spiked memory/latency on the request path).
+ENV HF_HOME=/app/hf-cache \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
 RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the cross-encoder reranker into HF_HOME at build time. Done with the
+# Hub online here; runtime stays offline (env vars above) so it never re-fetches.
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
 COPY app/ ./app/
 COPY --from=frontend /build/static ./static/

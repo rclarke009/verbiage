@@ -56,12 +56,21 @@ def test_build_ready_response_200_and_503():
     with patch("app.health.check_database", return_value=(True, "ok")):
         resp = build_ready_response(_make_request())
     assert resp.status_code == 200
-    assert resp.body == b'{"ready":true,"checks":{"database":"ok"}}'
+    assert resp.body == b'{"ready":true,"checks":{"database":"ok","reranker":"ok"}}'
 
     with patch("app.health.check_database", return_value=(False, "down")):
         resp = build_ready_response(_make_request())
     assert resp.status_code == 503
-    assert resp.body == b'{"ready":false,"checks":{"database":"down"}}'
+    assert resp.body == b'{"ready":false,"checks":{"database":"down","reranker":"ok"}}'
+
+
+def test_build_ready_response_503_while_reranker_warming():
+    request = _make_request()
+    request.app.state.reranker_ready = False
+    with patch("app.health.check_database", return_value=(True, "ok")):
+        resp = build_ready_response(request)
+    assert resp.status_code == 503
+    assert resp.body == b'{"ready":false,"checks":{"database":"ok","reranker":"warming up"}}'
 
 
 def test_build_deep_response_embed_failure():
