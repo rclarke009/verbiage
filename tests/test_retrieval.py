@@ -3,8 +3,12 @@
 import pytest
 
 import app.main as main
+from app.config import RAG_MIN_RELEVANCE_SCORE
 from app.models import AskRequest, RetrievedChunk
 from app.retrieval import FusedHit, _rrf_fuse, lexical_query_text, resolve_auto_mode
+
+_BELOW_GATE = RAG_MIN_RELEVANCE_SCORE - 0.1
+_ABOVE_GATE = RAG_MIN_RELEVANCE_SCORE + 0.1
 
 
 def _rc(chunk_id: str, score: float) -> RetrievedChunk:
@@ -277,3 +281,49 @@ def test_retrieve_for_ask_explicit_lexical_zero_hits_does_not_fall_back(monkeypa
     assert out == []  # explicit lexical choice honored, even when empty
     assert "hybrid" not in calls
     assert "rec_lexical" in calls
+
+
+# --- Relevance gate (cosine below threshold -> refuse) ---------------------
+
+
+def test_relevance_gate_blocks_only_when_best_cosine_below_threshold():
+    assert main._relevance_gate_blocks([]) is False  # no cosine signal -> never block
+    assert main._relevance_gate_blocks([_BELOW_GATE, _BELOW_GATE]) is True
+    assert main._relevance_gate_blocks([_BELOW_GATE, _ABOVE_GATE]) is False  # one strong hit clears it
+    assert main._relevance_gate_blocks([RAG_MIN_RELEVANCE_SCORE]) is False  # boundary is inclusive
+
+
+def test_retrieve_for_ask_vector_below_gate_returns_empty(monkeypatch):
+    monkeypatch.setattr(main, "retrieve_top_k", lambda *a, **k: [_rc("v", _BELOW_GATE)])
+    monkeypatch.setattr(main, "record_retrieval_scores", lambda *a, **k: None)
+
+    req = AskRequest(question="off-corpus question", retrieval_mode="vector")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert out == []  # weak cosine -> dropped so the prompt builder refuses
+
+
+def test_retrieve_for_ask_hybrid_all_cosine_below_gate_returns_empty(monkeypatch):
+    fused = [
+        FusedHit(chunk=_rc("h", 0.03), rrf_score=0.03, cosine_score=_BELOW_GATE, lexical_score=0.05),
+        FusedHit(chunk=_rc("x", 0.02), rrf_score=0.02, cosine_score=None, lexical_score=0.04),
+    ]
+    monkeypatch.setattr(main, "retrieve_top_k_hybrid", lambda *a, **k: fused)
+    monkeypatch.setattr(main, "record_hybrid_scores", lambda *a, **k: None)
+
+    req = AskRequest(question="off-corpus question", retrieval_mode="hybrid")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert out == []  # best cosine is below the gate -> refuse
+
+
+def test_retrieve_for_ask_lexical_never_gated_despite_low_score(monkeypatch):
+    # Lexical scores are ts_rank, not cosine, so a low value must NOT trip the gate:
+    # a lexical hit already means the query terms matched the document.
+    monkeypatch.setattr(main, "retrieve_top_k_lexical", lambda *a, **k: [_rc("l", 0.01)])
+    monkeypatch.setattr(main, "record_lexical_scores", lambda *a, **k: None)
+
+    req = AskRequest(question="torn shingles", retrieval_mode="lexical")
+    out = main._retrieve_for_ask(None, req, [0.0], "model", "sync")
+
+    assert [c.chunk_id for c in out] == ["l"]

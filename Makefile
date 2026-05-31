@@ -21,6 +21,7 @@ eval-full: eval-up
 	@$(EVAL_ENV) python -m pytest -m eval_full tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
 
 eval-up:
+	-$(COMPOSE_EVAL) down -v --remove-orphans 2>/dev/null || true
 	$(COMPOSE_EVAL) up -d --wait
 
 eval-down:

@@ -116,6 +116,17 @@ SIGNUP_INVITE_CODE = os.getenv("SIGNUP_INVITE_CODE", "").strip()
 # Optional canonical browser origin for auth email links (password reset redirect). No trailing slash.
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 
+# RAG relevance gate: /ask refuses (no LLM call, canary marker) when the best retrieved
+# chunk's cosine similarity to the query is below this. Cosine is the only signal that is
+# comparable across queries -- RRF (hybrid) and ts_rank (lexical) are rank/term-frequency
+# artifacts whose magnitude says nothing about absolute relevance -- so the gate always
+# evaluates the cosine component regardless of retrieval mode. Pure lexical lookups carry
+# no cosine and are exempt (a lexical hit already means the query terms matched).
+# 0.5 reliably refuses clearly off-corpus questions (cosine ~0.42 on the eval corpus) while
+# clearing every grounded gold question (lowest grounded cosine ~0.56). Borderline off-topic
+# queries that score just above the gate still depend on the model's own refusal.
+RAG_MIN_RELEVANCE_SCORE = float(os.getenv("RAG_MIN_RELEVANCE_SCORE", "0.5"))
+
 # Prometheus metrics: expose GET /metrics when METRICS_ENABLED; optional Bearer METRICS_TOKEN for scrape auth.
 def metrics_enabled() -> bool:
     """True when METRICS_ENABLED env is set (read each time for tests)."""

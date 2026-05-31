@@ -4,7 +4,8 @@ Two interchangeable judges share one verdict shape:
 
   - NliJudge  : local sentence-transformers cross-encoder (NLI). Free, deterministic,
                 no network. The every-tweak gate. A claim is supported if its max
-                entailment probability across the context blocks clears a threshold.
+                entailment probability over the candidate premises (whole block,
+                each sentence, and each header-prefixed sentence) clears a threshold.
   - LlmJudge  : OpenAI LLM-as-judge returning per-claim {supported, evidence} JSON.
                 More accurate, costs tokens, nondeterministic. The nightly/deep gate.
 
@@ -19,16 +20,53 @@ import json
 import re
 from dataclasses import dataclass, field
 
-# Must match the literal the /ask path emits when there is no usable context
-# (app/main.py do_ask / event_iter).
+# Canonical literal the /ask path emits when there is no usable context
+# (app/main.py do_ask / event_iter). Kept as the product marker; detection below
+# also recognises the broader family of model-worded refusals.
 REFUSAL_MARKER = "I don't have relevant context"
+
+# Conservative refusal wordings. The model often declines in its own words ("the
+# context does not contain any information about ...") rather than emitting the
+# canary, which a literal-only check would miss. These patterns target explicit
+# "the context can't support this" phrasings and avoid firing on grounded answers.
+_REFUSAL_PATTERNS = (
+    r"i do(?:es)?n'?t have relevant context",
+    r"context (?:provided )?does not contain",
+    r"provided does not contain",
+    r"do(?:es)?(?:n'?t| not) contain (?:any |enough |relevant )*information",
+    r"do(?:es)?(?:n'?t| not) provide (?:any |enough |relevant )*information",
+    r"do(?:es)?(?:n'?t| not) mention",
+    r"no information (?:about|on|regarding|related to)",
+    r"there is no (?:relevant )?information",
+)
+_REFUSAL_RE = re.compile("|".join(_REFUSAL_PATTERNS))
+
+
+def _normalize_for_refusal(answer: str) -> str:
+    """Lowercase, fold curly apostrophes, and collapse whitespace for matching."""
+    text = (answer or "").lower().replace("\u2019", "'")
+    return re.sub(r"\s+", " ", text)
 
 
 def is_refusal(answer: str) -> bool:
-    return REFUSAL_MARKER.lower() in (answer or "").lower()
+    return bool(_REFUSAL_RE.search(_normalize_for_refusal(answer)))
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences, also breaking on newlines so report headings and
+    list items become their own units. Trivially short fragments are dropped."""
+    if not text:
+        return []
+    sentences: list[str] = []
+    for line in text.splitlines():
+        for part in _SENTENCE_SPLIT.split(line.strip()):
+            part = part.strip()
+            if len(part) >= 8:
+                sentences.append(part)
+    return sentences
 
 
 def split_claims(answer: str) -> list[str]:
@@ -78,7 +116,7 @@ class FaithfulnessResult:
 
 
 class NliJudge:
-    """Local NLI cross-encoder. Supported = max entailment over context blocks >= threshold."""
+    """Local NLI cross-encoder. Supported = max entailment over candidate premises >= threshold."""
 
     # label order for cross-encoder/nli-deberta-v3-base: [contradiction, entailment, neutral]
     _ENTAILMENT_IDX = 1
@@ -107,19 +145,61 @@ class NliJudge:
         probs = exp / exp.sum(axis=1, keepdims=True)
         return probs[:, self._ENTAILMENT_IDX]
 
+    @staticmethod
+    def _candidate_premises(context_blocks: list[str]) -> list[str]:
+        """Expand each context block into the premises a claim may be entailed by.
+
+        Three candidate shapes per block, scored independently with max-pooling later:
+          1. the whole block -- supports claims that synthesise across several
+             sentences (e.g. "consistent with a single windstorm event"), which a
+             lone sentence cannot entail;
+          2. each individual sentence -- recovers a single supporting fact that a
+             long, multi-topic block dilutes below threshold;
+          3. each sentence prefixed with its block's header line -- bridges the
+             coreference gap where the supporting sentence says "this residence"
+             but the claim names the property ("412 Gulfview Drive in Naples"); the
+             address lives only in the section header, so neither the bare sentence
+             nor the truncated full block entails the claim on its own.
+        """
+        premises: list[str] = []
+        seen: set[str] = set()
+
+        def add(text: str) -> None:
+            text = text.strip()
+            if len(text) >= 8 and text not in seen:
+                seen.add(text)
+                premises.append(text)
+
+        for block in context_blocks:
+            add(block)
+            sentences = _split_sentences(block)
+            header = sentences[0] if sentences else ""
+            for sentence in sentences:
+                add(sentence)
+                if header and sentence != header:
+                    add(f"{header} {sentence}")
+        return premises or [""]
+
     def judge(self, context_blocks: list[str], claims: list[str]) -> list[ClaimVerdict]:
+        """Max-pool entailment of each claim over header/sentence/block premises.
+
+        A claim is supported when its best entailment probability over all candidate
+        premises (see _candidate_premises) clears the threshold. Max-pooling means the
+        candidate set can only ever raise a claim's score, so adding finer-grained
+        premises never regresses a claim that the whole block already entailed.
+        """
+        premises = self._candidate_premises(context_blocks)
         verdicts: list[ClaimVerdict] = []
-        blocks = [b for b in context_blocks if b.strip()] or [""]
         for claim in claims:
-            ent = self._entailment_probs(blocks, claim)
-            best = float(ent.max())
-            best_block = blocks[int(ent.argmax())]
+            ent = self._entailment_probs(premises, claim)
+            best_idx = int(ent.argmax())
+            best = float(ent[best_idx])
             verdicts.append(
                 ClaimVerdict(
                     claim=claim,
                     supported=best >= self.threshold,
                     score=best,
-                    evidence=best_block[:160],
+                    evidence=premises[best_idx][:160],
                 )
             )
         return verdicts

@@ -96,7 +96,9 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
             refused=True,
         )
 
-    answer = await llm_client.answer_with_context(prompt)
+    # temperature=0: the faithfulness gate must score a reproducible generation, not a
+    # different sample each run (default sampling makes the gate flaky on phrasing).
+    answer = await llm_client.answer_with_context(prompt, temperature=0.0)
     # Recover the context that actually reached the model for faithful judging.
     blocks = _included_blocks(top_chunks)
     # The portion of the prompt after "Context:" up to the question is the context.
