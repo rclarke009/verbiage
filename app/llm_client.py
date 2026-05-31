@@ -29,11 +29,18 @@ logger = logging.getLogger(__name__)
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 
-async def _answer_openai(prompt: str) -> str:
+async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
     """Call OpenAI chat completions; return assistant content. Retries on rate limit/timeout."""
     last_exc: BaseException | None = None
     for attempt in range(LLM_MAX_ATTEMPTS):
         try:
+            payload = {
+                "model": LLM_OPENAI_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+            if temperature is not None:
+                payload["temperature"] = temperature
             async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
                     OPENAI_CHAT_URL,
@@ -41,11 +48,7 @@ async def _answer_openai(prompt: str) -> str:
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {OPENAI_API_KEY}",
                     },
-                    json={
-                        "model": LLM_OPENAI_MODEL,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": False,
-                    },
+                    json=payload,
                 )
             if resp.status_code == 429:
                 retry_after = resp.headers.get("retry-after")
@@ -93,19 +96,22 @@ async def _answer_openai(prompt: str) -> str:
     raise RuntimeError("OpenAI LLM retries exhausted")
 
 
-async def _answer_ollama(prompt: str) -> str:
+async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
     """Call Ollama /api/chat; return assistant content. Retries on rate limit/timeout."""
     last_exc: BaseException | None = None
     for attempt in range(LLM_MAX_ATTEMPTS):
         try:
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+            if temperature is not None:
+                payload["options"] = {"temperature": temperature}
             async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
                     url=f"{LLM_BASE_URL.rstrip('/')}/api/chat",
-                    json={
-                        "model": LLM_MODEL,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": False,
-                    },
+                    json=payload,
                 )
             if resp.status_code == 429:
                 raise LLMRateLimitedError("LLM rate limited")
@@ -143,18 +149,22 @@ async def _answer_ollama(prompt: str) -> str:
     raise RuntimeError("LLM retries exhausted")
 
 
-async def answer_with_context(prompt: str) -> str:
-    """Use OpenAI when OPENAI_API_KEY is set, else Ollama. If OpenAI fails and LLM_FALLBACK_TO_LOCAL is set, use Ollama."""
+async def answer_with_context(prompt: str, temperature: float | None = None) -> str:
+    """Use OpenAI when OPENAI_API_KEY is set, else Ollama. If OpenAI fails and LLM_FALLBACK_TO_LOCAL is set, use Ollama.
+
+    temperature is optional and left unset (provider default) in production; the eval
+    harness pins it to 0 so the faithfulness gate scores a reproducible generation.
+    """
     if OPENAI_API_KEY:
         try:
-            return await _answer_openai(prompt)
+            return await _answer_openai(prompt, temperature=temperature)
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
                 logger.warning("OpenAI LLM failed, falling back to local: %s", e)
                 record_upstream_fallback("llm")
-                return await _answer_ollama(prompt)
+                return await _answer_ollama(prompt, temperature=temperature)
             raise
-    return await _answer_ollama(prompt)
+    return await _answer_ollama(prompt, temperature=temperature)
 
 
 async def _answer_openai_stream(prompt: str):

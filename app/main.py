@@ -100,6 +100,7 @@ from app.config import (
     METRICS_ENABLED,
     METRICS_TOKEN,
     PUBLIC_APP_URL,
+    RAG_MIN_RELEVANCE_SCORE,
     SIGNUP_INVITE_CODE,
     SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -785,6 +786,19 @@ def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> 
     )
 
 
+def _relevance_gate_blocks(cosine_scores: list[float]) -> bool:
+    """Whether the retrieval is too weak to attempt generation.
+
+    Cosine is the only signal comparable across queries (RRF/ts_rank encode rank, not
+    absolute relevance), so callers pass the cosine component of whatever mode ran and
+    we block when the best cosine is below RAG_MIN_RELEVANCE_SCORE. An empty list means
+    no cosine signal was available (e.g. a pure lexical lookup) -> never block on it.
+    """
+    if not cosine_scores:
+        return False
+    return max(cosine_scores) < RAG_MIN_RELEVANCE_SCORE
+
+
 def _retrieve_for_ask(
     conn,
     ask_request: AskRequest,
@@ -797,6 +811,11 @@ def _retrieve_for_ask(
     Shared by /ask and /ask/stream so the two paths can't drift. Returns the
     RetrievedChunks used to build the prompt; for hybrid the .score is the RRF score
     while the cosine/ts_rank components are reported to their own metrics.
+
+    Applies a shared cosine relevance gate (_relevance_gate_blocks): when the best
+    cosine similarity is below RAG_MIN_RELEVANCE_SCORE the result is dropped to [], so
+    the existing zero-chunk path in _ask_prompt_from_chunks turns it into a refusal.
+    Pure lexical lookups have no cosine and are never gated.
     """
     def _hybrid() -> list[RetrievedChunk]:
         fused: list[FusedHit] = retrieve_top_k_hybrid(
@@ -807,12 +826,15 @@ def _retrieve_for_ask(
             ask_request.doc_id,
             embedding_model=embedding_model,
         )
+        cosine_scores = [h.cosine_score for h in fused if h.cosine_score is not None]
         record_hybrid_scores(
             rag_endpoint,
-            [h.cosine_score for h in fused if h.cosine_score is not None],
+            cosine_scores,
             [h.lexical_score for h in fused if h.lexical_score is not None],
             [h.rrf_score for h in fused],
         )
+        if _relevance_gate_blocks(cosine_scores):
+            return []
         return [h.chunk for h in fused]
 
     mode = ask_request.retrieval_mode
@@ -844,6 +866,8 @@ def _retrieve_for_ask(
         embedding_model=embedding_model,
     )
     record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
+    if _relevance_gate_blocks([c.score for c in top_chunks]):
+        return []
     return top_chunks
 
 

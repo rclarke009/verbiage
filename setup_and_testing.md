@@ -107,7 +107,10 @@ git commit -m "Warm eval embeddings cache"
 make eval            # fast NLI gate (run after every tweak)
 make eval-full       # deep gate: OpenAI LLM-as-judge (needs OPENAI_API_KEY)
 make eval-warm-cache # re-embed + rewrite the cache after changing corpus/chunking/model
+make eval-down       # manually stop + remove the eval DB (data is ephemeral; nothing is lost)
 ```
+
+Each `make eval*` target tears the DB down automatically when it finishes (even on failure). `eval-up` is also self-healing: it runs `down -v --remove-orphans` before starting, so a leftover container from an interrupted previous run is cleared automatically. Use `make eval-down` only if you brought the DB up manually or cancelled a run mid-flight (Ctrl-C before teardown).
 
 Gold questions (including deliberately **unanswerable** ones that must trigger a refusal) live in `tests/eval/gold_questions.yaml`. The bar lives in `tests/eval/test_faithfulness.py`: `FAST_MIN_FAITHFULNESS` and the `NliJudge` threshold — loosen these if sentence-level NLI proves too strict on legitimately-grounded paraphrase.
 
@@ -117,6 +120,12 @@ Gold questions (including deliberately **unanswerable** ones that must trigger a
 - `make eval` manages its own env (`VERBIAGE_EVAL=1`, `EVAL_DATABASE_URL`), so no `PYTHONPATH=.` prefix is needed unlike the unit tests above.
 - Port 5433 busy → `up --wait` hangs; free it or change the host port in `docker-compose.eval.yml`.
 - A failure tagged as a retriever miss (missing `must_mention` terms) points at retrieval, not generation — see the assertion messages in `tests/eval/test_faithfulness.py`.
+- **Container name conflict** (`the container name "/verbiage_eval_db" is already in use`): a previous run was cancelled before teardown and left the container running. `eval-up` now self-heals on the next `make eval`, but if a stale container predates that change (so `make eval-down` only removes the network), force-remove it directly:
+
+```bash
+docker rm -f verbiage_eval_db   # ephemeral DB; safe to remove
+make eval                       # then re-run
+```
 
 ---
 
