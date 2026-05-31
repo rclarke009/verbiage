@@ -81,7 +81,10 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
     vec = (await embedder.embed_many([question]))[0]
 
     req = AskRequest(question=question)  # retrieval_mode defaults to "auto"
-    top_chunks = _retrieve_for_ask(conn, req, vec, embedder.model, "eval")
+    # reranker=None: the faithfulness gate scores the un-reranked pipeline (pool_k == top_k,
+    # exactly the current retrieval) so the eval stays reproducible and never loads the
+    # ~100MB cross-encoder. Pass a Reranker() here instead to measure rerank impact.
+    top_chunks = await _retrieve_for_ask(conn, req, vec, embedder.model, "eval", None)
 
     prompt = _ask_prompt_from_chunks(question, top_chunks)
     if prompt is None:

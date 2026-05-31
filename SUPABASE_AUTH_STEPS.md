@@ -104,7 +104,13 @@ The Verbiage UI sends password recovery emails via Supabase (`resetPasswordForEm
 2. Click **Add user** → **Create new user**.
 3. Enter email and password and create the user. Use this to sign in from the Verbiage UI.
 
-With **closed signup** enabled, you can instead insert the email into **`signup_allowlist`** and use **Sign up** in the UI (or keep using **Add user** in the dashboard if you prefer).
+With **closed signup** enabled, you can instead insert the email into **`signup_allowlist`** and use **Sign up** in the UI (or keep using **Add user** in the dashboard if you prefer). To allowlist an email, run in the **SQL Editor**:
+
+```sql
+INSERT INTO signup_allowlist (email, note)
+VALUES (lower('colleague@example.com'), 'optional note')
+ON CONFLICT (email) DO NOTHING;
+```
 
 ---
 

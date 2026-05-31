@@ -3,9 +3,16 @@ import { useState, type KeyboardEvent } from 'react'
 interface Props {
   onSubmit: (question: string) => void
   disabled: boolean
+  placeholder?: string
+  buttonLabel?: string
 }
 
-export function ChatInput({ onSubmit, disabled }: Props) {
+export function ChatInput({
+  onSubmit,
+  disabled,
+  placeholder = 'Search past reports for a damage type… (Enter to search)',
+  buttonLabel = 'Search',
+}: Props) {
   const [value, setValue] = useState('')
 
   const submit = () => {
@@ -28,7 +35,7 @@ export function ChatInput({ onSubmit, disabled }: Props) {
         value={value}
         onChange={e => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask anything about the engineering reports… (Enter to send)"
+        placeholder={placeholder}
         disabled={disabled}
         rows={2}
         style={{
@@ -46,7 +53,7 @@ export function ChatInput({ onSubmit, disabled }: Props) {
           opacity: disabled || !value.trim() ? 0.5 : 1,
         }}
       >
-        {disabled ? '…' : 'Send'}
+        {disabled ? '…' : buttonLabel}
       </button>
     </div>
   )

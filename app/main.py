@@ -22,6 +22,8 @@ from starlette.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2 import pool as psycopg2_pool
 
+from app.reranker import Reranker
+
 from app.db import (
     INGEST_JOB_KIND_GOOGLE_DRIVE,
     create_db,
@@ -105,6 +107,7 @@ from app.config import (
     SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
+    RERANK_ENABLED
 )
 from app import llm_client
 from app.similar_titles import find_similar_titles, select_newest_versions
@@ -149,6 +152,15 @@ def _create_db_pool():
         kwargs["connection_factory"] = NoPrepareConnection
     return psycopg2_pool.ThreadedConnectionPool(**kwargs)
 
+async def _warm_reranker(reranker):
+    try:
+        await asyncio.to_thread(reranker._get_model)
+        logger.info("Reranker warm-up complete")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        # Warm-up is best-effort: first real rerank() will retry the load lazily.
+        logger.warning("Reranker warm-up failed (will load lazily): %s", e)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -180,6 +192,21 @@ async def lifespan(app):
     app.state.db_pool = db_pool
 
     app.state.rate_limiter = TokenBucket()
+
+    warm_task = None
+
+    if RERANK_ENABLED:
+        # CrossEncoder loads a ~100MB model here — do it once at startup, never per request
+        # but do it on a different thread so user doesn't wait at 
+        #startup and they don't wait on first request
+        app.state.reranker = Reranker()            # cheap: no model load yet
+        # Warm in the background so boot isn't blocked and the first /ask isn't penalized.
+        warm_task = asyncio.create_task(_warm_reranker(app.state.reranker))
+        logger.info("Reranker warm-up scheduled")
+    else:
+        app.state.reranker = None
+        logger.info("Reranker disabled")
+
     ingest_task = None
     if INGEST_WORKER_ENABLED:
         ingest_task = asyncio.create_task(ingest_worker_loop(db_pool))
@@ -188,6 +215,13 @@ async def lifespan(app):
         logger.info("Ingest worker disabled")
 
     yield
+
+    if warm_task is not None and not warm_task.done():
+        warm_task.cancel()
+        try:
+            await warm_task
+        except asyncio.CancelledError:
+            pass
 
     if ingest_task is not None:
         ingest_task.cancel()
@@ -780,7 +814,9 @@ def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> 
 
     context_str = "\n".join(context_parts) if context_parts else "(No relevant context found.)"
     return (
-        "Answer using only the context below. If the context doesn't contain enough information, say so.\n\n"
+        "You help reuse text from past engineering reports. Using only the context below, "
+        "quote any passages that are relevant to the question. If none of the context is "
+        'relevant, reply exactly: "No source documents contain that information."\n\n'
         "Context:\n" + context_str + "\n\n"
         "Question: " + question
     )
@@ -798,13 +834,30 @@ def _relevance_gate_blocks(cosine_scores: list[float]) -> bool:
         return False
     return max(cosine_scores) < RAG_MIN_RELEVANCE_SCORE
 
+async def _rerank_chunks(
+    question: str,
+    chunks: list[RetrievedChunk],
+    top_k: int,
+    reranker,
+) -> list[RetrievedChunk]:
+    """Cross-encoder rerank a candidate pool down to top_k. No-op when disabled."""
+    if not chunks:
+        return []
+    if reranker is None or len(chunks) <= 1:
+        return chunks[:top_k]  # preserve current behavior / output size
+    # RetrievedChunk -> dict adapter (rerank() keys on "content")
+    payload = [{"content": c.content_snippet, "_chunk": c} for c in chunks]
+    # CPU-bound model.predict -> off the event loop so concurrent /ask aren't blocked
+    ranked = await asyncio.to_thread(reranker.rerank, question, payload, top_k)
+    return [d["_chunk"] for d in ranked]
 
-def _retrieve_for_ask(
+async def _retrieve_for_ask(
     conn,
     ask_request: AskRequest,
     query_vec: list[float],
     embedding_model: str | None,
     rag_endpoint: str,
+    reranker,                      # <-- new: request.app.state.reranker
 ) -> list[RetrievedChunk]:
     """Retrieve chunks per ask_request.retrieval_mode and record mode-appropriate metrics.
 
@@ -817,58 +870,49 @@ def _retrieve_for_ask(
     the existing zero-chunk path in _ask_prompt_from_chunks turns it into a refusal.
     Pure lexical lookups have no cosine and are never gated.
     """
+    top_k = ask_request.top_k
+    # Pull a wider candidate pool when reranking; otherwise retrieve exactly top_k as before.
+    pool_k = max(top_k * 4, 20) if reranker is not None else top_k
+
+    
     def _hybrid() -> list[RetrievedChunk]:
-        fused: list[FusedHit] = retrieve_top_k_hybrid(
-            conn,
-            query_vec,
-            ask_request.question,
-            ask_request.top_k,
-            ask_request.doc_id,
-            embedding_model=embedding_model,
+        fused = retrieve_top_k_hybrid(
+            conn, query_vec, ask_request.question, pool_k,
+            ask_request.doc_id, embedding_model=embedding_model,
         )
         cosine_scores = [h.cosine_score for h in fused if h.cosine_score is not None]
         record_hybrid_scores(
-            rag_endpoint,
-            cosine_scores,
+            rag_endpoint, cosine_scores,
             [h.lexical_score for h in fused if h.lexical_score is not None],
             [h.rrf_score for h in fused],
         )
-        if _relevance_gate_blocks(cosine_scores):
+        if _relevance_gate_blocks(cosine_scores):   # gate BEFORE rerank, on cosine
             return []
         return [h.chunk for h in fused]
-
     mode = ask_request.retrieval_mode
     auto_routed = mode == "auto"
     if auto_routed:
         mode = resolve_auto_mode(ask_request.question)
-
     if mode == "hybrid":
-        return _hybrid()
-    if mode == "lexical":
-        top_chunks = retrieve_top_k_lexical(
-            conn,
-            lexical_query_text(ask_request.question),
-            ask_request.top_k,
-            ask_request.doc_id,
+        candidates = _hybrid()
+    elif mode == "lexical":
+        candidates = retrieve_top_k_lexical(
+            conn, lexical_query_text(ask_request.question), pool_k, ask_request.doc_id,
         )
-        # auto must never do worse than the hybrid default: if the adaptive lexical
-        # route finds nothing (e.g. a verbose query whose terms AND to no match),
-        # fall back to hybrid. An explicitly requested lexical mode is left as-is.
-        if not top_chunks and auto_routed:
-            return _hybrid()
-        record_lexical_scores(rag_endpoint, [c.score for c in top_chunks])
-        return top_chunks
-    top_chunks = retrieve_top_k(
-        conn,
-        query_vec,
-        ask_request.top_k,
-        ask_request.doc_id,
-        embedding_model=embedding_model,
-    )
-    record_retrieval_scores(rag_endpoint, [c.score for c in top_chunks])
-    if _relevance_gate_blocks([c.score for c in top_chunks]):
-        return []
-    return top_chunks
+        if not candidates and auto_routed:
+            candidates = _hybrid()
+        else:
+            record_lexical_scores(rag_endpoint, [c.score for c in candidates])
+    else:  # vector
+        candidates = retrieve_top_k(
+            conn, query_vec, pool_k, ask_request.doc_id, embedding_model=embedding_model,
+        )
+        record_retrieval_scores(rag_endpoint, [c.score for c in candidates])
+        if _relevance_gate_blocks([c.score for c in candidates]):
+            candidates = []
+    # Single shared rerank+trim step — gate has already run, so a blocked
+    # retrieval is [] here and stays [] (→ refusal path downstream).
+    return await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
 
 
 def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
@@ -911,8 +955,9 @@ async def ask(
         query_vec = query_vectors[0]
 
         t_retrieve = time.perf_counter()
-        top_chunks = _retrieve_for_ask(
-            conn, ask_request, query_vec, embedder.model, rag_endpoint
+        top_chunks = await _retrieve_for_ask(
+            conn, ask_request, query_vec, embedder.model, rag_endpoint,
+            request.app.state.reranker,
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
 
@@ -953,8 +998,9 @@ async def ask_stream(
         record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         query_vec = query_vectors[0]
         t_retrieve = time.perf_counter()
-        top_chunks = _retrieve_for_ask(
-            conn, ask_request, query_vec, embedder.model, rag_endpoint
+        top_chunks = await _retrieve_for_ask(
+            conn, ask_request, query_vec, embedder.model, rag_endpoint,
+            request.app.state.reranker,
         )
         record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
