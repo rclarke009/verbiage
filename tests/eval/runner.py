@@ -37,7 +37,15 @@ def load_gold_questions() -> list[dict]:
 
 
 def _included_blocks(top_chunks: list[RetrievedChunk]) -> list[str]:
-    """Content of the chunks that fit under the prompt's char budget, in prompt order."""
+    """Content of the chunks that fit under the prompt's char budget, in prompt order.
+
+    Each block is prefixed with its document title because the model sees that title
+    in the block header (see app.main._ask_prompt_from_chunks) and legitimately uses
+    it to ground claims. The title typically carries the property address ("412
+    Gulfview Drive"), which the body refers to only as "this residence". Keeping the
+    title as the block's first line lets NliJudge's header-prefix premises bridge that
+    coreference gap; otherwise an address-bearing claim is unentailed by any premise.
+    """
     blocks: list[str] = []
     total = 0
     for c in top_chunks:
@@ -50,7 +58,7 @@ def _included_blocks(top_chunks: list[RetrievedChunk]) -> list[str]:
         )
         if total + len(block) > _MAX_CONTEXT_CHARS:
             break
-        blocks.append(c.content_snippet)
+        blocks.append(f"{title}\n{c.content_snippet}")
         total += len(block)
     return blocks
 
