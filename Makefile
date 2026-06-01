@@ -8,17 +8,21 @@ COMPOSE_EVAL := docker compose --env-file /dev/null -f docker-compose.eval.yml
 EVAL_DB_URL  := postgresql://postgres:postgres@localhost:5433/verbiage_eval
 EVAL_ENV     := VERBIAGE_EVAL=1 EVAL_DATABASE_URL=$(EVAL_DB_URL)
 
+# Python interpreter. Prefer the project virtualenv (it has pytest et al.), then a
+# bare `python3`, then `python`. Override with `make PYTHON=... eval` if needed.
+PYTHON ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || command -v python3 2>/dev/null || command -v python)
+
 .PHONY: eval eval-full eval-up eval-down eval-warm-cache
 
 # Fast gate (local NLI judge) -- run this after every tweak.
 # Run the suite, ALWAYS tear the DB down, then exit with the suite's real status
 # (all in one shell so the exit code propagates -- important for CI gating).
 eval: eval-up
-	@$(EVAL_ENV) python -m pytest -m eval_fast tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
+	@$(EVAL_ENV) $(PYTHON) -m pytest -m eval_fast tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
 
 # Deep gate (OpenAI LLM-as-judge) -- nightly / manual.
 eval-full: eval-up
-	@$(EVAL_ENV) python -m pytest -m eval_full tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
+	@$(EVAL_ENV) $(PYTHON) -m pytest -m eval_full tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
 
 eval-up:
 	-$(COMPOSE_EVAL) down -v --remove-orphans 2>/dev/null || true
@@ -30,4 +34,4 @@ eval-down:
 # Re-seed once against live backends to (re)populate tests/eval/embeddings_cache.json,
 # then commit the cache so future runs are deterministic and offline.
 eval-warm-cache: eval-up
-	@$(EVAL_ENV) python -m tests.eval.seed; status=$$?; $(MAKE) eval-down; exit $$status
+	@$(EVAL_ENV) $(PYTHON) -m tests.eval.seed; status=$$?; $(MAKE) eval-down; exit $$status
