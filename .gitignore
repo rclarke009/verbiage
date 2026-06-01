@@ -24,3 +24,7 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Test reference pages
+files_for_reference/testing/before.pages
+files_for_reference/testing/after.pages
