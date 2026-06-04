@@ -90,6 +90,8 @@ If you **`git clone`** or **`mv`** the repo to a **new folder**, recreate the ve
 
 Default: **http://localhost:8000**. Root serves the **built** SPA (from `static/`) after `npm run build:static` in `frontend/` (or Docker); API routes are under the same host.
 
+If you use **only uvicorn on :8000** (not Vite), rebuild after frontend UI changes so `static/` matches source — e.g. `cd frontend && npm run build:static`, then hard-refresh the browser. Production Docker images always build fresh; the committed `static/` bundle can lag until you rebuild.
+
 ### Local development: Vite + uvicorn (hot-reload SPA)
 
 Use **two terminals** so the UI can hot-reload while the FastAPI process handles `/config`, auth, and API routes:
