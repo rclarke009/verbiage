@@ -1,0 +1,13 @@
+# Append this job under scrape_configs in prometheus.yml to scrape Render production.
+# Requires: secrets/metrics_token (same value as Render METRICS_TOKEN).
+#
+#   - job_name: verbiage-prod
+#     scheme: https
+#     metrics_path: /metrics
+#     static_configs:
+#       - targets: ["rag-document-analysis-backend.onrender.com"]
+#     authorization:
+#       type: Bearer
+#       credentials_file: /etc/prometheus/secrets/metrics_token
+#
+# And in docker-compose.yml, uncomment the prometheus secrets volume mount.
