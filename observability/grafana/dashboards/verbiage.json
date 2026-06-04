@@ -1,0 +1,354 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total{job=~\"$environment\"}[5m])) by (job, route)",
+          "legendFormat": "{{job}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP request rate by route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total{job=~\"$environment\",status_class=~\"4xx|5xx\"}[5m])) by (job, status_class, route)",
+          "legendFormat": "{{job}} {{status_class}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP 4xx / 5xx rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(rag_phase_seconds_bucket{job=~\"$environment\"}[5m])) by (le, job, phase, endpoint))",
+          "legendFormat": "p95 {{job}} {{phase}} ({{endpoint}})",
+          "refId": "A"
+        }
+      ],
+      "title": "RAG phase latency p95 (embed / retrieve / llm)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(rag_retrieval_empty_total{job=~\"$environment\"}[1h])) by (job, endpoint)",
+          "legendFormat": "{{job}} empty {{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Empty retrieval (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(rag_retrieval_low_quality_total{job=~\"$environment\"}[1h])) by (job, endpoint)",
+          "legendFormat": "{{job}} low quality {{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Low-quality retrieval (per hour)",
+      "description": "Increments when top-1 cosine is below RAG_SIMILARITY_ALERT_THRESHOLD and chunks exist.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(rag_no_context_response_total{job=~\"$environment\"}[1h])) by (job, endpoint)",
+          "legendFormat": "{{job}} no context {{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "No-context responses (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_top_similarity_bucket{job=~\"$environment\"}[5m])) by (le, job, endpoint))",
+          "legendFormat": "p50 {{job}} top cosine ({{endpoint}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Top chunk cosine similarity p50",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(upstream_timeouts_total{job=~\"$environment\"}[1h])) by (job, component)",
+          "legendFormat": "{{job}} timeout {{component}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(upstream_fallback_total{job=~\"$environment\"}[1h])) by (job, kind)",
+          "legendFormat": "{{job}} fallback {{kind}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Upstream timeouts & OpenAI→Ollama fallbacks (per hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=~\"$environment\", route=~\"/ask.*\", method=\"POST\"}[5m])) by (le, job, route))",
+          "legendFormat": "p95 {{job}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP /ask latency p95 (end-to-end, incl. stream)",
+      "description": "Wall time until the full response body is sent (streaming completes for /ask/stream).",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(rag_no_context_response_total{job=~\"$environment\"}[5m])) by (job) / sum(rate(http_requests_total{job=~\"$environment\", route=~\"/ask.*\", method=\"POST\", status_class=\"2xx\"}[5m])) by (job)",
+          "legendFormat": "{{job}} overall",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(rag_no_context_response_total{job=~\"$environment\", endpoint=\"sync\"}[5m])) by (job) / sum(rate(http_requests_total{job=~\"$environment\", route=\"/ask\", method=\"POST\", status_class=\"2xx\"}[5m])) by (job)",
+          "legendFormat": "{{job}} sync (/ask)",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(rag_no_context_response_total{job=~\"$environment\", endpoint=\"stream\"}[5m])) by (job) / sum(rate(http_requests_total{job=~\"$environment\", route=\"/ask/stream\", method=\"POST\", status_class=\"2xx\"}[5m])) by (job)",
+          "legendFormat": "{{job}} stream (/ask/stream)",
+          "refId": "C"
+        }
+      ],
+      "title": "No-context refusal rate (/ask traffic)",
+      "description": "Share of successful POST /ask* requests that returned the fixed no-context refusal (empty retrieval or relevance gate below RAG_MIN_RELEVANCE_SCORE). Denominator matches route: sync uses /ask, stream uses /ask/stream.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 40 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_mean_similarity_bucket{job=~\"$environment\"}[5m])) by (le, job, endpoint))",
+          "legendFormat": "p50 {{job}} mean cosine ({{endpoint}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Mean chunk cosine similarity p50",
+      "description": "Average cosine across all retrieved chunks per request. Drops when the tail of the pool is weak even if top-1 is OK.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 40 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(rag_stream_retrieval_failed_total{job=~\"$environment\"}[1h])) by (job)",
+          "legendFormat": "{{job}} stream retrieval failed",
+          "refId": "A"
+        }
+      ],
+      "title": "Stream retrieval failures (per hour)",
+      "description": "/ask/stream errors during embed/retrieve (client receives event: error).",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "index": 0, "text": "DOWN" } }, "type": "value" },
+            { "options": { "1": { "color": "green", "index": 1, "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 40 },
+      "id": 13,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up{job=~\"$environment\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus scrape target",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 4 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_top_lexical_score_bucket{job=~\"$environment\"}[5m])) by (le, job, endpoint))",
+          "legendFormat": "p50 {{job}} top ts_rank ({{endpoint}})",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_top_rrf_score_bucket{job=~\"$environment\"}[5m])) by (le, job, endpoint))",
+          "legendFormat": "p50 {{job}} top RRF ({{endpoint}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Hybrid retrieval: lexical & RRF p50",
+      "description": "Recorded on hybrid/auto-routed asks. Lexical is ts_rank; RRF maxes near 0.033 with k=60.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_chunk_similarity_bucket{job=~\"$environment\"}[5m])) by (le, job, endpoint))",
+          "legendFormat": "p50 {{job}} per-chunk cosine ({{endpoint}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Per-chunk cosine similarity p50",
+      "description": "One observation per retrieved chunk — overall pool strength across all chunks in each request.",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["verbiage", "rag"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".+",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(http_requests_total, job)",
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "environment",
+        "options": [],
+        "query": {
+          "query": "label_values(http_requests_total, job)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Verbiage RAG",
+  "uid": "verbiage-rag",
+  "version": 2
+}

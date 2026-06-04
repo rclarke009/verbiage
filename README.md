@@ -198,7 +198,7 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 
 - Set the load-balancer health check to **`/health/ready`**, not `/health`.
 - Optional **`GET /health/deep`** probes DB + embed (avoid high-frequency polling — may call OpenAI).
-- Optional Prometheus **`GET /metrics`** — see [setup.md](setup.md#prometheus-metrics-optional).
+- Optional Prometheus **`GET /metrics`** — see [setup.md](setup.md#prometheus-metrics-optional); local **Grafana** stack in [observability/](observability/README.md).
 
 ---
 

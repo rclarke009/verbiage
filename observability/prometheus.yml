@@ -1,0 +1,16 @@
+# Scrape Verbiage GET /metrics (requires METRICS_ENABLED=true on the app).
+# Target: API on the host at :8000 (uvicorn or root docker-compose app service).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: verbiage-local
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+    # Bearer token must match METRICS_TOKEN in the app .env (see secrets/metrics_token).
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token

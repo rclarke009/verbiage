@@ -1,0 +1,32 @@
+# Prometheus + Grafana for Verbiage /metrics.
+# Prereq: Verbiage API with METRICS_ENABLED=true listening on host :8000.
+#
+#   cd observability && docker compose up -d
+#
+# Grafana:     http://localhost:3000  (admin / admin — change on first login)
+# Prometheus:  http://localhost:9090  (Status → Targets → verbiage-local UP)
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./secrets:/etc/prometheus/secrets:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
