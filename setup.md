@@ -71,7 +71,7 @@ Details: [supabase_migration.md](supabase_migration.md).
 
 ## Install and run
 
-On macOS with **Homebrew Python**, installs are often **externally managed (PEP 668)** — use the project **`venv`** below rather than `pip install` globally.
+On macOS with **Homebrew Python**, installs are often **externally managed (PEP 668)** — use the project **`venv`** below rather than `pip install` globally. **Python 3.11** matches CI and the production Docker image (see `.python-version` if you use pyenv/asdf).
 
 ```bash
 cd verbiage
@@ -141,6 +141,7 @@ The app exposes [Prometheus](https://prometheus.io/) metrics via **`prometheus-c
    `curl -s http://localhost:8000/metrics -H "Authorization: Bearer YOUR_METRICS_TOKEN"`
 3. **What you get:** HTTP latency and status classes (`http_request_duration_seconds`, `http_requests_total`); RAG pipeline phases and retrieval similarity histograms (`rag_phase_seconds`, `rag_retrieval_*`); empty retrieval / no-context counters; stream-only retrieval failures (`rag_stream_retrieval_failed_total`); upstream timeouts and OpenAI→Ollama fallbacks (`upstream_timeouts_total`, `upstream_fallback_total`). Metric names and behavior are documented in comments in **`app/monitoring/metrics.py`**.
 4. **Tests:** From the repo root with the venv active, run **`PYTHONPATH=. pytest tests/test_metrics.py -q`** (see [setup_and_testing.md](setup_and_testing.md#unit-tests-pytest)).
+5. **Grafana (local):** Optional Docker stack under **[observability/](observability/README.md)** — Prometheus scrapes `:8000/metrics` and provisions a **Verbiage RAG** dashboard on **http://localhost:3000**.
 
 ---
 

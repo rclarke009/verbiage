@@ -7,7 +7,7 @@ Activate the project venv first so httpx is available, e.g.:
   source .venv/bin/activate
 
 Usage:
-  python ingest_file.py payload.json
+  python ingest_file.py scripts/fixtures/edge-rel-playbook-v1.txt
   python ingest_file.py doc.txt --doc-id my-doc --title "My Doc" --source file
 """
 

@@ -23,6 +23,7 @@ logs/
 .idea/
 .vscode/
 .DS_Store
+.cursor/
 
 # Build artifacts
 dist/

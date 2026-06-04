@@ -82,7 +82,7 @@ def build_direct_url(pooler_url: str) -> str | None:
         p = urlparse(pooler_url)
         if not p.hostname or "pooler.supabase.com" not in p.hostname:
             return None
-        # Username is postgres.REF (e.g. postgres.dunxzvbxekxqrfnmtzmj)
+        # Username is postgres.REF (e.g. postgres.<project-ref>)
         if not p.username or not p.username.startswith("postgres."):
             return None
         ref = p.username.split(".", 1)[1]

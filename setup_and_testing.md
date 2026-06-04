@@ -283,7 +283,7 @@ curl -s -X POST "http://localhost:8000/ingest/file" \
 
 Requires a JSON body with `question`. Optional: `top_k`, `doc_id`, `use_rag`.
 
-After ingesting the test playbook (e.g. content from `payload.json` with `doc_id` `edge-rel-playbook-v1`), these questions verify RAG:
+After ingesting the test playbook (e.g. `scripts/fixtures/edge-rel-playbook-v1.txt` with `doc_id` `edge-rel-playbook-v1`), these questions verify RAG:
 
 ```bash
 # Answerable from the playbook: Preflight Validator checks are listed in section 4

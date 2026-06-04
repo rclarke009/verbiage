@@ -1,6 +1,7 @@
 # Secrets and env (keep .env.example)
 .env
 *.pem
+observability/secrets/metrics_token
 
 # Python
 __pycache__/
@@ -24,6 +25,9 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Cursor / local agent artifacts (do not publish)
+.cursor/
 
 # Test reference pages
 files_for_reference/testing/before.pages
