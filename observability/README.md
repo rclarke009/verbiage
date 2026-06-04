@@ -80,14 +80,49 @@ See `app/monitoring/metrics.py` and [setup.md](../setup.md#prometheus-metrics-op
 
 Set **`RAG_SIMILARITY_ALERT_THRESHOLD`** (e.g. `0.35`) in the app `.env` so the low-quality panel increments before the hard relevance gate at `RAG_MIN_RELEVANCE_SCORE` (default `0.5`).
 
-After editing `grafana/dashboards/verbiage.json`, restart Grafana or re-import the dashboard if it was already loaded (`docker compose restart grafana`).
+After editing `grafana/dashboards/verbiage.json`, restart Grafana from **`observability/`** (`docker compose restart grafana`). Running `docker compose` from the repo root will report `no such service: grafana`.
 
 ## Load testing and reading the dashboard
 
-Use the repo load script to populate RAG metrics (requires a Supabase Bearer token):
+Use the repo load script to populate RAG metrics. From the **repo root** (not `observability/`):
 
 ```bash
-python scripts/load_test_ask.py --token "$TOKEN" --count 30 --concurrency 3 --endpoint mix
+# Prefer a token in .env (see below) — no --token flag needed
+.venv/bin/python scripts/load_test_ask.py --count 30 --concurrency 3 --endpoint mix
+```
+
+**Auth token for load tests**
+
+Add a Supabase **access** JWT (not the refresh token) to the project `.env`:
+
+```bash
+VERBIAGE_LOAD_TEST_TOKEN=eyJ...
+```
+
+Copy it after sign-in: DevTools → Network → any API call to your API → `Authorization` → paste only the part after `Bearer ` (no `Bearer` prefix in `.env`).
+
+The script also accepts `--token "$TOKEN"` or `export VERBIAGE_LOAD_TEST_TOKEN=...` in the shell.
+
+### Expired token after a break (401, finishes in under 1s)
+
+Supabase **access tokens expire** (often ~1 hour). The value in `.env` does **not** refresh when you step away.
+
+| Symptom | Meaning |
+|--------|---------|
+| All requests **HTTP 401**, **~0.0s** latency, whole run done in **under 1 second** | Auth rejected immediately — embed/retrieve/LLM never ran |
+| App still works in the browser | SPA refreshes tokens automatically; the load script only uses the stale JWT in `.env` |
+
+**Fix:** sign in again, copy a **new** access token into `VERBIAGE_LOAD_TEST_TOKEN`, rerun the script. A healthy run shows **HTTP 200** and **multi-second** latencies per request.
+
+Optional check (repo root, does not print the token):
+
+```bash
+.venv/bin/python -c "
+import time, jwt
+from scripts.load_test_ask import _load_dotenv_token
+p = jwt.decode(_load_dotenv_token(), options={'verify_signature': False})
+print('expired:', p['exp'] < time.time())
+"
 ```
 
 **What looks alarming but is often expected**
