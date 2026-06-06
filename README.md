@@ -92,6 +92,10 @@ flowchart TD
 3. Vectors stored in pgvector; retrieval filtered by active embedding model
 4. User question → hybrid retrieval (vector + lexical) → RRF fusion → relevance gate (cosine) → optional cross-encoder rerank → top-k chunks → grounded LLM response with citations
 
+### Concurrency model
+
+We chose **psycopg2** and a **sync DB layer** first because the app migrated from SQLite with minimal churn — same `conn`-per-request pattern, straightforward pgvector SQL, and one `ThreadedConnectionPool` against the Supabase pooler. We used **native async (`httpx`)** for LLM and embedding API calls from the start because that is where most `/ask` latency lives. As load grew on a **single uvicorn worker** (ingest worker in-process, reranker in memory), blocking work on the event loop caused real pain — first **Google Drive listing** (502s on large folders), then the **cross-encoder reranker**. We addressed those with **`asyncio.to_thread`** (and a dedicated Drive thread pool), not an asyncpg rewrite: same database, same pooler, lower risk. Remaining gaps — **Postgres retrieval, document chunking, PDF/DOCX extraction, and worker Drive downloads** — are offloaded the same way so concurrent `/ask` and ingest do not freeze health checks or SSE streams.
+
 Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md). Prompt engineering & grounding strategy: [build-prompts.md](build-prompts.md).
 
 ---
@@ -106,6 +110,7 @@ Implementation notes (chunking, reindex, data sources): [code-notes.md](code-not
 | **Postgres-backed ingest job queue** | Synchronous ingestion blocked the API during large uploads (200+ reports), causing 502 errors | Durable batch jobs + status polling; reliable under real team usage loads |
 | **Strict grounding prompt + citations** | Reduce hallucinations and ensure answers are traceable to source reports | Builds team trust — every response either cites documents or says "Not enough information" |
 | **Canonical `full_text` storage** | Support re-indexing and chunking improvements without re-uploading | Faster iteration during development |
+| **Event-loop offload (`to_thread`)** | Sync psycopg2 + chunking/PDF/Drive still blocked the single worker under concurrency | Retrieval, ingest CPU work, and worker Drive fetch moved off the loop; LLM/embed stay native async |
 
 ---
 
