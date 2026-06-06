@@ -8,6 +8,26 @@
 
 ---
 
+## Demo (no login required)
+
+The production app requires sign-in, so the examples below show typical **Ask** behavior from the faithfulness eval corpus ([tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml)). Answers are grounded in retrieved report text and include **source citations** (document title + excerpt). Off-corpus questions are **refused** before any LLM call when retrieval scores are too low.
+
+**Answerable question** — retrieval finds relevant storm-report language:
+
+> **Q:** What roof damage was found at 1060 Alton Road in Port Charlotte?
+>
+> **A:** *(Suggested overview / detailed-image verbiage drawn from matching inspection reports, with cited source chunks — e.g. shingle damage, wind-related observations.)*
+
+**Refusal** — nothing relevant in the shared library:
+
+> **Q:** What hail damage was found on roofs in Wyoming?
+>
+> **A:** *I don't have relevant context in the document library to answer that question.*
+
+Optional polish: add UI screenshots under [`docs/screenshots/`](docs/screenshots/) and embed them here — **not required**; the text examples above are enough for a portfolio README.
+
+---
+
 ## 🎯 Business Impact
 
 - Dramatically reduces time spent manually searching through old reports
@@ -137,6 +157,8 @@ make eval-full   # deep gate: OpenAI LLM-as-judge, nightly/manual
 
 Each `make` target brings the ephemeral DB up (`docker-compose.eval.yml`), seeds `tests/eval/corpus/`, runs the suite, prints a per-question scoreboard, and tears the DB down. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest` run stays fast and offline. Gold questions (including deliberately unanswerable ones that must trigger a refusal) live in [tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml). Generation needs an LLM backend (OpenAI key or Ollama) and an embedding backend (or a warm `tests/eval/embeddings_cache.json`; refresh with `make eval-warm-cache`).
 
+**CI vs eval:** GitHub Actions runs `pytest -q` on every push (unit/integration tests, no LLM). The faithfulness harness is **`make eval`** locally or on a schedule — heavier, needs Docker + an LLM backend. See [setup_and_testing.md](setup_and_testing.md).
+
 ---
 
 ## Web UI (SPA)
@@ -167,6 +189,16 @@ Interactive docs: **http://localhost:8000/docs** when the server is running.
 | `POST /ask`, `POST /ask/stream` | RAG Q&A |
 
 Most routes require `Authorization: Bearer <Supabase access token>`.
+
+---
+
+## Security & access model
+
+This app is a **team shared library**, not per-user document isolation:
+
+- **API auth:** Protected routes require a valid **Supabase JWT** (`Authorization: Bearer …`). Sign-up is **closed** (invite code or email allowlist).
+- **Shared corpus:** All authenticated users see the same ingested documents — ingest, list, search, and delete apply to one team library (intentional for a collaborative storm-report inbox).
+- **Database access:** The FastAPI service connects with **`DATABASE_URL`** (Postgres owner role), which **bypasses Row Level Security**. RLS policies on `documents` / `chunks` / `embeddings` are defined for Supabase-native clients (`authenticated` role); they document how direct Supabase access would be scoped if you add client-side DB reads later. Today all data access goes through the API.
 
 ---
 
@@ -205,3 +237,7 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 ## 📬 Contact
 
 **Rebecca Clarke** — [LinkedIn](https://www.linkedin.com/in/rclarke009/) · [Email](mailto:rivkaclarke@icloud.com)
+
+## License
+
+[MIT](LICENSE)
