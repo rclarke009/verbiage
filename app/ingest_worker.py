@@ -20,7 +20,7 @@ from app.drive_client import (
     DriveClientError,
     compute_index_status,
     drive_source_url_for_mime,
-    fetch_drive_file,
+    fetch_drive_file_async,
 )
 from app.ingest_core import ingest_new_document, reingest_existing_document
 from app.models import ChunkingOptions, IngestResponse
@@ -44,7 +44,7 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
     drive_file_id = payload.get("drive_file_id") or doc_id
 
     try:
-        doc = fetch_drive_file(drive_file_id)
+        doc = await fetch_drive_file_async(drive_file_id)
     except DriveClientError as e:
         return "failed", None, str(e)
 

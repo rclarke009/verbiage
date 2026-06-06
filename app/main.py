@@ -540,7 +540,7 @@ async def ingest_file(
             detail=f"File too large (max {MAX_UPLOAD_PDF_BYTES // (1024*1024)} MB).",
         )
     try:
-        text = extract_text_from_pdf(data)
+        text = await asyncio.to_thread(extract_text_from_pdf, data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -889,7 +889,6 @@ async def _retrieve_for_ask(
     # Pull a wider candidate pool when reranking; otherwise retrieve exactly top_k as before.
     pool_k = max(top_k * 4, 20) if reranker is not None else top_k
 
-    
     def _hybrid() -> list[RetrievedChunk]:
         fused = retrieve_top_k_hybrid(
             conn, query_vec, ask_request.question, pool_k,
@@ -904,27 +903,32 @@ async def _retrieve_for_ask(
         if _relevance_gate_blocks(cosine_scores):   # gate BEFORE rerank, on cosine
             return []
         return [h.chunk for h in fused]
-    mode = ask_request.retrieval_mode
-    auto_routed = mode == "auto"
-    if auto_routed:
-        mode = resolve_auto_mode(ask_request.question)
-    if mode == "hybrid":
-        candidates = _hybrid()
-    elif mode == "lexical":
-        candidates = retrieve_top_k_lexical(
-            conn, lexical_query_text(ask_request.question), pool_k, ask_request.doc_id,
-        )
-        if not candidates and auto_routed:
-            candidates = _hybrid()
-        else:
+
+    def _run_retrieval() -> list[RetrievedChunk]:
+        mode = ask_request.retrieval_mode
+        auto_routed = mode == "auto"
+        if auto_routed:
+            mode = resolve_auto_mode(ask_request.question)
+        if mode == "hybrid":
+            return _hybrid()
+        if mode == "lexical":
+            candidates = retrieve_top_k_lexical(
+                conn, lexical_query_text(ask_request.question), pool_k, ask_request.doc_id,
+            )
+            if not candidates and auto_routed:
+                return _hybrid()
             record_lexical_scores(rag_endpoint, [c.score for c in candidates])
-    else:  # vector
+            return candidates
         candidates = retrieve_top_k(
             conn, query_vec, pool_k, ask_request.doc_id, embedding_model=embedding_model,
         )
         record_retrieval_scores(rag_endpoint, [c.score for c in candidates])
         if _relevance_gate_blocks([c.score for c in candidates]):
-            candidates = []
+            return []
+        return candidates
+
+    # Sync psycopg2 retrieval -> off the event loop so concurrent /ask stay responsive
+    candidates = await asyncio.to_thread(_run_retrieval)
     # Single shared rerank+trim step — gate has already run, so a blocked
     # retrieval is [] here and stays [] (→ refusal path downstream).
     return await _rerank_chunks(ask_request.question, candidates, top_k, reranker)

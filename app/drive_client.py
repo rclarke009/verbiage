@@ -560,6 +560,11 @@ def fetch_drive_file(file_id: str) -> DriveDoc:
     )
 
 
+async def fetch_drive_file_async(file_id: str) -> DriveDoc:
+    """Async wrapper for fetch_drive_file; offloads blocking Drive I/O from the event loop."""
+    return await asyncio.to_thread(fetch_drive_file, file_id)
+
+
 def list_and_export_docs(
     folder_id: str | None = None,
     file_ids: list[str] | None = None,

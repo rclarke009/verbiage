@@ -5,6 +5,7 @@ Used by ingest and reindex flows.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.chunking import chunk_text
@@ -21,6 +22,25 @@ from app.models import ChunkingOptions, IngestResponse
 logger = logging.getLogger(__name__)
 
 
+def _chunk_and_insert(conn, doc_id: str, text: str, opts: ChunkingOptions):
+    """CPU-bound chunking + sync chunk inserts; run via asyncio.to_thread."""
+    delete_chunks_for_doc(conn, doc_id)
+    chunks = chunk_text(text, opts)
+    for chunk in chunks:
+        chunk_id = f"{doc_id}:{chunk.chunk_index}"
+        insert_chunk(
+            conn,
+            chunk_id,
+            doc_id,
+            chunk.chunk_index,
+            chunk.content,
+            chunk.start_offset,
+            chunk.end_offset,
+            section_label=chunk.section_label,
+        )
+    return chunks
+
+
 async def index_document(
     conn,
     doc_id: str,
@@ -34,21 +54,7 @@ async def index_document(
     """
     embedder = embedder or HttpEmbedder()
     opts = chunking_options
-    delete_chunks_for_doc(conn, doc_id)
-    chunks = chunk_text(text, opts)
-
-    for chunk in chunks:
-        chunk_id = f"{doc_id}:{chunk.chunk_index}"
-        insert_chunk(
-            conn,
-            chunk_id,
-            doc_id,
-            chunk.chunk_index,
-            chunk.content,
-            chunk.start_offset,
-            chunk.end_offset,
-            section_label=chunk.section_label,
-        )
+    chunks = await asyncio.to_thread(_chunk_and_insert, conn, doc_id, text, opts)
 
     try:
         vectors = await embedder.embed_many([c.content for c in chunks])
