@@ -104,6 +104,15 @@ PYTHONPATH=. pytest tests/ -q
 - **`tests/test_reranker.py`** — cross-encoder reranking: the `Reranker` (lazy load stubbed, no model download), the `_rerank_chunks` adapter, and `_retrieve_for_ask` pool-widening + the gate-runs-before-rerank invariant.
 - **`tests/test_llm_client.py`** — LLM temperature plumbing: the configured `LLM_TEMPERATURE` default and explicit overrides reach the OpenAI/Ollama request payload (HTTP mocked).
 - **`tests/test_ask_stream.py`** — SSE wire contract for **`POST /ask/stream`**: a prepare/retrieval failure emits an `event: error` frame (`retrieval_failed`), and the no-context path emits a token refusal + empty `sources` frame without calling the LLM. These are the exact frames the SPA's `useReportSearch` hook parses. `TestClient` is used without a context manager so the app lifespan (and its real DB) never starts; `with_db_conn_retry` is patched, so no database is required.
+- **`tests/test_api_smoke.py`** — API regression smoke tests (no database). Uses `TestClient` without lifespan; patches `with_db_conn_retry` / `with_db_conn_retry_sync` and mocks embed/LLM/Drive at the route boundary. Covers:
+  - public routes: **`GET /health`**, **`GET /config`**;
+  - documents: **`GET /documents`**, **`DELETE /documents/{doc_id}`**, **`GET /documents/similar-titles`**, **`POST /documents/{doc_id}/reindex`**;
+  - ask (sync): **`POST /ask`** — no-context refusal and LLM answer with chunks;
+  - ingest: **`POST /ingest`** (success + 409 duplicate), **`POST /ingest/file`** (reject non-PDF, accept PDF);
+  - Drive ingest: **`POST /ingest/google-drive`** (202 enqueue), **`GET /ingest/batches/{batch_id}`**;
+  - Drive listing: **`GET /drive/files`** with index-status enrichment.
+  Shared helpers live in **`tests/conftest_api.py`**.
+- **`tests/test_indexing.py`** — **`index_document`** / **`reindex_document`**: chunk insert, embed, metadata update, and rollback on embed failure (mocked DB, no Postgres).
 - Other **`tests/*.py`** — lightweight unit tests (no full API startup unless noted).
 - **`tests/eval/`** — faithfulness eval suite; excluded from `pytest tests/` unless `VERBIAGE_EVAL=1` is set. See **Faithfulness eval (opt-in)** below.
 
@@ -126,8 +135,9 @@ npm run test:watch # re-run on change while developing
   - an **`event: error`** frame (e.g. `retrieval_failed`) surfaces a readable message instead of being silently dropped;
   - a non-OK response with an empty body and empty `statusText` (as over HTTP/2) renders `Error: HTTP 502`, not a bare `Error:`;
   - an event whose type and data arrive in separate network reads still parses (the `currentEvent`-across-chunks case).
+- **`src/lib/driveFolder.test.ts`** — Drive folder ID parsing for the Drive tab (`parseDriveFolderInput`, `driveFolderUrl`, `resolveDriveFolderForApi`): raw IDs, full folder URLs, rejection of single-document links, empty input, and team-inbox fallback.
 
-These pair with the backend **`tests/test_ask_stream.py`** above so both sides of the SSE contract are pinned: if the backend renames an event or the frontend stops handling one, a test fails instead of the UI silently showing a blank error.
+These pair with the backend **`tests/test_ask_stream.py`** and **`tests/test_drive_folder_id.py`** so client/server contracts stay aligned: SSE events, folder ID parsing, and API response shapes are pinned in tests instead of failing silently in the UI.
 
 The build typechecks exclude test files (`tsconfig.app.json`), so `npm run build` is unaffected.
 
