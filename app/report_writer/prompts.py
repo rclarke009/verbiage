@@ -14,7 +14,15 @@ def build_retrieval_query(
 ) -> str:
     parts: list[str] = []
     meta = property_metadata or {}
-    for key in ("address", "property_type", "storm_date", "storm_type"):
+    for key in (
+        "storm_name",
+        "storm_date",
+        "storm_type",
+        "storm_category",
+        "landfall_region",
+        "address",
+        "property_type",
+    ):
         val = meta.get(key)
         if val:
             parts.append(f"{key.replace('_', ' ')}: {val}")

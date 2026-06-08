@@ -25,6 +25,24 @@ def test_normalize_inputs_builds_retrieval_query():
     assert "100 Maple Ct" in out["retrieval_query"]
 
 
+def test_normalize_inputs_includes_storm_metadata():
+    state: ReportWriterState = {
+        "field_notes": "Roof damage noted",
+        "property_metadata": {
+            "storm_name": "Ian",
+            "storm_date": "September 28, 2022",
+            "storm_type": "hurricane",
+            "storm_category": "Cat 4",
+            "landfall_region": "Cayo Costa, FL",
+        },
+    }
+    out = normalize_inputs(state)
+    query = out["retrieval_query"]
+    assert "storm name: Ian" in query
+    assert "storm category: Cat 4" in query
+    assert "landfall region: Cayo Costa, FL" in query
+
+
 def test_gate_blocks_empty_retrieval():
     state: ReportWriterState = {"retrieved_chunks": []}
     out = gate_retrieval(state)

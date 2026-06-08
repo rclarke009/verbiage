@@ -47,7 +47,12 @@ export function ClaimList({
             }}
           >
             <div style={{ fontWeight: 600 }}>{c.title || 'Untitled claim'}</div>
-            <div style={{ fontSize: 11, color: '#57606a' }}>{c.status}</div>
+            {c.property_metadata?.address ? (
+              <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>
+                {c.property_metadata.address}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>{c.status}</div>
           </button>
         ))}
       </div>
