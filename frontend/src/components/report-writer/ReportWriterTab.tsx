@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -34,7 +34,7 @@ const emptyClaim = (): Claim => ({
 export function ReportWriterTab() {
   const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Claim>(emptyClaim())
+  const [localDraft, setLocalDraft] = useState<Claim | null>(null)
   const { state: genState, generating, generate, reset: resetStream } = useReportWriterStream()
 
   const claimsQuery = useQuery({
@@ -54,9 +54,14 @@ export function ReportWriterTab() {
     enabled: !!activeId,
   })
 
-  useEffect(() => {
-    if (claimQuery.data) setDraft(claimQuery.data)
-  }, [claimQuery.data])
+  const draft = localDraft ?? claimQuery.data ?? emptyClaim()
+
+  const updateDraft = useCallback(
+    (updater: (prev: Claim) => Claim) => {
+      setLocalDraft(prev => updater(prev ?? claimQuery.data ?? emptyClaim()))
+    },
+    [claimQuery.data],
+  )
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -66,7 +71,7 @@ export function ReportWriterTab() {
         property_metadata: draft.property_metadata,
       }),
     onSuccess: data => {
-      setDraft(data)
+      setLocalDraft(data)
       queryClient.invalidateQueries({ queryKey: ['report-writer-claims'] })
     },
   })
@@ -75,6 +80,7 @@ export function ReportWriterTab() {
     mutationFn: () => createClaim({ title: 'New claim', field_notes: '' }),
     onSuccess: data => {
       queryClient.invalidateQueries({ queryKey: ['report-writer-claims'] })
+      setLocalDraft(null)
       setActiveId(data.claim_id)
     },
   })
@@ -83,7 +89,7 @@ export function ReportWriterTab() {
 
   const handleSectionChange = useCallback(
     (key: string, content: string) => {
-      setDraft(prev => ({
+      updateDraft(prev => ({
         ...prev,
         sections: {
           ...prev.sections,
@@ -97,7 +103,7 @@ export function ReportWriterTab() {
         updateSection(activeId, key, content).catch(() => {})
       }, 800)
     },
-    [activeId],
+    [activeId, updateDraft],
   )
 
   const handleGenerate = async () => {
@@ -105,6 +111,7 @@ export function ReportWriterTab() {
     await saveMutation.mutateAsync()
     resetStream()
     await generate(activeId, `/report-writer/claims/${activeId}/generate`)
+    setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
     queryClient.invalidateQueries({ queryKey: ['report-writer-runs', activeId] })
   }
@@ -116,6 +123,7 @@ export function ReportWriterTab() {
       `/report-writer/claims/${activeId}/sections/${sectionKey}/regenerate`,
       { section_key: sectionKey },
     )
+    setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
   }
 
@@ -137,6 +145,7 @@ export function ReportWriterTab() {
         activeId={activeId}
         onSelect={id => {
           setActiveId(id)
+          setLocalDraft(null)
           resetStream()
         }}
         onCreate={() => createMutation.mutate()}
@@ -206,7 +215,7 @@ export function ReportWriterTab() {
               <div>
                 <ClaimForm
                   claim={draft}
-                  onChange={patch => setDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
+                  onChange={patch => updateDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
                 <DraftEditor
