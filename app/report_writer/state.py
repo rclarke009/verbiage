@@ -25,6 +25,7 @@ class ReportWriterState(TypedDict, total=False):
     title: str
     field_notes: str
     property_metadata: dict[str, Any]
+    report_type: str
     image_analyses: list[ImageAnalysis]
     retrieval_query: str
     retrieved_chunks: list[dict[str, Any]]

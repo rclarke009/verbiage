@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from app.report_writer.constants import REPORT_SECTIONS
+from app.report_writer.constants import (
+    REPORT_TYPE_KEY,
+    get_report_type,
+    report_type_def,
+    section_guidance_for,
+    section_labels_for_type,
+)
 
 MAX_CONTEXT_CHARS = 8000
 
@@ -14,6 +20,9 @@ def build_retrieval_query(
 ) -> str:
     parts: list[str] = []
     meta = property_metadata or {}
+    type_id = get_report_type(meta)
+    type_def = report_type_def(type_id)
+    parts.extend(type_def.retrieval_terms)
     for key in (
         "storm_name",
         "storm_date",
@@ -63,16 +72,19 @@ def build_section_prompt(
     retrieved_chunks: list[dict],
     prior_sections: dict[str, dict],
     image_analyses: list[dict] | None = None,
+    report_type: str | None = None,
 ) -> str:
     context = _context_block(retrieved_chunks)
     meta = property_metadata or {}
+    type_id = report_type or get_report_type(meta)
+    type_def = report_type_def(type_id)
     meta_lines = "\n".join(
         f"- {k.replace('_', ' ').title()}: {v}"
         for k, v in meta.items()
-        if v and k != "report_template"
+        if v and k not in (REPORT_TYPE_KEY, "report_template")
     )
+    label_by_key = section_labels_for_type(type_id)
     prior_parts: list[str] = []
-    label_by_key = dict(REPORT_SECTIONS)
     for key, sec in prior_sections.items():
         content = sec.get("content", "")
         if content:
@@ -90,12 +102,15 @@ def build_section_prompt(
         if lines:
             image_block = "Photo observations from this claim:\n" + "\n".join(lines) + "\n\n"
 
+    guidance = section_guidance_for(type_id, section_key)
+    guidance_block = f"Section guidance: {guidance}\n\n" if guidance else ""
+
     return (
-        "You are drafting a storm damage engineering report section. "
-        "Write professional inspection language grounded in the field notes and retrieved "
-        "similar reports below. Do not invent damage not supported by the notes or context. "
+        f"{type_def.prompt_preamble} "
         "If the context lacks detail for this section, state only what the field notes support.\n\n"
+        f"Report type: {type_def.label}\n"
         f"Section to write: {section_label}\n\n"
+        f"{guidance_block}"
         f"Property metadata:\n{meta_lines or '(none)'}\n\n"
         f"{image_block}"
         f"Field notes for this claim:\n{field_notes.strip() or '(none)'}\n\n"

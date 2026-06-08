@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Claim } from '../../types'
+import type { Claim, ReportTypeDefinition } from '../../types'
 import { StormPicker } from './StormPicker'
 
 const inputStyle: React.CSSProperties = {
@@ -11,17 +11,23 @@ const inputStyle: React.CSSProperties = {
 
 export function ClaimForm({
   claim,
+  reportTypes,
+  typeLocked = false,
   onChange,
 }: {
   claim: Claim
+  reportTypes: ReportTypeDefinition[]
+  typeLocked?: boolean
   onChange: (patch: Partial<Pick<Claim, 'title' | 'field_notes' | 'property_metadata'>>) => void
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
   const showManualDate = !meta.storm_id || stormCustom
+  const selectedType = reportTypes.find(t => t.id === meta.report_type)
 
   const keepBaseFields = (base: Record<string, string>): Record<string, string> => {
     const next: Record<string, string> = {}
+    if (base.report_type) next.report_type = base.report_type
     if (base.address) next.address = base.address
     if (base.property_type) next.property_type = base.property_type
     return next
@@ -33,6 +39,61 @@ export function ClaimForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <fieldset
+        style={{
+          border: '1px solid #d0d7de',
+          borderRadius: 6,
+          padding: 12,
+          margin: 0,
+        }}
+        disabled={typeLocked}
+      >
+        <legend style={{ fontSize: 13, fontWeight: 600, padding: '0 4px' }}>Report type</legend>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {reportTypes.map(type => (
+            <label
+              key={type.id}
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                fontSize: 13,
+                cursor: typeLocked ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="report_type"
+                value={type.id}
+                checked={meta.report_type === type.id}
+                onChange={() => updateMetadata({ report_type: type.id })}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600 }}>{type.label}</span>
+                <span style={{ display: 'block', color: '#57606a', fontSize: 12, marginTop: 2 }}>
+                  {type.description}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {typeLocked ? (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#57606a' }}>
+            Report type is locked after generation.
+          </p>
+        ) : null}
+        {!meta.report_type ? (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#9a6700' }}>
+            Select a report type before generating a draft.
+          </p>
+        ) : null}
+      </fieldset>
+      {selectedType ? (
+        <p style={{ margin: 0, fontSize: 12, color: '#57606a' }}>
+          {selectedType.sections.length} sections: {selectedType.sections.map(s => s.label).join(', ')}
+        </p>
+      ) : null}
       <label style={{ fontSize: 13 }}>
         <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title</span>
         <input

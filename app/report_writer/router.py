@@ -11,7 +11,8 @@ from fastapi.responses import Response, StreamingResponse
 from app.auth import get_current_user
 from app.db import get_valid_conn
 from app.report_writer.deps import ReportWriterDeps, reset_report_writer_deps, set_report_writer_deps
-from app.report_writer.export import draft_to_docx_bytes
+from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
+from app.report_writer.constants import REPORT_TYPES, get_report_type, report_type_def, section_keys_for_type
 from app.report_writer.models import (
     ClaimCreateRequest,
     ClaimResponse,
@@ -21,15 +22,20 @@ from app.report_writer.models import (
     GenerationRunResponse,
     GenerationRunsListResponse,
     RegenerateSectionRequest,
+    ReportTypeModel,
+    ReportTypeSectionModel,
+    ReportTypesListResponse,
     ResumeRequest,
     SectionResponse,
     SectionUpdateRequest,
 )
 from app.report_writer.queries import (
+    claim_has_generated_sections,
     create_claim,
     create_generation_run,
     create_section_revision,
     delete_claim,
+    empty_sections_template,
     get_claim,
     get_claim_sections,
     get_generation_run,
@@ -39,11 +45,26 @@ from app.report_writer.queries import (
     list_generation_runs,
     update_claim,
 )
-from app.report_writer.queries import empty_sections_template
+from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
 from app.report_writer.storage import storage_path_for, write_claim_image
 
 router = APIRouter(prefix="/report-writer", tags=["report-writer"])
+
+
+@router.get("/report-types", response_model=ReportTypesListResponse)
+async def get_report_types():
+    return ReportTypesListResponse(
+        report_types=[
+            ReportTypeModel(
+                id=t.id,
+                label=t.label,
+                description=t.description,
+                sections=[ReportTypeSectionModel(key=k, label=l) for k, l in t.sections],
+            )
+            for t in REPORT_TYPES.values()
+        ]
+    )
 
 
 def _claim_response(claim: dict, sections: dict | None = None) -> ClaimResponse:
@@ -84,12 +105,15 @@ async def post_claim(
     body: ClaimCreateRequest,
     user_id: str = Depends(get_current_user),
 ):
+    validate_report_type_metadata(body.property_metadata)
+    metadata = normalize_report_type_metadata(body.property_metadata)
+
     def _create(conn):
         return create_claim(
             conn,
             user_id=user_id,
             title=body.title,
-            property_metadata=body.property_metadata,
+            property_metadata=metadata,
             field_notes=body.field_notes,
         )
 
@@ -136,13 +160,38 @@ async def patch_claim(
     body: ClaimUpdateRequest,
     user_id: str = Depends(get_current_user),
 ):
+    if body.property_metadata is not None:
+        validate_report_type_metadata(body.property_metadata)
+
+    def _load_existing(conn):
+        return get_claim(conn, claim_id, user_id)
+
+    existing = await _with_conn(request, _load_existing)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    metadata = body.property_metadata
+    if metadata is not None:
+        metadata = normalize_report_type_metadata(metadata)
+        old_type = get_report_type(existing["property_metadata"])
+        new_type = get_report_type(metadata)
+        if old_type != new_type:
+            def _has_sections(conn):
+                return claim_has_generated_sections(conn, claim_id)
+
+            if await _with_conn(request, _has_sections):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot change report_type after sections have been generated",
+                )
+
     def _update(conn):
         updated = update_claim(
             conn,
             claim_id,
             user_id,
             title=body.title,
-            property_metadata=body.property_metadata,
+            property_metadata=metadata,
             field_notes=body.field_notes,
             status=body.status,
         )
@@ -230,6 +279,9 @@ async def generate_draft(
         raise HTTPException(status_code=404, detail="Claim not found")
     claim, run_id = loaded
 
+    validate_report_type_metadata(claim["property_metadata"], required=True)
+    report_type = get_report_type(claim["property_metadata"])
+
     input_state = {
         "claim_id": claim_id,
         "user_id": user_id,
@@ -237,16 +289,17 @@ async def generate_draft(
         "title": claim["title"],
         "field_notes": claim["field_notes"],
         "property_metadata": claim["property_metadata"],
-        "sections": empty_sections_template(),
+        "report_type": report_type,
+        "sections": empty_sections_template(report_type=report_type),
         "image_analyses": [],
         "errors": [],
     }
     config = {"configurable": {"thread_id": claim_id}}
 
     deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
-    token = set_report_writer_deps(deps)
 
     async def event_iter():
+        token = set_report_writer_deps(deps)
         try:
             async for frame in stream_graph_events(
                 graph,
@@ -295,6 +348,12 @@ async def regenerate_section(
         raise HTTPException(status_code=404, detail="Claim not found")
     claim, sections, run_id = loaded
 
+    validate_report_type_metadata(claim["property_metadata"], required=True)
+    report_type = get_report_type(claim["property_metadata"])
+    allowed_keys = section_keys_for_type(report_type)
+    if section_key not in allowed_keys:
+        raise HTTPException(status_code=400, detail=f"Unknown section_key for report type {report_type}")
+
     notes = claim["field_notes"]
     if body and body.instruction:
         notes = f"{notes}\n\nRegeneration instruction: {body.instruction}".strip()
@@ -310,6 +369,7 @@ async def regenerate_section(
         "run_id": run_id,
         "field_notes": notes,
         "property_metadata": claim["property_metadata"],
+        "report_type": report_type,
         "sections": section_state,
         "retrieved_chunks": [],
         "retrieval_passed": True,
@@ -318,9 +378,9 @@ async def regenerate_section(
     }
     config = {"configurable": {"thread_id": f"{claim_id}:regen:{run_id}"}}
     deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
-    token = set_report_writer_deps(deps)
 
     async def event_iter():
+        token = set_report_writer_deps(deps)
         try:
             async for frame in stream_graph_events(
                 regen_graph,
@@ -363,10 +423,10 @@ async def resume_generation(
         return {"status": "cancelled"}
 
     deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
-    token = set_report_writer_deps(deps)
     run_id = str(uuid.uuid4())
 
     async def event_iter():
+        token = set_report_writer_deps(deps)
         try:
             async for frame in stream_graph_events(
                 graph,
@@ -500,16 +560,46 @@ async def export_docx(
         if not claim:
             return None
         sections = get_claim_sections(conn, claim_id)
-        return claim, sections
+        images = list_claim_images(conn, claim_id, user_id)
+        return claim, sections, images
 
     result = await _with_conn(request, _load)
     if not result:
         raise HTTPException(status_code=404, detail="Claim not found")
-    claim, sections = result
-    data = draft_to_docx_bytes(sections, title=claim["title"] or "Engineering Report")
+    claim, sections, images = result
+    export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
+    data = draft_to_docx_bytes(sections, title=claim["title"] or export_title, claim=claim, images=images)
     filename = (claim["title"] or "report").replace(" ", "_")[:80] + ".docx"
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/claims/{claim_id}/export/pdf")
+async def export_pdf(
+    request: Request,
+    claim_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    def _load(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        sections = get_claim_sections(conn, claim_id)
+        images = list_claim_images(conn, claim_id, user_id)
+        return claim, sections, images
+
+    result = await _with_conn(request, _load)
+    if not result:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    claim, sections, images = result
+    export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
+    data = draft_to_pdf_bytes(sections, title=claim["title"] or export_title, claim=claim, images=images)
+    filename = (claim["title"] or "report").replace(" ", "_")[:80] + ".pdf"
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

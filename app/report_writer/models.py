@@ -72,3 +72,19 @@ class RegenerateSectionRequest(BaseModel):
 
 class ResumeRequest(BaseModel):
     action: str = Field(default="continue", description="continue | cancel")
+
+
+class ReportTypeSectionModel(BaseModel):
+    key: str
+    label: str
+
+
+class ReportTypeModel(BaseModel):
+    id: str
+    label: str
+    description: str
+    sections: list[ReportTypeSectionModel]
+
+
+class ReportTypesListResponse(BaseModel):
+    report_types: list[ReportTypeModel]

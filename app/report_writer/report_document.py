@@ -1,0 +1,147 @@
+"""Build a structured ReportDocument from claim data for export renderers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from app.report_writer.boilerplate import (
+    default_client_name,
+    default_inspection_date,
+    default_prepared_by,
+    engineering_letter_paragraphs,
+    include_engineering_letter,
+    observations_text,
+    purpose_text,
+    weather_text,
+)
+from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
+from app.report_writer.image_utils import compress_image_bytes
+from app.report_writer.storage import read_claim_image_bytes
+
+
+@dataclass
+class ReportPhoto:
+    data: bytes
+    caption: str
+    file_extension: str = "jpeg"
+    cx: int = 0
+    cy: int = 0
+
+
+@dataclass
+class ReportSection:
+    key: str
+    label: str
+    content: str
+
+
+@dataclass
+class ReportDocument:
+    title: str
+    claim_id: str
+    report_number: str
+    client_name: str
+    address_line1: str
+    address_line2: str
+    full_address: str
+    inspection_date: str
+    prepared_by: str
+    include_engineering_letter: bool
+    purpose_text: str
+    observations_text: str
+    weather_text: str
+    engineering_letter_paragraphs: list[str]
+    sections: list[ReportSection] = field(default_factory=list)
+    photos: list[ReportPhoto] = field(default_factory=list)
+
+
+def _split_address(raw: str) -> tuple[str, str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return "", ""
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) >= 3:
+        return parts[0], ", ".join(parts[1:])
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return raw, ""
+
+
+def _photo_caption(vision: dict | None) -> str:
+    if not vision:
+        return "Inspection photograph."
+    cap = (vision.get("caption") or "").strip()
+    obs = (vision.get("observations") or "").strip()
+    if cap and obs:
+        return f"{cap} {obs}"
+    return cap or obs or "Inspection photograph."
+
+
+def build_report_document(
+    claim: dict,
+    sections: dict[str, dict],
+    images: list[dict] | None = None,
+) -> ReportDocument:
+    meta = claim.get("property_metadata") or {}
+    type_id = get_report_type(meta)
+    type_def = report_type_def(type_id)
+    title = (claim.get("title") or type_def.export_title).strip()
+    claim_id = str(claim.get("claim_id") or "")
+    report_number = claim_id[:8].upper() if claim_id else "DRAFT"
+    client = default_client_name(meta, title)
+    address_raw = (meta.get("address") or "").strip()
+    line1, line2 = _split_address(address_raw)
+    full_address = address_raw or "Unknown"
+    conclusion = (
+        (sections.get("recommendations_conclusion") or {}).get("content")
+        or (sections.get("conclusion") or {}).get("content")
+        or ""
+    )
+
+    doc_sections: list[ReportSection] = []
+    for key, label in sections_for_type(type_id):
+        content = ((sections.get(key) or {}).get("content") or "").strip()
+        if content:
+            doc_sections.append(ReportSection(key=key, label=label.upper(), content=content))
+
+    photos: list[ReportPhoto] = []
+    for img in images or []:
+        path = img.get("storage_path")
+        if not path:
+            continue
+        try:
+            raw = read_claim_image_bytes(path)
+        except OSError:
+            continue
+        data, ext = compress_image_bytes(raw)
+        from app.report_writer.image_utils import image_emu_size
+
+        cx, cy = image_emu_size(data)
+        photos.append(
+            ReportPhoto(
+                data=data,
+                caption=_photo_caption(img.get("vision_analysis")),
+                file_extension=ext,
+                cx=cx,
+                cy=cy,
+            )
+        )
+
+    return ReportDocument(
+        title=title,
+        claim_id=claim_id,
+        report_number=report_number,
+        client_name=client,
+        address_line1=line1 or address_raw,
+        address_line2=line2,
+        full_address=full_address,
+        inspection_date=default_inspection_date(meta),
+        prepared_by=default_prepared_by(meta),
+        include_engineering_letter=type_id == "engineering" and include_engineering_letter(meta),
+        purpose_text=purpose_text(meta),
+        observations_text=observations_text(meta),
+        weather_text=weather_text(meta),
+        engineering_letter_paragraphs=engineering_letter_paragraphs(meta, line1 or address_raw, conclusion),
+        sections=doc_sections,
+        photos=photos,
+    )

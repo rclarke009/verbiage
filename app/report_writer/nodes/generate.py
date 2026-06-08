@@ -5,7 +5,7 @@ from __future__ import annotations
 from langgraph.config import get_stream_writer
 
 from app import llm_client
-from app.report_writer.constants import REPORT_SECTIONS
+from app.report_writer.constants import get_report_type, section_labels_for_type, sections_for_type
 from app.report_writer.prompts import build_section_prompt
 from app.report_writer.state import ReportWriterState
 
@@ -34,11 +34,13 @@ async def generate_sections(state: ReportWriterState) -> dict:
     meta = state.get("property_metadata") or {}
     images = state.get("image_analyses") or []
     regen_key = state.get("regenerate_section_key")
+    type_id = state.get("report_type") or get_report_type(meta)
 
-    keys_to_run = [regen_key] if regen_key else [k for k, _ in REPORT_SECTIONS]
+    keys_to_run = [regen_key] if regen_key else [k for k, _ in sections_for_type(type_id)]
+    labels = section_labels_for_type(type_id)
 
     for section_key in keys_to_run:
-        label = dict(REPORT_SECTIONS).get(section_key, section_key)
+        label = labels.get(section_key, section_key)
         if writer:
             writer({"event": "section_start", "section_key": section_key})
         prompt = build_section_prompt(
@@ -49,6 +51,7 @@ async def generate_sections(state: ReportWriterState) -> dict:
             chunks,
             sections,
             images,
+            report_type=type_id,
         )
         parts: list[str] = []
         async for delta in llm_client.answer_with_context_stream(prompt):
