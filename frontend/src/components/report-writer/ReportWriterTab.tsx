@@ -46,7 +46,7 @@ export function ReportWriterTab() {
     queryFn: listReportTypes,
   })
 
-  const claimsQuery = useQuery({
+  const { data: claims = [], isLoading: claimsLoading } = useQuery({
     queryKey: ['report-writer-claims'],
     queryFn: listClaims,
   })
@@ -156,7 +156,8 @@ export function ReportWriterTab() {
   return (
     <div style={{ display: 'flex', gap: 20, minHeight: 'calc(100vh - 140px)' }}>
       <ClaimList
-        claims={claimsQuery.data ?? []}
+        claims={claims}
+        loading={claimsLoading}
         activeId={activeId}
         reportTypes={reportTypes}
         onSelect={id => {
