@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import io
+import xml.etree.ElementTree as ET
 import zipfile
 
 import pytest
 
 from app.report_writer.boilerplate import purpose_text, weather_text
+from app.report_writer.docx_ooxml import xml_escape
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
 from app.report_writer.report_document import build_report_document
 
@@ -87,6 +89,8 @@ def test_docx_export_structure(sample_claim: dict, sample_sections: dict[str, di
         assert "PROPERTY OVERVIEW" in doc_xml
         assert "ROOF OBSERVATIONS" in doc_xml
         assert "WEATHER HISTORY" in doc_xml
+        assert "sectPr" in doc_xml
+        ET.fromstring(doc_xml)
 
 
 def test_pdf_export_structure(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
@@ -108,3 +112,24 @@ def test_docx_without_engineering_letter(sample_claim: dict, sample_sections: di
         doc_xml = zf.read("word/document.xml").decode("utf-8")
     assert "ENGINEERING LETTER" not in doc_xml
     assert "PURPOSE:" in doc_xml
+    assert "sectPr" in doc_xml
+
+
+def test_xml_escape_strips_control_characters() -> None:
+    assert xml_escape("hello\x0bworld") == "helloworld"
+    assert xml_escape("a & b < c") == "a &amp; b &lt; c"
+
+
+def test_docx_export_with_control_characters_in_content(
+    sample_claim: dict,
+    sample_sections: dict[str, dict],
+) -> None:
+    sections = {
+        **sample_sections,
+        "property_overview": {"content": "Text with\x0billegal\x1fchars & symbols."},
+    }
+    data = draft_to_docx_bytes(sections, claim=sample_claim, images=[])
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        doc_xml = zf.read("word/document.xml").decode("utf-8")
+    ET.fromstring(doc_xml)
+    assert "illegalchars" in doc_xml.replace(" ", "")

@@ -6,8 +6,20 @@ import html
 import re
 
 
+# XML 1.0 allowed chars: tab, LF, CR, and valid Unicode scalar values.
+_INVALID_XML_CHARS = re.compile(r"[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u10000-\u10FFFF]")
+
+_SECT_PR = (
+    '<w:pgSz w:w="12240" w:h="15840"/>'
+    '<w:pgMar w:top="1166" w:right="1440" w:bottom="720" w:left="1440" '
+    'w:header="720" w:footer="720" w:gutter="0"/>'
+    '<w:cols w:space="720"/>'
+)
+
+
 def xml_escape(text: str) -> str:
-    return html.escape(text, quote=False)
+    cleaned = _INVALID_XML_CHARS.sub("", text)
+    return html.escape(cleaned, quote=False)
 
 
 def page_break() -> str:
@@ -255,7 +267,38 @@ def xml_photo_table(entries: list[tuple[str, int, str, int, int]], *, columns: i
     return xml
 
 
+def _append_sect_pr(body: str) -> str:
+    """Append section properties to the last paragraph (required for Word to open the file)."""
+    sect_pr_block = f"<w:sectPr>{_SECT_PR}</w:sectPr>"
+    if not body.strip():
+        return f"<w:p><w:pPr>{sect_pr_block}</w:pPr></w:p>"
+
+    last_close = body.rfind("</w:p>")
+    if last_close == -1:
+        return body + f"<w:p><w:pPr>{sect_pr_block}</w:pPr></w:p>"
+
+    last_open = body.rfind("<w:p", 0, last_close)
+    if last_open == -1:
+        return body + f"<w:p><w:pPr>{sect_pr_block}</w:pPr></w:p>"
+
+    para = body[last_open : last_close + len("</w:p>")]
+    if "<w:sectPr>" in para:
+        return body
+
+    if "<w:pPr>" in para:
+        ppr_close = para.rfind("</w:pPr>")
+        if ppr_close != -1:
+            new_para = para[:ppr_close] + sect_pr_block + para[ppr_close:]
+        else:
+            new_para = para[: -len("</w:p>")] + f"<w:pPr>{sect_pr_block}</w:pPr></w:p>"
+    else:
+        new_para = para[: -len("</w:p>")] + f"<w:pPr>{sect_pr_block}</w:pPr></w:p>"
+
+    return body[:last_open] + new_para + body[last_close + len("</w:p>") :]
+
+
 def wrap_document_xml(body: str) -> str:
+    body_with_sect = _append_sect_pr(body)
     return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -263,7 +306,7 @@ def wrap_document_xml(body: str) -> str:
             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
             xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:body>
-    {body}
+    {body_with_sect}
   </w:body>
 </w:document>"""
 
