@@ -69,6 +69,8 @@ async def stream_graph_events(
                         seq += 1
             elif mode == "updates":
                 for node_name, update in chunk.items():
+                    if not isinstance(update, dict):
+                        continue
                     if node_name == "retrieve_similar" and update.get("retrieved_chunks"):
                         yield format_sse(
                             "sources",

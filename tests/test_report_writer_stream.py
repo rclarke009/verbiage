@@ -122,3 +122,30 @@ def test_stream_graph_events_emits_run_started_and_complete():
     import asyncio
 
     asyncio.run(_run())
+
+
+def test_stream_graph_events_skips_none_node_updates():
+    async def _run():
+        from app.report_writer.sse import stream_graph_events
+
+        graph = MagicMock()
+
+        async def _astream(*a, **k):
+            yield ("updates", {"normalize_inputs": None})
+
+        graph.astream = _astream
+        frames = []
+        async for frame in stream_graph_events(
+            graph,
+            {"claim_id": "c1"},
+            {"configurable": {"thread_id": "c1"}},
+            run_id="r1",
+            claim_id="c1",
+        ):
+            frames.append(frame)
+        assert any("event: run_started" in f for f in frames)
+        assert any("event: run_complete" in f for f in frames)
+
+    import asyncio
+
+    asyncio.run(_run())
