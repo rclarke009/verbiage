@@ -17,6 +17,7 @@ build/
 # Logs and local data
 logs/
 *.log
+claim_images/
 .pytest_cache/
 .coverage
 htmlcov/

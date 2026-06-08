@@ -138,3 +138,83 @@ export interface IngestGoogleDriveResponse {
   errors: string[]
   doc_ids: string[]
 }
+
+export interface ReportWriterSource {
+  chunk_id?: string
+  doc_id?: string
+  score?: number
+  snippet?: string
+  document_title?: string | null
+  source_url?: string | null
+}
+
+export interface SectionContent {
+  section_key: string
+  content: string
+  revision_id?: string | null
+  origin?: string | null
+  sources?: ReportWriterSource[]
+}
+
+export interface Claim {
+  claim_id: string
+  user_id: string
+  title: string
+  property_metadata: Record<string, string>
+  field_notes: string
+  status: string
+  created_at?: string | null
+  updated_at?: string | null
+  sections?: Record<string, SectionContent>
+}
+
+export interface ClaimCreatePayload {
+  title?: string
+  property_metadata?: Record<string, string>
+  field_notes?: string
+}
+
+export interface ClaimUpdatePayload {
+  title?: string
+  property_metadata?: Record<string, string>
+  field_notes?: string
+}
+
+export interface GenerationRun {
+  run_id: string
+  claim_id: string
+  status: string
+  thread_id: string
+  started_at?: string | null
+  completed_at?: string | null
+  error?: string | null
+  sections?: Record<string, SectionContent>
+}
+
+export interface ReportWriterImage {
+  image_id: string
+  claim_id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  storage_path: string
+  vision_analysis?: Record<string, unknown> | null
+  sort_order?: number
+}
+
+export interface GenerationSectionState {
+  content: string
+  streaming: boolean
+  sources: ReportWriterSource[]
+}
+
+export interface GenerationState {
+  runId: string | null
+  claimId: string | null
+  activeNode: string | null
+  status: 'idle' | 'running' | 'complete' | 'refused' | 'error'
+  refusalReason: string | null
+  retrievedSources: ReportWriterSource[]
+  sections: Record<string, GenerationSectionState>
+  error: string | null
+}

@@ -228,7 +228,30 @@ async def lifespan(app):
     else:
         logger.info("Ingest worker disabled")
 
+    report_writer_cm = None
+    app.state.report_writer_graph = None
+    app.state.report_writer_regen_graph = None
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
+
+        report_writer_cm = AsyncPostgresSaver.from_conn_string(DATABASE_URL)
+        checkpointer = await report_writer_cm.__aenter__()
+        await checkpointer.setup()
+        app.state.report_writer_graph = build_report_writer_graph(checkpointer)
+        app.state.report_writer_regen_graph = build_regenerate_section_graph(checkpointer)
+        app.state.report_writer_checkpointer_cm = report_writer_cm
+        logger.info("Report Writer LangGraph compiled with Postgres checkpointer")
+    except Exception as e:
+        logger.warning("Report Writer graph init failed (report-writer routes unavailable): %s", e)
+
     yield
+
+    if report_writer_cm is not None:
+        try:
+            await report_writer_cm.__aexit__(None, None, None)
+        except Exception as e:
+            logger.warning("Report Writer checkpointer shutdown: %s", e)
 
     if warm_task is not None and not warm_task.done():
         warm_task.cancel()
@@ -1325,6 +1348,11 @@ async def auth_google_callback(request: Request):
     )
     response.delete_cookie("oauth_state")
     return response
+
+
+from app.report_writer.router import router as report_writer_router
+
+app.include_router(report_writer_router)
 
 
 # Mount static frontend last so API routes take precedence.
