@@ -54,6 +54,20 @@ def _parse_database_url(url: str) -> dict | None:
 # Parsed connection kwargs for psycopg2 (avoids DSN parse errors when password contains =, &, ?).
 DATABASE_CONNECTION_KWARGS = _parse_database_url(DATABASE_URL) if DATABASE_URL else None
 
+
+def report_writer_database_url() -> str:
+    """Postgres URL for LangGraph AsyncPostgresSaver.
+
+    Supabase transaction-mode pooler (port 6543) breaks psycopg3 checkpointer setup even with
+    prepare_threshold=0. Prefer session mode (5432), then DIRECT_DATABASE_URL, then DATABASE_URL.
+    """
+    direct = os.getenv("DIRECT_DATABASE_URL", "").strip().strip("'\"")
+    if direct:
+        return direct
+    if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
+        return DATABASE_URL.replace(":6543/", ":5432/", 1)
+    return DATABASE_URL
+
 DB_PATH = os.getenv("DATABASE_PATH", "verbiage.db")
 
 # OpenAI: when OPENAI_API_KEY is set, use OpenAI for embeddings and LLM first; optional fallback to Ollama via env flags.
