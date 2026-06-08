@@ -94,6 +94,7 @@ from app.health import build_deep_response, build_ready_response
 from app.config import (
     DATABASE_CONNECTION_KWARGS,
     DATABASE_URL,
+    report_writer_database_url,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
@@ -235,7 +236,10 @@ async def lifespan(app):
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
 
-        report_writer_cm = AsyncPostgresSaver.from_conn_string(DATABASE_URL)
+        rw_db_url = report_writer_database_url()
+        if rw_db_url != DATABASE_URL:
+            logger.info("Report Writer checkpointer using session-mode Postgres URL (6543 pooler is incompatible)")
+        report_writer_cm = AsyncPostgresSaver.from_conn_string(rw_db_url)
         checkpointer = await report_writer_cm.__aenter__()
         await checkpointer.setup()
         app.state.report_writer_graph = build_report_writer_graph(checkpointer)
