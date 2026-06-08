@@ -30,6 +30,9 @@ htmlcov/
 # Cursor / local agent artifacts (do not publish)
 .cursor/
 
+# Local reference repos (nested git checkouts — not submodules)
+files_for_reference/WindowTest2/
+
 # Test reference pages
 files_for_reference/testing/before.pages
 files_for_reference/testing/after.pages
