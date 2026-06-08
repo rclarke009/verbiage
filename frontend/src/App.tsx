@@ -5,6 +5,7 @@ import { LoginPanel } from './components/auth/LoginPanel'
 import { ChatTab } from './components/chat/ChatTab'
 import { DocumentsTab } from './components/documents/DocumentsTab'
 import { DriveTab } from './components/drive/DriveTab'
+import { ReportWriterTab } from './components/report-writer/ReportWriterTab'
 import { VisionTab } from './components/vision/VisionTab'
 import { TabBar } from './components/layout/TabBar'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -20,6 +21,7 @@ function AppInner() {
   const tabs = useMemo(() => {
     const base = [
       { id: 'chat', label: 'Search' },
+      { id: 'report-writer', label: 'Report Writer' },
       { id: 'documents', label: 'Documents' },
       { id: 'drive', label: 'Google Drive' },
     ]
@@ -80,6 +82,7 @@ function AppInner() {
       <TabBar tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
       {activeTab === 'chat' && <ChatTab />}
+      {activeTab === 'report-writer' && <ReportWriterTab />}
       {activeTab === 'documents' && <DocumentsTab />}
       {activeTab === 'drive' && <DriveTab />}
       {FEATURE_VISION && activeTab === 'vision' && <VisionTab />}
