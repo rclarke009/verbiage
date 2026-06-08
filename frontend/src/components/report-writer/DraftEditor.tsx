@@ -1,22 +1,31 @@
-import { SECTION_LABELS } from './SourcesPanel'
-import type { Claim, GenerationSectionState } from '../../types'
+import type { Claim, GenerationSectionState, ReportTypeSection } from '../../types'
 
 export function DraftEditor({
   claim,
+  sections,
   streamSections,
   onSectionChange,
   onRegenerateSection,
 }: {
   claim: Claim
+  sections: ReportTypeSection[]
   streamSections?: Record<string, GenerationSectionState>
   onSectionChange: (key: string, content: string) => void
   onRegenerateSection?: (key: string) => void
 }) {
-  const keys = Object.keys(SECTION_LABELS)
+  if (!sections.length) {
+    return (
+      <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
+        Select a report type to see draft sections.
+      </p>
+    )
+  }
+
+  const labelByKey = Object.fromEntries(sections.map(s => [s.key, s.label]))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {keys.map(key => {
+      {sections.map(({ key }) => {
         const streamed = streamSections?.[key]
         const saved = claim.sections?.[key]
         const content = streamed?.content ?? saved?.content ?? ''
@@ -25,12 +34,12 @@ export function DraftEditor({
           <div key={key}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h4 style={{ margin: '0 0 6px', fontSize: 14, color: '#0969da' }}>
-                {SECTION_LABELS[key]}
+                {labelByKey[key]}
                 {streaming && (
                   <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>streaming…</span>
                 )}
               </h4>
-              {onRegenerateSection && (
+              {onRegenerateSection && content.trim() ? (
                 <button
                   type="button"
                   onClick={() => onRegenerateSection(key)}
@@ -45,7 +54,7 @@ export function DraftEditor({
                 >
                   Regenerate
                 </button>
-              )}
+              ) : null}
             </div>
             <textarea
               value={content}

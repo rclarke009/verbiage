@@ -8,7 +8,7 @@ from typing import Any
 from psycopg2.extras import Json, RealDictCursor
 
 from app.db import get_valid_conn
-from app.report_writer.constants import SECTION_KEYS
+from app.report_writer.constants import get_report_type, section_keys_for_type
 
 
 def _row_to_claim(row: dict) -> dict[str, Any]:
@@ -452,5 +452,22 @@ def chunks_to_dicts(chunks) -> list[dict]:
     ]
 
 
-def empty_sections_template() -> dict[str, dict]:
-    return {key: {"content": "", "status": "pending", "sources": []} for key in SECTION_KEYS}
+def empty_sections_template(report_type: str | None = None, property_metadata: dict | None = None) -> dict[str, dict]:
+    type_id = report_type or get_report_type(property_metadata)
+    keys = section_keys_for_type(type_id)
+    return {key: {"content": "", "status": "pending", "sources": []} for key in keys}
+
+
+def claim_has_generated_sections(conn, claim_id: str) -> bool:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM report_claim_section_revisions r
+            JOIN report_claim_sections s ON s.current_revision_id = r.revision_id
+            WHERE s.claim_id = %s AND r.content <> ''
+            LIMIT 1
+            """,
+            (claim_id,),
+        )
+        return cur.fetchone() is not None

@@ -4,16 +4,9 @@ import { apiOrigin, getAuthFetchInit } from '../lib/api'
 
 const STREAM_STALL_TIMEOUT_MS = 60000
 
-const SECTION_KEYS = [
-  'property_overview',
-  'roof_observations',
-  'interior_observations',
-  'conclusion',
-]
-
-function emptySections(): Record<string, GenerationSectionState> {
+function emptySections(sectionKeys: string[]): Record<string, GenerationSectionState> {
   return Object.fromEntries(
-    SECTION_KEYS.map(k => [k, { content: '', streaming: false, sources: [] }]),
+    sectionKeys.map(k => [k, { content: '', streaming: false, sources: [] }]),
   )
 }
 
@@ -24,7 +17,7 @@ const initialState: GenerationState = {
   status: 'idle',
   refusalReason: null,
   retrievedSources: [],
-  sections: emptySections(),
+  sections: {},
   error: null,
 }
 
@@ -47,14 +40,19 @@ export function useReportWriterStream() {
     setState(initialState)
   }, [])
 
-  const generate = useCallback(async (claimId: string, url: string, body?: object) => {
+  const generate = useCallback(async (
+    claimId: string,
+    url: string,
+    body?: object,
+    sectionKeys: string[] = [],
+  ) => {
     if (generating) return
     setGenerating(true)
     setState({
       ...initialState,
       claimId,
       status: 'running',
-      sections: emptySections(),
+      sections: emptySections(sectionKeys),
     })
 
     const controller = new AbortController()
@@ -127,7 +125,7 @@ export function useReportWriterStream() {
                   ...s,
                   sections: {
                     ...s.sections,
-                    [key]: { ...s.sections[key], streaming: true, content: '' },
+                    [key]: { ...(s.sections[key] ?? { content: '', sources: [] }), streaming: true, content: '' },
                   },
                 }))
               } else if (currentEvent === 'section_delta') {
@@ -138,7 +136,7 @@ export function useReportWriterStream() {
                   sections: {
                     ...s.sections,
                     [key]: {
-                      ...s.sections[key],
+                      ...(s.sections[key] ?? { streaming: false, sources: [] }),
                       content: (s.sections[key]?.content ?? '') + delta,
                     },
                   },

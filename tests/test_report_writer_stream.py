@@ -23,6 +23,18 @@ def test_normalize_inputs_builds_retrieval_query():
     out = normalize_inputs(state)
     assert "Missing shingles" in out["retrieval_query"]
     assert "100 Maple Ct" in out["retrieval_query"]
+    assert out["report_type"] == "engineering"
+
+
+def test_normalize_inputs_uses_report_type_sections():
+    state: ReportWriterState = {
+        "field_notes": "Window specimens failed ASTM test",
+        "property_metadata": {"report_type": "window_test"},
+        "report_type": "window_test",
+    }
+    out = normalize_inputs(state)
+    assert out["report_type"] == "window_test"
+    assert set(out["sections"].keys()) == {"overview", "weather_history", "test_summary", "recommendations_conclusion"}
 
 
 def test_normalize_inputs_includes_storm_metadata():

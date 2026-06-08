@@ -1,16 +1,20 @@
-import type { Claim } from '../../types'
+import type { Claim, ReportTypeDefinition } from '../../types'
 
 export function ClaimList({
   claims,
   activeId,
+  reportTypes,
   onSelect,
   onCreate,
 }: {
   claims: Claim[]
   activeId: string | null
+  reportTypes: ReportTypeDefinition[]
   onSelect: (id: string) => void
   onCreate: () => void
 }) {
+  const typeLabel = (id: string | undefined) =>
+    reportTypes.find(t => t.id === id)?.label ?? (id ? id.replace(/_/g, ' ') : null)
   return (
     <div style={{ width: 220, flexShrink: 0 }}>
       <button
@@ -47,6 +51,11 @@ export function ClaimList({
             }}
           >
             <div style={{ fontWeight: 600 }}>{c.title || 'Untitled claim'}</div>
+            {typeLabel(c.property_metadata?.report_type) ? (
+              <div style={{ fontSize: 11, color: '#0969da', marginTop: 2 }}>
+                {typeLabel(c.property_metadata?.report_type)}
+              </div>
+            ) : null}
             {c.property_metadata?.address ? (
               <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>
                 {c.property_metadata.address}

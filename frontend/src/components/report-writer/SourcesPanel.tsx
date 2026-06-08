@@ -1,12 +1,5 @@
 import type { ReportWriterSource } from '../../types'
 
-const SECTION_LABELS: Record<string, string> = {
-  property_overview: 'Property Overview',
-  roof_observations: 'Roof Observations',
-  interior_observations: 'Interior Observations',
-  conclusion: 'Conclusion',
-}
-
 export function SourcesPanel({
   sources,
   title = 'Retrieved sources',
@@ -46,5 +39,3 @@ export function SourcesPanel({
     </div>
   )
 }
-
-export { SECTION_LABELS }

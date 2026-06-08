@@ -4,11 +4,19 @@ import type {
   ClaimCreatePayload,
   ClaimUpdatePayload,
   GenerationRun,
+  ReportTypeDefinition,
   ReportWriterImage,
   SectionContent,
 } from '../types'
 
 const BASE = '/report-writer'
+
+export async function listReportTypes(): Promise<ReportTypeDefinition[]> {
+  const res = await apiFetch(`${BASE}/report-types`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  const data = (await res.json()) as { report_types: ReportTypeDefinition[] }
+  return data.report_types
+}
 
 export async function listClaims(): Promise<Claim[]> {
   const res = await apiFetch(`${BASE}/claims`)
@@ -109,6 +117,13 @@ export async function exportClaimDocx(claimId: string, title: string): Promise<v
   a.download = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.docx`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+export async function fetchClaimPdfBlob(claimId: string): Promise<Blob> {
+  const init = await getAuthFetchInit()
+  const res = await fetch(`${apiOrigin()}/report-writer/claims/${claimId}/export/pdf`, init)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.blob()
 }
 
 export { getAuthFetchInit }

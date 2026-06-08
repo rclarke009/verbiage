@@ -157,6 +157,7 @@ export interface SectionContent {
 }
 
 export interface ClaimPropertyMetadata {
+  report_type?: string
   address?: string
   property_type?: string
   storm_id?: string
@@ -166,6 +167,18 @@ export interface ClaimPropertyMetadata {
   storm_category?: string
   landfall_region?: string
   [key: string]: string | undefined
+}
+
+export interface ReportTypeSection {
+  key: string
+  label: string
+}
+
+export interface ReportTypeDefinition {
+  id: string
+  label: string
+  description: string
+  sections: ReportTypeSection[]
 }
 
 export interface Claim {

@@ -5,8 +5,10 @@ import {
   createClaim,
   deleteClaim,
   exportClaimDocx,
+  fetchClaimPdfBlob,
   getClaim,
   listClaims,
+  listReportTypes,
   listRuns,
   updateClaim,
   updateSection,
@@ -35,7 +37,14 @@ export function ReportWriterTab() {
   const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [localDraft, setLocalDraft] = useState<Claim | null>(null)
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
   const { state: genState, generating, generate, reset: resetStream } = useReportWriterStream()
+
+  const reportTypesQuery = useQuery({
+    queryKey: ['report-writer-types'],
+    queryFn: listReportTypes,
+  })
 
   const claimsQuery = useQuery({
     queryKey: ['report-writer-claims'],
@@ -55,6 +64,11 @@ export function ReportWriterTab() {
   })
 
   const draft = localDraft ?? claimQuery.data ?? emptyClaim()
+  const reportTypes = reportTypesQuery.data ?? []
+  const activeReportType = reportTypes.find(t => t.id === draft.property_metadata?.report_type)
+  const sectionKeys = activeReportType?.sections.map(s => s.key) ?? []
+  const hasGeneratedContent = Object.values(draft.sections ?? {}).some(s => (s.content ?? '').trim())
+  const canGenerate = !!draft.property_metadata?.report_type && !!draft.field_notes.trim()
 
   const updateDraft = useCallback(
     (updater: (prev: Claim) => Claim) => {
@@ -110,7 +124,7 @@ export function ReportWriterTab() {
     if (!activeId) return
     await saveMutation.mutateAsync()
     resetStream()
-    await generate(activeId, `/report-writer/claims/${activeId}/generate`)
+    await generate(activeId, `/report-writer/claims/${activeId}/generate`, undefined, sectionKeys)
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
     queryClient.invalidateQueries({ queryKey: ['report-writer-runs', activeId] })
@@ -122,6 +136,7 @@ export function ReportWriterTab() {
       activeId,
       `/report-writer/claims/${activeId}/sections/${sectionKey}/regenerate`,
       { section_key: sectionKey },
+      sectionKeys,
     )
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
@@ -143,6 +158,7 @@ export function ReportWriterTab() {
       <ClaimList
         claims={claimsQuery.data ?? []}
         activeId={activeId}
+        reportTypes={reportTypes}
         onSelect={id => {
           setActiveId(id)
           setLocalDraft(null)
@@ -170,7 +186,8 @@ export function ReportWriterTab() {
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={generating || !draft.field_notes.trim()}
+                disabled={generating || !canGenerate}
+                title={!draft.property_metadata?.report_type ? 'Select a report type first' : undefined}
                 style={{
                   padding: '6px 12px',
                   borderRadius: 6,
@@ -186,6 +203,30 @@ export function ReportWriterTab() {
                 Upload photo
                 <input type="file" accept="image/*" hidden onChange={handleUpload} />
               </label>
+              <button
+                type="button"
+                disabled={pdfLoading}
+                onClick={async () => {
+                  if (!activeId) return
+                  setPdfLoading(true)
+                  try {
+                    const blob = await fetchClaimPdfBlob(activeId)
+                    const url = URL.createObjectURL(blob)
+                    setPdfPreviewUrl(prev => {
+                      if (prev) URL.revokeObjectURL(prev)
+                      return url
+                    })
+                  } catch (err) {
+                    console.log('MYDEBUG →', err)
+                    window.alert(err instanceof Error ? err.message : 'PDF preview failed')
+                  } finally {
+                    setPdfLoading(false)
+                  }
+                }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7de', cursor: 'pointer' }}
+              >
+                {pdfLoading ? 'Loading PDF…' : 'Preview PDF'}
+              </button>
               <button
                 type="button"
                 onClick={() => exportClaimDocx(activeId, draft.title)}
@@ -215,11 +256,14 @@ export function ReportWriterTab() {
               <div>
                 <ClaimForm
                   claim={draft}
+                  reportTypes={reportTypes}
+                  typeLocked={hasGeneratedContent}
                   onChange={patch => updateDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
                 <DraftEditor
                   claim={draft}
+                  sections={activeReportType?.sections ?? []}
                   streamSections={genState.status !== 'idle' ? genState.sections : undefined}
                   onSectionChange={handleSectionChange}
                   onRegenerateSection={handleRegenerateSection}
@@ -235,6 +279,54 @@ export function ReportWriterTab() {
           </>
         )}
       </div>
+      {pdfPreviewUrl ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 24,
+          }}
+          onClick={() => {
+            URL.revokeObjectURL(pdfPreviewUrl)
+            setPdfPreviewUrl(null)
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 8,
+              width: 'min(960px, 95vw)',
+              height: 'min(90vh, 900px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid #d0d7de' }}>
+              <strong style={{ fontSize: 14 }}>Report preview</strong>
+              <button
+                type="button"
+                onClick={() => {
+                  URL.revokeObjectURL(pdfPreviewUrl)
+                  setPdfPreviewUrl(null)
+                }}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18 }}
+              >
+                ×
+              </button>
+            </div>
+            <iframe title="Report PDF preview" src={pdfPreviewUrl} style={{ flex: 1, border: 'none' }} />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
