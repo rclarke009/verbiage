@@ -2,12 +2,14 @@ import type { Claim, ReportTypeDefinition } from '../../types'
 
 export function ClaimList({
   claims,
+  loading,
   activeId,
   reportTypes,
   onSelect,
   onCreate,
 }: {
   claims: Claim[]
+  loading?: boolean
   activeId: string | null
   reportTypes: ReportTypeDefinition[]
   onSelect: (id: string) => void
@@ -35,7 +37,10 @@ export function ClaimList({
         New claim
       </button>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {claims.map(c => (
+        {loading ? (
+          <p style={{ color: '#888', fontSize: 13, margin: 0 }}>Loading reports…</p>
+        ) : (
+        claims.map(c => (
           <button
             key={c.claim_id}
             type="button"
@@ -63,7 +68,8 @@ export function ClaimList({
             ) : null}
             <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>{c.status}</div>
           </button>
-        ))}
+        ))
+        )}
       </div>
     </div>
   )
