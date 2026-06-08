@@ -85,3 +85,12 @@ def test_ollama_defaults_to_configured_temperature(monkeypatch):
     asyncio.run(llm.answer_with_context("prompt"))
 
     assert captured["payload"]["options"]["temperature"] == LLM_TEMPERATURE
+
+
+def test_ollama_null_message_returns_empty_string(monkeypatch):
+    monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
+    _capture_post(monkeypatch, {}, {"message": None})
+
+    out = asyncio.run(llm.answer_with_context("prompt"))
+
+    assert out == ""

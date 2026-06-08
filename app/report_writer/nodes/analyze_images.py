@@ -49,7 +49,9 @@ async def _analyze_with_openai(image_bytes: bytes, content_type: str) -> dict:
     )
     resp.raise_for_status()
     data = resp.json()
-    text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+    choice = (data.get("choices") or [None])[0]
+    msg = (choice.get("message") if choice else None) or {}
+    text = (msg.get("content") or "").strip()
     return {"caption": text, "observations": text, "model": LLM_OPENAI_MODEL}
 
 

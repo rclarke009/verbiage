@@ -124,7 +124,8 @@ async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
                     f"LLM API error {resp.status_code}: {resp.text[:200]}"
                 )
             data = resp.json()
-            text = data.get("message", {}).get("content", "").strip()
+            msg = data.get("message") or {}
+            text = (msg.get("content") or "").strip()
             return text
         except httpx.TimeoutException:
             last_exc = LLMUpstreamTimeoutError("LLM request timed out")
