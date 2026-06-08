@@ -156,6 +156,18 @@ export interface SectionContent {
   sources?: ReportWriterSource[]
 }
 
+export interface ClaimPropertyMetadata {
+  address?: string
+  property_type?: string
+  storm_id?: string
+  storm_name?: string
+  storm_date?: string
+  storm_type?: string
+  storm_category?: string
+  landfall_region?: string
+  [key: string]: string | undefined
+}
+
 export interface Claim {
   claim_id: string
   user_id: string

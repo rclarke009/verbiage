@@ -1,4 +1,13 @@
+import { useState } from 'react'
 import type { Claim } from '../../types'
+import { StormPicker } from './StormPicker'
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: 8,
+  borderRadius: 6,
+  border: '1px solid #d0d7de',
+}
 
 export function ClaimForm({
   claim,
@@ -8,14 +17,38 @@ export function ClaimForm({
   onChange: (patch: Partial<Pick<Claim, 'title' | 'field_notes' | 'property_metadata'>>) => void
 }) {
   const meta = claim.property_metadata || {}
+  const [stormCustom, setStormCustom] = useState(false)
+  const showManualDate = !meta.storm_id || stormCustom
+
+  const keepBaseFields = (base: Record<string, string>): Record<string, string> => {
+    const next: Record<string, string> = {}
+    if (base.address) next.address = base.address
+    if (base.property_type) next.property_type = base.property_type
+    return next
+  }
+
+  const updateMetadata = (patch: Record<string, string>) => {
+    onChange({ property_metadata: { ...meta, ...patch } })
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <label style={{ fontSize: 13 }}>
-        <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title / address</span>
+        <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title</span>
         <input
           value={claim.title}
           onChange={e => onChange({ title: e.target.value })}
-          style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d0d7de' }}
+          placeholder="Claim name or client reference"
+          style={inputStyle}
+        />
+      </label>
+      <label style={{ fontSize: 13 }}>
+        <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Address</span>
+        <input
+          value={meta.address ?? ''}
+          onChange={e => updateMetadata({ address: e.target.value })}
+          placeholder="412 Gulfview Drive, Tampa, FL"
+          style={inputStyle}
         />
       </label>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -23,23 +56,49 @@ export function ClaimForm({
           <span style={{ display: 'block', marginBottom: 4 }}>Property type</span>
           <input
             value={meta.property_type ?? ''}
-            onChange={e =>
-              onChange({ property_metadata: { ...meta, property_type: e.target.value } })
-            }
-            style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d0d7de' }}
+            onChange={e => updateMetadata({ property_type: e.target.value })}
+            style={inputStyle}
           />
         </label>
-        <label style={{ fontSize: 13 }}>
-          <span style={{ display: 'block', marginBottom: 4 }}>Storm date</span>
-          <input
-            value={meta.storm_date ?? ''}
-            onChange={e =>
-              onChange({ property_metadata: { ...meta, storm_date: e.target.value } })
-            }
-            style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d0d7de' }}
-          />
-        </label>
+        {showManualDate ? (
+          <label style={{ fontSize: 13 }}>
+            <span style={{ display: 'block', marginBottom: 4 }}>Storm date</span>
+            <input
+              value={meta.storm_date ?? ''}
+              onChange={e => updateMetadata({ storm_date: e.target.value })}
+              placeholder="e.g. September 28, 2022"
+              style={inputStyle}
+            />
+          </label>
+        ) : (
+          <div />
+        )}
       </div>
+      <StormPicker
+        stormId={meta.storm_id}
+        customMode={stormCustom}
+        onSelect={selection => {
+          if (selection.kind === 'storm') {
+            setStormCustom(false)
+            onChange({
+              property_metadata: {
+                ...keepBaseFields(meta),
+                ...selection.metadata,
+              },
+            })
+            return
+          }
+          if (selection.kind === 'custom') {
+            setStormCustom(true)
+            const next = keepBaseFields(meta)
+            if (meta.storm_date) next.storm_date = meta.storm_date
+            onChange({ property_metadata: next })
+            return
+          }
+          setStormCustom(false)
+          onChange({ property_metadata: keepBaseFields(meta) })
+        }}
+      />
       <label style={{ fontSize: 13 }}>
         <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Field notes</span>
         <textarea
@@ -48,10 +107,7 @@ export function ClaimForm({
           rows={8}
           placeholder="Paste inspection notes, damage observations, etc."
           style={{
-            width: '100%',
-            padding: 8,
-            borderRadius: 6,
-            border: '1px solid #d0d7de',
+            ...inputStyle,
             fontFamily: 'inherit',
             resize: 'vertical',
           }}
