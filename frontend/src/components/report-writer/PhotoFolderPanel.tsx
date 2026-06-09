@@ -9,7 +9,7 @@ import type { Claim, PhotoAnalysisCounts } from '../../types'
 const stepLegend: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
-  color: '#0969da',
+  color: 'var(--app-primary)',
   margin: '0 0 8px',
 }
 
@@ -89,24 +89,24 @@ export function PhotoFolderPanel({
   return (
     <fieldset
       style={{
-        border: '2px solid #0969da',
+        border: '2px solid var(--app-primary)',
         borderRadius: 8,
         padding: 14,
         margin: 0,
-        background: '#f6f8fa',
+        background: 'var(--app-surface)',
       }}
     >
       <legend style={{ ...stepLegend, padding: '0 6px' }}>Step 2 — Job photos (link Drive folder first)</legend>
-      <p style={{ margin: '0 0 12px', fontSize: 13, color: '#57606a', lineHeight: 1.5 }}>
+      <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
         After you enter the address above, we search your jobs folder in Drive. Confirm the match to start
         analyzing photos while you write field notes.
       </p>
 
       {matchStatus === 'searching' && (
-        <p style={{ fontSize: 13, color: '#57606a', margin: '0 0 8px' }}>Searching Drive for this address…</p>
+        <p style={{ fontSize: 13, color: 'var(--app-text-muted)', margin: '0 0 8px' }}>Searching Drive for this address…</p>
       )}
       {matchError && (
-        <p style={{ fontSize: 13, color: '#cf222e', margin: '0 0 8px' }}>{matchError}</p>
+        <p style={{ fontSize: 13, color: 'var(--app-danger)', margin: '0 0 8px' }}>{matchError}</p>
       )}
 
       {suggestedId && !folderId && matchStatus === 'done' && (
@@ -114,8 +114,8 @@ export function PhotoFolderPanel({
           style={{
             padding: 10,
             borderRadius: 6,
-            background: '#ddf4ff',
-            border: '1px solid #54aeff',
+            background: 'var(--app-info-bg)',
+            border: '1px solid var(--app-info-border)',
             marginBottom: 10,
           }}
         >
@@ -131,8 +131,8 @@ export function PhotoFolderPanel({
               padding: '6px 12px',
               borderRadius: 6,
               border: 'none',
-              background: '#0969da',
-              color: '#fff',
+              background: 'var(--app-primary)',
+              color: 'var(--app-on-primary)',
               cursor: 'pointer',
               fontSize: 13,
             }}
@@ -147,8 +147,8 @@ export function PhotoFolderPanel({
           style={{
             padding: 10,
             borderRadius: 6,
-            background: '#fff8c5',
-            border: '1px solid #d4a72c',
+            background: 'var(--app-warning-bg)',
+            border: '1px solid var(--app-warning-border)',
             marginBottom: 10,
           }}
         >
@@ -164,8 +164,8 @@ export function PhotoFolderPanel({
               padding: '6px 12px',
               borderRadius: 6,
               border: 'none',
-              background: '#0969da',
-              color: '#fff',
+              background: 'var(--app-primary)',
+              color: 'var(--app-on-primary)',
               cursor: 'pointer',
               fontSize: 13,
             }}
@@ -184,11 +184,11 @@ export function PhotoFolderPanel({
                 <button
                   type="button"
                   onClick={() => pickFolder(m.id, m.name)}
-                  style={{ background: 'none', border: 'none', color: '#0969da', cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'none', border: 'none', color: 'var(--app-primary)', cursor: 'pointer', padding: 0 }}
                 >
                   {m.name}
                 </button>{' '}
-                <span style={{ color: '#57606a' }}>({Math.round(m.score * 100)}% match)</span>
+                <span style={{ color: 'var(--app-text-muted)' }}>({Math.round(m.score * 100)}% match)</span>
               </li>
             ))}
           </ul>
@@ -196,7 +196,7 @@ export function PhotoFolderPanel({
       )}
 
       {matchStatus === 'done' && visibleMatches.length === 0 && address.trim().length >= 5 && !folderId && (
-        <p style={{ fontSize: 13, color: '#9a6700', margin: '0 0 8px' }}>
+        <p style={{ fontSize: 13, color: 'var(--app-warning)', margin: '0 0 8px' }}>
           No folder found for this address. Paste a folder link below.
         </p>
       )}
@@ -223,8 +223,8 @@ export function PhotoFolderPanel({
               padding: '8px 14px',
               borderRadius: 6,
               border: 'none',
-              background: '#1a7f37',
-              color: '#fff',
+              background: 'var(--app-success)',
+              color: 'var(--app-on-primary)',
               cursor: syncing ? 'wait' : 'pointer',
               fontSize: 13,
               fontWeight: 600,
@@ -239,23 +239,23 @@ export function PhotoFolderPanel({
             value={manualInput}
             onChange={e => setManualInput(e.target.value)}
             placeholder="Paste drive.google.com/.../folders/…"
-            style={{ flex: 1, minWidth: 200, padding: 8, borderRadius: 6, border: '1px solid #d0d7de' }}
+            style={{ flex: 1, minWidth: 200, padding: 8, borderRadius: 6, border: '1px solid var(--app-border)' }}
           />
           <button
             type="button"
             onClick={applyManual}
-            style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7de', cursor: 'pointer' }}
+            style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
           >
             Link folder
           </button>
         </div>
       )}
-      {manualError ? <p style={{ color: '#cf222e', fontSize: 12 }}>{manualError}</p> : null}
-      {syncError ? <p style={{ color: '#cf222e', fontSize: 12 }}>{syncError}</p> : null}
+      {manualError ? <p style={{ color: 'var(--app-danger)', fontSize: 12 }}>{manualError}</p> : null}
+      {syncError ? <p style={{ color: 'var(--app-danger)', fontSize: 12 }}>{syncError}</p> : null}
 
       {images.length > 0 && (
         <details style={{ marginTop: 10, fontSize: 13 }}>
-          <summary style={{ cursor: 'pointer', color: '#0969da' }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--app-primary)' }}>
             {images.length} photo{images.length === 1 ? '' : 's'} — {examined} examined
             {examined > 0 ? `, ${withDamage} with damage` : ''}
           </summary>
@@ -263,7 +263,7 @@ export function PhotoFolderPanel({
             {images.slice(0, 30).map(img => (
               <li key={img.image_id} style={{ marginBottom: 4 }}>
                 {img.filename}{' '}
-                <span style={{ color: '#57606a' }}>({img.analysis_status ?? 'pending'})</span>
+                <span style={{ color: 'var(--app-text-muted)' }}>({img.analysis_status ?? 'pending'})</span>
                 {img.source_url ? (
                   <>
                     {' '}
@@ -279,12 +279,12 @@ export function PhotoFolderPanel({
         </details>
       )}
 
-      <p style={{ margin: '12px 0 0', fontSize: 12, color: '#57606a' }}>
+      <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--app-text-muted)' }}>
         Or{' '}
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          style={{ background: 'none', border: 'none', color: '#0969da', cursor: 'pointer', padding: 0 }}
+          style={{ background: 'none', border: 'none', color: 'var(--app-primary)', cursor: 'pointer', padding: 0 }}
         >
           upload one photo manually
         </button>

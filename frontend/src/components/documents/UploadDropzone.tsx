@@ -41,13 +41,13 @@ export function UploadDropzone({ onSuccess }: Props) {
         onClick={() => inputRef.current?.click()}
         onKeyDown={ev => ev.key === 'Enter' && inputRef.current?.click()}
         style={{
-          border: '2px dashed #90CAF9',
+          border: '2px dashed var(--app-info-border)',
           borderRadius: 8,
           padding: '20px 24px',
           textAlign: 'center',
           cursor: 'pointer',
-          background: '#F3F9FF',
-          color: '#555',
+          background: 'var(--app-info-bg)',
+          color: 'var(--app-text-muted)',
           fontSize: 13,
         }}
       >
@@ -65,9 +65,9 @@ export function UploadDropzone({ onSuccess }: Props) {
         <div
           style={{
             marginTop: 8,
-            color: '#1a7f37',
+            color: 'var(--app-success)',
             fontSize: 13,
-            background: '#dafbe1',
+            background: 'var(--app-success-bg)',
             borderRadius: 6,
             padding: '8px 12px',
           }}
@@ -80,9 +80,9 @@ export function UploadDropzone({ onSuccess }: Props) {
         <div
           style={{
             marginTop: 8,
-            color: '#cf222e',
+            color: 'var(--app-danger)',
             fontSize: 13,
-            background: '#FFEBEE',
+            background: 'var(--app-danger-bg)',
             borderRadius: 6,
             padding: '8px 12px',
           }}

@@ -26,8 +26,8 @@ export function ClaimList({
           width: '100%',
           marginBottom: 12,
           padding: '8px 12px',
-          background: '#0969da',
-          color: '#fff',
+          background: 'var(--app-primary)',
+          color: 'var(--app-on-primary)',
           border: 'none',
           borderRadius: 6,
           cursor: 'pointer',
@@ -38,7 +38,7 @@ export function ClaimList({
       </button>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {loading ? (
-          <p style={{ color: '#888', fontSize: 13, margin: 0 }}>Loading reports…</p>
+          <p style={{ color: 'var(--app-text-subtle)', fontSize: 13, margin: 0 }}>Loading reports…</p>
         ) : (
         claims.map(c => (
           <button
@@ -49,24 +49,24 @@ export function ClaimList({
               textAlign: 'left',
               padding: '8px 10px',
               borderRadius: 6,
-              border: activeId === c.claim_id ? '2px solid #0969da' : '1px solid #d0d7de',
-              background: activeId === c.claim_id ? '#ddf4ff' : '#fff',
+              border: activeId === c.claim_id ? '2px solid var(--app-primary)' : '1px solid var(--app-border)',
+              background: activeId === c.claim_id ? 'var(--app-info-bg)' : 'var(--app-bg)',
               cursor: 'pointer',
               fontSize: 13,
             }}
           >
             <div style={{ fontWeight: 600 }}>{c.title || 'Untitled claim'}</div>
             {typeLabel(c.property_metadata?.report_type) ? (
-              <div style={{ fontSize: 11, color: '#0969da', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--app-primary)', marginTop: 2 }}>
                 {typeLabel(c.property_metadata?.report_type)}
               </div>
             ) : null}
             {c.property_metadata?.address ? (
-              <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>
                 {c.property_metadata.address}
               </div>
             ) : null}
-            <div style={{ fontSize: 11, color: '#57606a', marginTop: 2 }}>{c.status}</div>
+            <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>{c.status}</div>
           </button>
         ))
         )}

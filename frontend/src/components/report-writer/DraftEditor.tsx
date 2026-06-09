@@ -15,7 +15,7 @@ export function DraftEditor({
 }) {
   if (!sections.length) {
     return (
-      <p style={{ fontSize: 13, color: '#888', margin: 0 }}>
+      <p style={{ fontSize: 13, color: 'var(--app-text-subtle)', margin: 0 }}>
         Select a report type to see draft sections.
       </p>
     )
@@ -33,10 +33,10 @@ export function DraftEditor({
         return (
           <div key={key}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h4 style={{ margin: '0 0 6px', fontSize: 14, color: '#0969da' }}>
+              <h4 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--app-primary)' }}>
                 {labelByKey[key]}
                 {streaming && (
-                  <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>streaming…</span>
+                  <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--app-text-subtle)' }}>streaming…</span>
                 )}
               </h4>
               {onRegenerateSection && content.trim() ? (
@@ -46,7 +46,7 @@ export function DraftEditor({
                   style={{
                     fontSize: 11,
                     background: 'none',
-                    border: '1px solid #d0d7de',
+                    border: '1px solid var(--app-border)',
                     borderRadius: 4,
                     padding: '2px 8px',
                     cursor: 'pointer',
@@ -64,7 +64,7 @@ export function DraftEditor({
                 width: '100%',
                 padding: 8,
                 borderRadius: 6,
-                border: '1px solid #d0d7de',
+                border: '1px solid var(--app-border)',
                 fontFamily: 'inherit',
                 fontSize: 13,
                 lineHeight: 1.5,

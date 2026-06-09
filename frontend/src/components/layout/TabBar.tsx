@@ -14,7 +14,7 @@ export function TabBar({ tabs, active, onChange }: Props) {
     <nav
       role="tablist"
       aria-label="Main"
-      style={{ display: 'flex', gap: 4, borderBottom: '2px solid #d0d7de', marginBottom: 24, flexWrap: 'wrap' }}
+      style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--app-border)', marginBottom: 24, flexWrap: 'wrap' }}
     >
       {tabs.map(tab => (
         <button
@@ -30,8 +30,8 @@ export function TabBar({ tabs, active, onChange }: Props) {
             cursor: 'pointer',
             fontSize: 14,
             fontWeight: active === tab.id ? 700 : 400,
-            color: active === tab.id ? '#0969da' : '#24292f',
-            borderBottom: active === tab.id ? '2px solid #0969da' : '2px solid transparent',
+            color: active === tab.id ? 'var(--app-primary)' : 'var(--app-text)',
+            borderBottom: active === tab.id ? '2px solid var(--app-primary)' : '2px solid transparent',
             marginBottom: -2,
           }}
         >

@@ -39,7 +39,7 @@ export function ChatInput({
         disabled={disabled}
         rows={2}
         style={{
-          flex: 1, resize: 'none', borderRadius: 8, border: '1px solid #ccc',
+          flex: 1, resize: 'none', borderRadius: 8, border: '1px solid var(--app-border)',
           padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
           outline: 'none',
         }}
@@ -48,7 +48,7 @@ export function ChatInput({
         onClick={submit}
         disabled={disabled || !value.trim()}
         style={{
-          background: '#1976D2', color: '#fff', border: 'none', borderRadius: 8,
+          background: 'var(--app-primary)', color: 'var(--app-on-primary)', border: 'none', borderRadius: 8,
           padding: '10px 18px', cursor: 'pointer', fontSize: 14, fontWeight: 600,
           opacity: disabled || !value.trim() ? 0.5 : 1,
         }}

@@ -195,7 +195,7 @@ export function ReportWriterTab() {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {!activeId ? (
-          <p style={{ color: '#888', fontSize: 14 }}>
+          <p style={{ color: 'var(--app-text-subtle)', fontSize: 14 }}>
             Create or select a claim to draft a report from field notes and similar past reports.
           </p>
         ) : (
@@ -205,7 +205,7 @@ export function ReportWriterTab() {
                 type="button"
                 onClick={() => saveMutation.mutate()}
                 disabled={saveMutation.isPending}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7de', cursor: 'pointer' }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
               >
                 Save
               </button>
@@ -224,8 +224,8 @@ export function ReportWriterTab() {
                   padding: '6px 12px',
                   borderRadius: 6,
                   border: 'none',
-                  background: '#0969da',
-                  color: '#fff',
+                  background: 'var(--app-primary)',
+                  color: 'var(--app-on-primary)',
                   cursor: 'pointer',
                 }}
               >
@@ -251,14 +251,14 @@ export function ReportWriterTab() {
                     setPdfLoading(false)
                   }
                 }}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7de', cursor: 'pointer' }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
               >
                 {pdfLoading ? 'Loading PDF…' : 'Preview PDF'}
               </button>
               <button
                 type="button"
                 onClick={() => exportClaimDocx(activeId, draft.title)}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7de', cursor: 'pointer' }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
               >
                 Export DOCX
               </button>
@@ -272,7 +272,7 @@ export function ReportWriterTab() {
                     })
                   }
                 }}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #cf222e', color: '#cf222e', cursor: 'pointer' }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-danger)', color: 'var(--app-danger)', cursor: 'pointer' }}
               >
                 Delete
               </button>
@@ -306,7 +306,7 @@ export function ReportWriterTab() {
                   weatherError={weather.error}
                   onRefreshWeather={weather.refresh}
                 />
-                <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
+                <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
                 <DraftEditor
                   claim={draft}
                   sections={activeReportType?.sections ?? []}
@@ -317,7 +317,7 @@ export function ReportWriterTab() {
               </div>
               <aside>
                 <SourcesPanel sources={sources} />
-                <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
+                <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
                 <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Run history</h3>
                 <RunHistory runs={runsQuery.data ?? []} />
               </aside>
@@ -346,7 +346,7 @@ export function ReportWriterTab() {
         >
           <div
             style={{
-              background: '#fff',
+              background: 'var(--app-bg)',
               borderRadius: 8,
               width: 'min(960px, 95vw)',
               height: 'min(90vh, 900px)',
@@ -356,7 +356,7 @@ export function ReportWriterTab() {
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid #d0d7de' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--app-border)' }}>
               <strong style={{ fontSize: 14 }}>Report preview</strong>
               <button
                 type="button"

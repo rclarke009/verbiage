@@ -28,8 +28,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#fff8c5',
-          borderLeft: '4px solid #9a6700',
+          background: 'var(--app-warning-bg)',
+          borderLeft: '4px solid var(--app-warning)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -45,8 +45,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#fff8c5',
-          borderLeft: '4px solid #9a6700',
+          background: 'var(--app-warning-bg)',
+          borderLeft: '4px solid var(--app-warning)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -82,8 +82,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#f6f8fa',
-          borderLeft: '4px solid #0969da',
+          background: 'var(--app-surface)',
+          borderLeft: '4px solid var(--app-primary)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -105,8 +105,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#dafbe1',
-          borderLeft: '4px solid #1a7f37',
+          background: 'var(--app-success-bg)',
+          borderLeft: '4px solid var(--app-success)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -124,8 +124,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#fff8c5',
-          borderLeft: '4px solid #9a6700',
+          background: 'var(--app-warning-bg)',
+          borderLeft: '4px solid var(--app-warning)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -141,8 +141,8 @@ export function PhotoAnalysisBanner({
         style={{
           padding: '10px 12px',
           borderRadius: 6,
-          background: '#f6f8fa',
-          borderLeft: '4px solid #57606a',
+          background: 'var(--app-surface)',
+          borderLeft: '4px solid var(--app-text-muted)',
           fontSize: 13,
           marginBottom: 12,
         }}

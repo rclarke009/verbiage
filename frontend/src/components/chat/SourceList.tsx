@@ -20,19 +20,19 @@ export function SourceList({ sources, chunksUsed }: Props) {
         onClick={() => setOpen(o => !o)}
         style={{
           background: 'none',
-          border: '1px solid #ccc',
+          border: '1px solid var(--app-border)',
           borderRadius: 4,
           padding: '4px 10px',
           cursor: 'pointer',
           fontSize: 12,
-          color: '#555',
+          color: 'var(--app-text-muted)',
         }}
       >
         {open ? '▾' : '▸'} Sources ({sources.length})
         {chunksUsed !== undefined ? ` · ${chunksUsed} passages retrieved` : ''}
       </button>
       {open && (
-        <div style={{ marginTop: 8, paddingLeft: 8, borderLeft: '3px solid #E3F2FD' }}>
+        <div style={{ marginTop: 8, paddingLeft: 8, borderLeft: '3px solid var(--app-info-bg)' }}>
           {sources.map((src, i) => {
             const parts = []
             if (src.page) parts.push(`Page ${src.page}`)
@@ -44,14 +44,14 @@ export function SourceList({ sources, chunksUsed }: Props) {
                   📄 <strong>{src.filename}</strong>
                 </span>
                 {subtitle && (
-                  <span style={{ color: '#666' }}> — {subtitle}</span>
+                  <span style={{ color: 'var(--app-text-muted)' }}> — {subtitle}</span>
                 )}
                 {src.source_url && (
                   <a
                     href={src.source_url}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ marginLeft: 8, fontSize: 12, color: '#0969da' }}
+                    style={{ marginLeft: 8, fontSize: 12, color: 'var(--app-primary)' }}
                   >
                     {isDriveLike(src) ? 'Open in Drive' : 'Open source'}
                   </a>
