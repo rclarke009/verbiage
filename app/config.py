@@ -161,6 +161,9 @@ RAG_SIMILARITY_ALERT_THRESHOLD: float | None = (
     float(_raw_sim_thresh) if _raw_sim_thresh else None
 )
 
+# Visual Crossing Timeline API — historical wind for Report Writer weather section.
+VISUAL_CROSSING_API_KEY = os.getenv("VISUAL_CROSSING_API_KEY", "").strip()
+
 # Cross-encoder reranking of the retrieved candidate pool before prompt assembly.
 # Off by default: loading the ~100MB CrossEncoder is undesirable in tests/CI. Enable
 # in deployment with RERANK_ENABLED=1.

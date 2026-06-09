@@ -121,3 +121,16 @@ class PhotoAnalysisCountsResponse(BaseModel):
 
 class PhotoSyncRequest(BaseModel):
     folder_id: str | None = Field(default=None, description="Override drive_photo_folder_id on claim")
+
+
+class WeatherResponse(BaseModel):
+    wind_speed_mph: float | None = None
+    wind_gust_mph: float | None = None
+    stations: list[str] = Field(default_factory=list)
+    resolved_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    date_iso: str
+    date_display: str
+    source: str = "visual_crossing"
+    fetch_key: str = ""

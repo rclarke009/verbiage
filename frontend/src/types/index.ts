@@ -163,10 +163,32 @@ export interface ClaimPropertyMetadata {
   storm_id?: string
   storm_name?: string
   storm_date?: string
+  storm_date_iso?: string
   storm_type?: string
   storm_category?: string
   landfall_region?: string
+  wind_speed_mph?: string
+  wind_gust_mph?: string
+  weather_stations?: string
+  weather_resolved_address?: string
+  weather_date_iso?: string
+  weather_source?: string
+  weather_fetched_at?: string
+  weather_fetch_key?: string
   [key: string]: string | undefined
+}
+
+export interface WeatherSnapshot {
+  wind_speed_mph: number | null
+  wind_gust_mph: number | null
+  stations: string[]
+  resolved_address: string
+  latitude: number | null
+  longitude: number | null
+  date_iso: string
+  date_display: string
+  source: string
+  fetch_key: string
 }
 
 export interface ReportTypeSection {

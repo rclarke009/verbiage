@@ -26,6 +26,7 @@ describe('floridaStorms', () => {
       storm_id: 'ian-2022',
       storm_name: 'Ian',
       storm_date: 'September 28, 2022',
+      storm_date_iso: '2022-09-28',
       storm_type: 'hurricane',
       storm_category: 'Cat 4',
       landfall_region: 'Cayo Costa, FL',
