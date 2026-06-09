@@ -79,6 +79,20 @@ async def stream_graph_events(
                             run_id=run_id,
                         )
                         seq += 1
+                    if node_name == "analyze_images":
+                        partial = {
+                            k: v
+                            for k, v in update.items()
+                            if k in ("image_analyses", "photo_analysis_pending")
+                        }
+                        if partial:
+                            yield format_sse(
+                                "node_update",
+                                {"node": node_name, "partial_state": partial},
+                                seq=seq,
+                                run_id=run_id,
+                            )
+                            seq += 1
                     if node_name in ("gate_retrieval", "refuse", "persist_draft", "generate_sections"):
                         partial = {k: v for k, v in update.items() if k != "sections"}
                         if node_name == "persist_draft" and update.get("run_status"):

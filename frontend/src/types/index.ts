@@ -222,9 +222,27 @@ export interface ReportWriterImage {
   filename: string
   content_type: string
   size_bytes: number
-  storage_path: string
+  storage_path?: string | null
+  drive_file_id?: string | null
+  source_url?: string | null
   vision_analysis?: Record<string, unknown> | null
+  analysis_status?: string | null
   sort_order?: number
+}
+
+export interface DriveFolderMatch {
+  id: string
+  name: string
+  score: number
+  source_url: string
+}
+
+export interface PhotoAnalysisCounts {
+  total: number
+  pending: number
+  running: number
+  succeeded: number
+  failed: number
 }
 
 export interface GenerationSectionState {

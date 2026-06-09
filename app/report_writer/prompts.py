@@ -9,6 +9,7 @@ from app.report_writer.constants import (
     section_guidance_for,
     section_labels_for_type,
 )
+from app.report_writer.photo_summary import build_photo_context_block
 
 MAX_CONTEXT_CHARS = 8000
 
@@ -38,11 +39,9 @@ def build_retrieval_query(
     if field_notes.strip():
         parts.append(field_notes.strip())
     if image_analyses:
-        for img in image_analyses:
-            cap = (img.get("caption") or "").strip()
-            obs = (img.get("observations") or "").strip()
-            if cap or obs:
-                parts.append(f"Photo: {cap} {obs}".strip())
+        block = build_photo_context_block(image_analyses)
+        if block.strip():
+            parts.append(block.strip())
     return "\n".join(parts).strip() or field_notes.strip() or "storm damage inspection"
 
 
@@ -91,16 +90,7 @@ def build_section_prompt(
             label = label_by_key.get(key, key)
             prior_parts.append(f"{label}:\n{content}")
     prior = "\n\n".join(prior_parts)
-    image_block = ""
-    if image_analyses:
-        lines = []
-        for img in image_analyses:
-            cap = img.get("caption") or ""
-            obs = img.get("observations") or ""
-            if cap or obs:
-                lines.append(f"- {cap} {obs}".strip())
-        if lines:
-            image_block = "Photo observations from this claim:\n" + "\n".join(lines) + "\n\n"
+    image_block = build_photo_context_block(image_analyses)
 
     guidance = section_guidance_for(type_id, section_key)
     guidance_block = f"Section guidance: {guidance}\n\n" if guidance else ""

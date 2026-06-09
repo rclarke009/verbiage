@@ -44,7 +44,7 @@ def test_list_docs_metadata_recurses_one_level_into_subfolders():
     """zfinished/<report folder>/<report> layout: files in subfolders are found."""
     queries: list[str] = []
 
-    def fake_list(q, pageSize, fields, pageToken):
+    def fake_list(q, pageSize, fields, pageToken, **_kwargs):
         queries.append(q)
         # Subfolder discovery query for the top folder.
         if FOLDER_MIME in q and "'zfinished' in parents" in q:
@@ -77,7 +77,7 @@ def test_list_docs_metadata_recurses_one_level_into_subfolders():
 
 
 def test_list_docs_metadata_dedupes_files_seen_in_multiple_parents():
-    def fake_list(q, pageSize, fields, pageToken):
+    def fake_list(q, pageSize, fields, pageToken, **_kwargs):
         if FOLDER_MIME in q:
             files = [{"id": "sub1"}]
         else:

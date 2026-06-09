@@ -19,6 +19,25 @@ from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
 
+def _read_image_bytes(img: dict) -> bytes | None:
+    path = img.get("storage_path")
+    if path:
+        try:
+            return read_claim_image_bytes(path)
+        except OSError:
+            return None
+    drive_file_id = img.get("drive_file_id")
+    if drive_file_id:
+        try:
+            from app.drive_client import download_drive_file_bytes
+
+            data, _ = download_drive_file_bytes(drive_file_id, img.get("filename") or drive_file_id)
+            return data
+        except Exception:
+            return None
+    return None
+
+
 @dataclass
 class ReportPhoto:
     data: bytes
@@ -106,12 +125,8 @@ def build_report_document(
 
     photos: list[ReportPhoto] = []
     for img in images or []:
-        path = img.get("storage_path")
-        if not path:
-            continue
-        try:
-            raw = read_claim_image_bytes(path)
-        except OSError:
+        raw = _read_image_bytes(img)
+        if not raw:
             continue
         data, ext = compress_image_bytes(raw)
         from app.report_writer.image_utils import image_emu_size

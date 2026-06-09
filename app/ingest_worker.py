@@ -8,6 +8,7 @@ from typing import Any
 
 from app.config import INGEST_WORKER_ENABLED
 from app.db import (
+    INGEST_JOB_KIND_CLAIM_PHOTO_VISION,
     INGEST_JOB_KIND_GOOGLE_DRIVE,
     claim_next_ingest_job,
     doc_exist,
@@ -19,11 +20,14 @@ from app.db import (
 from app.drive_client import (
     DriveClientError,
     compute_index_status,
+    download_drive_file_bytes_async,
     drive_source_url_for_mime,
     fetch_drive_file_async,
 )
 from app.ingest_core import ingest_new_document, reingest_existing_document
 from app.models import ChunkingOptions, IngestResponse
+from app.report_writer.queries import get_claim, get_claim_image, update_image_analysis_status, update_image_vision_analysis
+from app.report_writer.vision import analyze_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +96,55 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
         pool.putconn(conn)
 
 
+async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str, dict | None, str | None]:
+    payload = job["payload"] or {}
+    claim_id = payload.get("claim_id")
+    user_id = payload.get("user_id")
+    image_id = payload.get("image_id")
+    drive_file_id = payload.get("drive_file_id") or job["doc_id"]
+
+    if not claim_id or not user_id or not image_id:
+        return "failed", None, "Missing claim_id, user_id, or image_id in payload"
+
+    conn = get_valid_conn(pool)
+    try:
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return "failed", None, "Claim not found or access denied"
+        img = get_claim_image(conn, image_id)
+        if not img:
+            return "failed", None, f"Image {image_id} not found"
+        if img.get("vision_analysis"):
+            return "skipped", {"image_id": image_id, "reason": "already_analyzed"}, None
+
+        update_image_analysis_status(conn, image_id, "running")
+        conn.commit()
+    finally:
+        pool.putconn(conn)
+
+    try:
+        data, mime = await download_drive_file_bytes_async(drive_file_id, img.get("filename") or drive_file_id)
+        result = await analyze_image_bytes(data, mime)
+        result["image_id"] = image_id
+
+        conn2 = get_valid_conn(pool)
+        try:
+            update_image_vision_analysis(conn2, image_id, result)
+            conn2.commit()
+        finally:
+            pool.putconn(conn2)
+        return "succeeded", {"image_id": image_id}, None
+    except Exception as e:
+        conn3 = get_valid_conn(pool)
+        try:
+            update_image_analysis_status(conn3, image_id, "failed")
+            conn3.commit()
+        finally:
+            pool.putconn(conn3)
+        logger.exception("Vision job failed for image %s", image_id)
+        return "failed", None, str(e)
+
+
 async def process_ingest_job(pool, job: dict[str, Any]) -> None:
     batch_id = job["batch_id"]
     job_id = job["id"]
@@ -99,6 +152,8 @@ async def process_ingest_job(pool, job: dict[str, Any]) -> None:
 
     if kind == INGEST_JOB_KIND_GOOGLE_DRIVE:
         terminal, result, error = await process_google_drive_job(pool, job)
+    elif kind == INGEST_JOB_KIND_CLAIM_PHOTO_VISION:
+        terminal, result, error = await process_claim_photo_vision_job(pool, job)
     else:
         terminal, result, error = "failed", None, f"Unknown job kind: {kind}"
 

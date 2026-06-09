@@ -322,11 +322,14 @@ def create_db(conn: PgConnection) -> None:
                 image_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 claim_id UUID NOT NULL REFERENCES report_claims(claim_id) ON DELETE CASCADE,
                 user_id TEXT NOT NULL,
-                storage_path TEXT NOT NULL,
+                storage_path TEXT,
+                drive_file_id TEXT,
+                source_url TEXT,
                 filename TEXT NOT NULL,
                 content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
                 size_bytes BIGINT NOT NULL DEFAULT 0,
                 vision_analysis JSONB,
+                analysis_status TEXT NOT NULL DEFAULT 'pending',
                 sort_order INT NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
@@ -334,6 +337,52 @@ def create_db(conn: PgConnection) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_report_claim_images_claim "
             "ON report_claim_images(claim_id, sort_order);"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_report_claim_images_drive_unique "
+            "ON report_claim_images(claim_id, drive_file_id) WHERE drive_file_id IS NOT NULL;"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_report_claim_images_analysis "
+            "ON report_claim_images(claim_id, analysis_status);"
+        )
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'report_claim_images'
+                      AND column_name = 'storage_path' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE report_claim_images ALTER COLUMN storage_path DROP NOT NULL;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'report_claim_images'
+                      AND column_name = 'drive_file_id'
+                ) THEN
+                    ALTER TABLE report_claim_images ADD COLUMN drive_file_id TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'report_claim_images'
+                      AND column_name = 'source_url'
+                ) THEN
+                    ALTER TABLE report_claim_images ADD COLUMN source_url TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'report_claim_images'
+                      AND column_name = 'analysis_status'
+                ) THEN
+                    ALTER TABLE report_claim_images
+                        ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'pending';
+                END IF;
+            END $$;
+        """)
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_report_claim_images_drive_unique "
+            "ON report_claim_images(claim_id, drive_file_id) WHERE drive_file_id IS NOT NULL;"
         )
         cur.execute("ALTER TABLE report_claims ENABLE ROW LEVEL SECURITY;")
         cur.execute("ALTER TABLE report_generation_runs ENABLE ROW LEVEL SECURITY;")
@@ -746,6 +795,8 @@ def list_doc_title_pairs(conn: PgConnection) -> list[tuple[str, str | None]]:
 # --- Ingest job queue ---
 
 INGEST_JOB_KIND_GOOGLE_DRIVE = "google_drive"
+INGEST_JOB_KIND_CLAIM_PHOTO_VISION = "claim_photo_vision"
+INGEST_BATCH_KIND_CLAIM_PHOTO_SYNC = "claim_photo_sync"
 
 
 def create_ingest_batch(conn: PgConnection, kind: str, total: int) -> str:
@@ -934,6 +985,36 @@ def get_ingest_batch_errors(conn: PgConnection, batch_id: str, limit: int = 10) 
             (batch_id, limit),
         )
         return [f"{r[0]}: {r[1]}" for r in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def get_ingest_batch_claim_context(conn: PgConnection, batch_id: str) -> dict[str, str] | None:
+    """Return claim_id and user_id from first job payload (claim photo batches)."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT payload FROM ingest_jobs
+            WHERE batch_id = %s::uuid
+            ORDER BY created_at
+            LIMIT 1
+            """,
+            (batch_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        payload = row[0]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if not isinstance(payload, dict):
+            return None
+        claim_id = payload.get("claim_id")
+        user_id = payload.get("user_id")
+        if claim_id and user_id:
+            return {"claim_id": str(claim_id), "user_id": str(user_id)}
+        return None
     finally:
         cur.close()
 

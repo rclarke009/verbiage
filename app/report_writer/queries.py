@@ -355,6 +355,22 @@ def get_generation_run(conn, claim_id: str, run_id: str, user_id: str) -> dict[s
         cur.close()
 
 
+def _image_row_to_dict(row) -> dict[str, Any]:
+    return {
+        "image_id": str(row["image_id"]),
+        "claim_id": str(row["claim_id"]),
+        "filename": row["filename"],
+        "content_type": row["content_type"],
+        "size_bytes": row["size_bytes"],
+        "storage_path": row.get("storage_path"),
+        "drive_file_id": row.get("drive_file_id"),
+        "source_url": row.get("source_url"),
+        "vision_analysis": row["vision_analysis"],
+        "analysis_status": row.get("analysis_status") or "pending",
+        "sort_order": row["sort_order"],
+    }
+
+
 def list_claim_images(conn, claim_id: str, user_id: str) -> list[dict[str, Any]]:
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -367,19 +383,42 @@ def list_claim_images(conn, claim_id: str, user_id: str) -> list[dict[str, Any]]
             """,
             (claim_id, user_id),
         )
-        return [
-            {
-                "image_id": str(row["image_id"]),
-                "claim_id": str(row["claim_id"]),
-                "filename": row["filename"],
-                "content_type": row["content_type"],
-                "size_bytes": row["size_bytes"],
-                "storage_path": row["storage_path"],
-                "vision_analysis": row["vision_analysis"],
-                "sort_order": row["sort_order"],
-            }
-            for row in cur.fetchall()
-        ]
+        return [_image_row_to_dict(row) for row in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def count_claim_image_analysis(conn, claim_id: str) -> dict[str, int]:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT analysis_status, COUNT(*)::int
+            FROM report_claim_images
+            WHERE claim_id = %s::uuid
+            GROUP BY analysis_status
+            """,
+            (claim_id,),
+        )
+        counts = {row[0]: row[1] for row in cur.fetchall()}
+        total = sum(counts.values())
+        return {
+            "total": total,
+            "pending": counts.get("pending", 0),
+            "running": counts.get("running", 0),
+            "succeeded": counts.get("succeeded", 0),
+            "failed": counts.get("failed", 0),
+        }
+    finally:
+        cur.close()
+
+
+def get_claim_image(conn, image_id: str) -> dict[str, Any] | None:
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM report_claim_images WHERE image_id = %s::uuid", (image_id,))
+        row = cur.fetchone()
+        return _image_row_to_dict(row) if row else None
     finally:
         cur.close()
 
@@ -401,24 +440,74 @@ def insert_claim_image(
         cur.execute(
             """
             INSERT INTO report_claim_images
-                (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes, sort_order)
-            VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s)
+                (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes, sort_order, analysis_status)
+            VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
             """,
             (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes, sort_order),
         )
         row = cur.fetchone()
         conn.commit()
-        return {
-            "image_id": str(row["image_id"]),
-            "claim_id": str(row["claim_id"]),
-            "filename": row["filename"],
-            "content_type": row["content_type"],
-            "size_bytes": row["size_bytes"],
-            "storage_path": row["storage_path"],
-            "vision_analysis": row["vision_analysis"],
-            "sort_order": row["sort_order"],
-        }
+        return _image_row_to_dict(row)
+    finally:
+        cur.close()
+
+
+def upsert_drive_claim_image(
+    conn,
+    *,
+    claim_id: str,
+    user_id: str,
+    drive_file_id: str,
+    source_url: str,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    sort_order: int,
+) -> dict[str, Any]:
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            INSERT INTO report_claim_images
+                (claim_id, user_id, drive_file_id, source_url, storage_path,
+                 filename, content_type, size_bytes, sort_order, analysis_status)
+            VALUES (%s::uuid, %s, %s, %s, NULL, %s, %s, %s, %s, 'pending')
+            ON CONFLICT (claim_id, drive_file_id) WHERE drive_file_id IS NOT NULL
+            DO UPDATE SET
+                filename = EXCLUDED.filename,
+                content_type = EXCLUDED.content_type,
+                size_bytes = EXCLUDED.size_bytes,
+                source_url = EXCLUDED.source_url,
+                sort_order = EXCLUDED.sort_order
+            RETURNING *
+            """,
+            (
+                claim_id,
+                user_id,
+                drive_file_id,
+                source_url,
+                filename,
+                content_type,
+                size_bytes,
+                sort_order,
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return _image_row_to_dict(row)
+    finally:
+        cur.close()
+
+
+def update_image_analysis_status(conn, image_id: str, status: str) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE report_claim_images SET analysis_status = %s WHERE image_id = %s::uuid",
+            (status, image_id),
+        )
+        conn.commit()
     finally:
         cur.close()
 
@@ -427,7 +516,11 @@ def update_image_vision_analysis(conn, image_id: str, analysis: dict) -> None:
     cur = conn.cursor()
     try:
         cur.execute(
-            "UPDATE report_claim_images SET vision_analysis = %s WHERE image_id = %s::uuid",
+            """
+            UPDATE report_claim_images
+            SET vision_analysis = %s, analysis_status = 'succeeded'
+            WHERE image_id = %s::uuid
+            """,
             (Json(analysis), image_id),
         )
         conn.commit()

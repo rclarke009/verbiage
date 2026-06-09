@@ -99,6 +99,8 @@ from app.config import (
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
     GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL,
+    GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID,
+    GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL,
     INGEST_WORKER_ENABLED,
     GOOGLE_REDIRECT_URI,
     METRICS_ENABLED,
@@ -410,6 +412,8 @@ def get_config():
         "public_app_url": PUBLIC_APP_URL or "",
         "google_drive_default_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_DEFAULT_FOLDER_ID) or "",
         "google_drive_default_folder_label": GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL or "",
+        "google_drive_jobs_root_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID) or "",
+        "google_drive_jobs_root_folder_label": GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL or "",
     }
 
 
@@ -815,6 +819,13 @@ async def get_ingest_batch_status(
         batch = get_ingest_batch(conn, batch_id)
         if not batch:
             raise HTTPException(status_code=404, detail="Batch not found")
+        if batch["kind"] == "claim_photo_sync":
+            from app.db import get_ingest_batch_claim_context
+            from app.report_writer.queries import get_claim
+
+            ctx = get_ingest_batch_claim_context(conn, batch_id)
+            if not ctx or not get_claim(conn, ctx["claim_id"], user_id):
+                raise HTTPException(status_code=404, detail="Batch not found")
         errors = get_ingest_batch_errors(conn, batch_id)
         return IngestBatchStatusResponse(
             batch_id=batch["id"],

@@ -1,64 +1,23 @@
-"""Graph node: vision analysis for claim photos (Phase 2)."""
+"""Graph node: load cached vision analyses for claim photos."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
 
-from app.config import OPENAI_API_KEY, LLM_OPENAI_MODEL
+from app.config import OPENAI_API_KEY
 from app.db import get_valid_conn
-from app.http_client import get_async_client
 from app.report_writer.deps import get_report_writer_deps
 from app.report_writer.queries import list_claim_images, update_image_vision_analysis
 from app.report_writer.state import ReportWriterState
-
-
-async def _analyze_with_openai(image_bytes: bytes, content_type: str) -> dict:
-    b64 = base64.standard_b64encode(image_bytes).decode("ascii")
-    mime = content_type or "image/jpeg"
-    client = get_async_client()
-    resp = await client.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": LLM_OPENAI_MODEL,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Describe storm-related damage visible in this inspection photo. "
-                                "List observable conditions only; note if unclear."
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
-                        },
-                    ],
-                }
-            ],
-            "max_tokens": 400,
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    choice = (data.get("choices") or [None])[0]
-    msg = (choice.get("message") if choice else None) or {}
-    text = (msg.get("content") or "").strip()
-    return {"caption": text, "observations": text, "model": LLM_OPENAI_MODEL}
+from app.report_writer.storage import read_claim_image_bytes
+from app.report_writer.vision import analyze_image_bytes
 
 
 async def analyze_images(state: ReportWriterState) -> dict:
-    """Load claim images from storage and populate image_analyses in state."""
-    if not OPENAI_API_KEY:
-        return {}
+    """
+    Populate image_analyses from DB cache. Only analyze uncached manual uploads inline;
+    Drive-backed photos are analyzed by the background worker before generate.
+    """
     deps = get_report_writer_deps()
     claim_id = state["claim_id"]
     user_id = state["user_id"]
@@ -75,23 +34,34 @@ async def analyze_images(state: ReportWriterState) -> dict:
     if not images:
         return {"image_analyses": state.get("image_analyses") or []}
 
-    from app.report_writer.storage import read_claim_image_bytes
-
     analyses: list[dict] = []
+    pending_count = 0
+
     for img in images:
         existing = img.get("vision_analysis")
         if existing:
             analyses.append(
                 {
                     "image_id": img["image_id"],
+                    "filename": img.get("filename", ""),
                     "caption": existing.get("caption", ""),
                     "observations": existing.get("observations", ""),
                 }
             )
             continue
+
+        status = img.get("analysis_status") or "pending"
+        if img.get("drive_file_id"):
+            pending_count += 1
+            continue
+
+        if not OPENAI_API_KEY or not img.get("storage_path"):
+            pending_count += 1
+            continue
+
         try:
             data = read_claim_image_bytes(img["storage_path"])
-            result = await _analyze_with_openai(data, img.get("content_type") or "image/jpeg")
+            result = await analyze_image_bytes(data, img.get("content_type") or "image/jpeg")
             result["image_id"] = img["image_id"]
 
             def _save(conn):
@@ -105,11 +75,15 @@ async def analyze_images(state: ReportWriterState) -> dict:
             analyses.append(
                 {
                     "image_id": img["image_id"],
+                    "filename": img.get("filename", ""),
                     "caption": result.get("caption", ""),
                     "observations": result.get("observations", ""),
                 }
             )
         except Exception:
-            continue
+            pending_count += 1
 
-    return {"image_analyses": analyses}
+    out: dict = {"image_analyses": analyses}
+    if pending_count:
+        out["photo_analysis_pending"] = pending_count
+    return out
