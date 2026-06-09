@@ -338,14 +338,6 @@ def create_db(conn: PgConnection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_report_claim_images_claim "
             "ON report_claim_images(claim_id, sort_order);"
         )
-        cur.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_report_claim_images_drive_unique "
-            "ON report_claim_images(claim_id, drive_file_id) WHERE drive_file_id IS NOT NULL;"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_report_claim_images_analysis "
-            "ON report_claim_images(claim_id, analysis_status);"
-        )
         cur.execute("""
             DO $$
             BEGIN
@@ -383,6 +375,10 @@ def create_db(conn: PgConnection) -> None:
         cur.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_report_claim_images_drive_unique "
             "ON report_claim_images(claim_id, drive_file_id) WHERE drive_file_id IS NOT NULL;"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_report_claim_images_analysis "
+            "ON report_claim_images(claim_id, analysis_status);"
         )
         cur.execute("ALTER TABLE report_claims ENABLE ROW LEVEL SECURITY;")
         cur.execute("ALTER TABLE report_generation_runs ENABLE ROW LEVEL SECURITY;")
