@@ -10,6 +10,7 @@ export const CUSTOM_STORM_VALUE = '__custom__'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
+  boxSizing: 'border-box',
   padding: 8,
   borderRadius: 6,
   border: '1px solid #d0d7de',

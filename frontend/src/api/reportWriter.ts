@@ -1,4 +1,4 @@
-import { apiFetch, apiOrigin, getAuthFetchInit, readErrorDetail } from '../lib/api'
+import { apiFetch, apiFetchRetry, apiOrigin, getAuthFetchInit, readErrorDetail } from '../lib/api'
 import type {
   Claim,
   ClaimCreatePayload,
@@ -92,7 +92,7 @@ export async function uploadClaimImage(claimId: string, file: File): Promise<Rep
 }
 
 export async function listClaimImages(claimId: string): Promise<ReportWriterImage[]> {
-  const res = await apiFetch(`${BASE}/claims/${claimId}/images`)
+  const res = await apiFetchRetry(`${BASE}/claims/${claimId}/images`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   const data = (await res.json()) as { images: ReportWriterImage[] }
   return data.images
@@ -110,10 +110,14 @@ export async function matchDrivePhotoFolder(address: string) {
 }
 
 export async function syncClaimPhotosFromDrive(claimId: string, folderId?: string) {
-  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/sync-drive`, {
-    method: 'POST',
-    body: JSON.stringify(folderId ? { folder_id: folderId } : {}),
-  })
+  const res = await apiFetchRetry(
+    `${BASE}/claims/${claimId}/photos/sync-drive`,
+    {
+      method: 'POST',
+      body: JSON.stringify(folderId ? { folder_id: folderId } : {}),
+    },
+    { retries: 4, baseDelayMs: 1500 },
+  )
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<{
     batch_id: string | null
@@ -124,13 +128,13 @@ export async function syncClaimPhotosFromDrive(claimId: string, folderId?: strin
 }
 
 export async function getClaimPhotoBatchStatus(claimId: string, batchId: string) {
-  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/batch/${batchId}`)
+  const res = await apiFetchRetry(`${BASE}/claims/${claimId}/photos/batch/${batchId}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<import('../types').IngestBatchStatusResponse>
 }
 
 export async function getPhotoAnalysisCounts(claimId: string) {
-  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/analysis-counts`)
+  const res = await apiFetchRetry(`${BASE}/claims/${claimId}/photos/analysis-counts`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<import('../types').PhotoAnalysisCounts>
 }
