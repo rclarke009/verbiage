@@ -15,6 +15,7 @@ import {
 } from '../../api/reportWriter'
 import type { Claim } from '../../types'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
+import { useClaimWeather } from '../../hooks/useClaimWeather'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
@@ -78,6 +79,19 @@ export function ReportWriterTab() {
     },
     [claimQuery.data],
   )
+
+  const weather = useClaimWeather({
+    claimId: activeId,
+    address: draft.property_metadata?.address ?? '',
+    stormDate: draft.property_metadata?.storm_date ?? '',
+    stormDateIso: draft.property_metadata?.storm_date_iso ?? '',
+    metadata: draft.property_metadata ?? {},
+    onMetadataPatch: patch =>
+      updateDraft(prev => ({
+        ...prev,
+        property_metadata: { ...prev.property_metadata, ...patch },
+      })),
+  })
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -288,6 +302,9 @@ export function ReportWriterTab() {
                   photoSyncing={photoSync.syncing}
                   photoSyncError={photoSync.syncError}
                   photoCounts={photoSync.counts}
+                  weatherLoading={weather.loading}
+                  weatherError={weather.error}
+                  onRefreshWeather={weather.refresh}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
                 <DraftEditor

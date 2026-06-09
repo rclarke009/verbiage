@@ -28,6 +28,9 @@ export function ClaimForm({
   photoSyncing,
   photoSyncError,
   photoCounts,
+  weatherLoading,
+  weatherError,
+  onRefreshWeather,
 }: {
   claim: Claim
   claimId: string
@@ -38,6 +41,9 @@ export function ClaimForm({
   photoSyncing: boolean
   photoSyncError: string | null
   photoCounts?: PhotoAnalysisCounts | null
+  weatherLoading?: boolean
+  weatherError?: string | null
+  onRefreshWeather?: () => void
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
@@ -191,6 +197,73 @@ export function ClaimForm({
           ) : (
             <div />
           )}
+        </div>
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 6,
+            background: '#f6f8fa',
+            border: '1px solid #d0d7de',
+            fontSize: 13,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600 }}>Historical wind (Visual Crossing)</span>
+            {onRefreshWeather ? (
+              <button
+                type="button"
+                onClick={onRefreshWeather}
+                disabled={weatherLoading || typeLocked}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  border: '1px solid #d0d7de',
+                  background: '#fff',
+                  cursor: weatherLoading || typeLocked ? 'not-allowed' : 'pointer',
+                  fontSize: 12,
+                }}
+              >
+                {weatherLoading ? 'Fetching…' : 'Refresh weather'}
+              </button>
+            ) : null}
+          </div>
+          {weatherLoading ? (
+            <p style={{ margin: '8px 0 0', color: '#57606a' }}>Loading wind speeds for this address and date…</p>
+          ) : meta.wind_speed_mph || meta.wind_gust_mph ? (
+            <div style={{ marginTop: 8, color: '#24292f' }}>
+              {meta.wind_speed_mph ? (
+                <p style={{ margin: '0 0 4px' }}>
+                  Sustained wind: <strong>{meta.wind_speed_mph} mph</strong>
+                </p>
+              ) : null}
+              {meta.wind_gust_mph ? (
+                <p style={{ margin: '0 0 4px' }}>
+                  Wind gusts: <strong>{meta.wind_gust_mph} mph</strong>
+                </p>
+              ) : null}
+              {meta.weather_stations ? (
+                <p style={{ margin: '0 0 4px', color: '#57606a' }}>Stations: {meta.weather_stations}</p>
+              ) : null}
+              {meta.weather_resolved_address ? (
+                <p style={{ margin: '0 0 4px', color: '#57606a' }}>
+                  Resolved: {meta.weather_resolved_address}
+                </p>
+              ) : null}
+              {meta.weather_fetched_at ? (
+                <p style={{ margin: 0, fontSize: 12, color: '#57606a' }}>
+                  Fetched {new Date(meta.weather_fetched_at).toLocaleString()}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p style={{ margin: '8px 0 0', color: '#57606a' }}>
+              Enter address and storm date to auto-fetch wind speeds for the weather section.
+            </p>
+          )}
+          {weatherError ? (
+            <p style={{ margin: '8px 0 0', color: '#cf222e', fontSize: 12 }}>{weatherError}</p>
+          ) : null}
         </div>
         <StormPicker
           stormId={meta.storm_id}

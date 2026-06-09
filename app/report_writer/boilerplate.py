@@ -48,6 +48,10 @@ def weather_text(meta: dict) -> str:
     storm_date = (meta.get("storm_date") or meta.get("landfall_display") or "").strip()
     category = (meta.get("storm_category") or "").strip()
     region = (meta.get("landfall_region") or "").strip()
+    wind_speed = (meta.get("wind_speed_mph") or "").strip()
+    wind_gust = (meta.get("wind_gust_mph") or "").strip()
+    stations = (meta.get("weather_stations") or "").strip()
+
     parts = [f"The home was directly in the path of {storm}."]
     if storm_date:
         parts.append(f"The event occurred on {storm_date}.")
@@ -55,10 +59,31 @@ def weather_text(meta: dict) -> str:
         parts.append(f"The storm was classified as {category}.")
     if region:
         parts.append(f"Landfall region: {region}.")
-    parts.append(
-        "It is reasonable to assume that wind and gust speeds in the immediate area "
-        "met or exceeded regional weather station readings for this event."
-    )
+
+    if wind_speed or wind_gust:
+        date_for_speeds = storm_date or (meta.get("weather_date_iso") or "").strip()
+        speed_parts: list[str] = []
+        if wind_speed and wind_gust:
+            speed_parts.append(
+                f"On {date_for_speeds}, sustained winds reached {wind_speed} mph "
+                f"with gusts to {wind_gust} mph."
+            )
+        elif wind_speed:
+            speed_parts.append(
+                f"On {date_for_speeds}, sustained winds reached {wind_speed} mph."
+            )
+        elif wind_gust:
+            speed_parts.append(f"On {date_for_speeds}, wind gusts reached {wind_gust} mph.")
+        if stations:
+            speed_parts.append(
+                f"Data from weather stations {stations} near the property."
+            )
+        parts.append(" ".join(speed_parts))
+    else:
+        parts.append(
+            "It is reasonable to assume that wind and gust speeds in the immediate area "
+            "met or exceeded regional weather station readings for this event."
+        )
     return " ".join(parts)
 
 

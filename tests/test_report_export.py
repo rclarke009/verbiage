@@ -67,6 +67,19 @@ def test_storm_placeholders_in_boilerplate(sample_claim: dict) -> None:
     assert "Cat 4" in weather
 
 
+def test_weather_boilerplate_includes_mph_when_metadata_present(sample_claim: dict) -> None:
+    meta = {
+        **sample_claim["property_metadata"],
+        "wind_speed_mph": "58",
+        "wind_gust_mph": "72",
+        "weather_stations": "KRSW",
+    }
+    weather = weather_text(meta)
+    assert "58 mph" in weather
+    assert "72 mph" in weather
+    assert "KRSW" in weather
+
+
 def test_build_report_document(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
     doc = build_report_document(sample_claim, sample_sections, images=[])
     assert doc.client_name == "Huseman"
