@@ -11,12 +11,16 @@ export function PhotoAnalysisBanner({
   counts,
   batchStatus,
   syncing,
+  pollReconnecting,
+  pollError,
 }: {
   hasFolder: boolean
   hasAddress: boolean
   counts: PhotoAnalysisCounts | null
   batchStatus: IngestBatchStatusResponse | null
   syncing: boolean
+  pollReconnecting?: boolean
+  pollError?: string | null
 }) {
   if (!hasAddress && !hasFolder && !counts?.total) {
     return (
@@ -35,8 +39,27 @@ export function PhotoAnalysisBanner({
     )
   }
 
+  if (pollError) {
+    return (
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 6,
+          background: '#fff8c5',
+          borderLeft: '4px solid #9a6700',
+          fontSize: 13,
+          marginBottom: 12,
+        }}
+      >
+        Photo status check stopped: {pollError}. Refresh the page or click Confirm &amp; start analysis
+        again.
+      </div>
+    )
+  }
+
   const inFlight =
     syncing ||
+    pollReconnecting ||
     batchStatus?.status === 'pending' ||
     batchStatus?.status === 'running' ||
     (counts?.pending ?? 0) > 0 ||
@@ -65,7 +88,9 @@ export function PhotoAnalysisBanner({
           marginBottom: 12,
         }}
       >
-        Analyzing photos… {progress}. You can keep editing field notes.
+        Analyzing photos… {progress}.
+        {pollReconnecting ? ' Server reconnecting — progress will resume shortly.' : ''} You can keep
+        editing field notes.
       </div>
     )
   }

@@ -6,9 +6,33 @@ import {
   getPhotoAnalysisCounts,
   syncClaimPhotosFromDrive,
 } from '../api/reportWriter'
+import { isTransientHttpStatus } from '../lib/api'
 import type { IngestBatchStatusResponse, PhotoAnalysisCounts } from '../types'
 
 const POLL_MS = 2500
+
+function isTransientPollError(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    // fetch network failure (offline, CORS blip, connection reset)
+    return true
+  }
+  if (!(err instanceof Error)) return false
+  const msg = err.message.toLowerCase()
+  return (
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('504') ||
+    msg.includes('service unavailable') ||
+    msg.includes('bad gateway') ||
+    msg.includes('gateway timeout') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('network')
+  )
+}
+
+function isTransientStatusResponse(status: number): boolean {
+  return isTransientHttpStatus(status)
+}
 
 export function useClaimPhotoSync(claimId: string | null) {
   const queryClient = useQueryClient()
@@ -17,6 +41,8 @@ export function useClaimPhotoSync(claimId: string | null) {
   const [counts, setCounts] = useState<PhotoAnalysisCounts | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [pollReconnecting, setPollReconnecting] = useState(false)
+  const [pollError, setPollError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const refreshCounts = useCallback(async () => {
@@ -25,7 +51,7 @@ export function useClaimPhotoSync(claimId: string | null) {
       const c = await getPhotoAnalysisCounts(claimId)
       setCounts(c)
     } catch {
-      /* ignore */
+      /* counts refresh is best-effort during poll blips */
     }
   }, [claimId])
 
@@ -43,18 +69,34 @@ export function useClaimPhotoSync(claimId: string | null) {
   const startPoll = useCallback(
     (id: string) => {
       stopPoll()
+      setPollError(null)
+      setPollReconnecting(false)
+
       const tick = async () => {
         if (!claimId) return
         try {
           const status = await getClaimPhotoBatchStatus(claimId, id)
           setBatchStatus(status)
+          setPollReconnecting(false)
+          setPollError(null)
           await refreshCounts()
           queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
           if (status.status === 'completed' || status.status === 'failed') {
             stopPoll()
           }
-        } catch {
+        } catch (err) {
+          if (isTransientPollError(err)) {
+            setPollReconnecting(true)
+            return
+          }
+          const status = (err as { status?: number }).status
+          if (typeof status === 'number' && isTransientStatusResponse(status)) {
+            setPollReconnecting(true)
+            return
+          }
           stopPoll()
+          setPollReconnecting(false)
+          setPollError(err instanceof Error ? err.message : 'Photo status check failed')
         }
       }
       void tick()
@@ -70,6 +112,7 @@ export function useClaimPhotoSync(claimId: string | null) {
       if (!claimId) return
       setSyncing(true)
       setSyncError(null)
+      setPollError(null)
       try {
         const res = await syncClaimPhotosFromDrive(claimId, folderId)
         await refreshCounts()
@@ -93,6 +136,8 @@ export function useClaimPhotoSync(claimId: string | null) {
     counts,
     syncing,
     syncError,
+    pollReconnecting,
+    pollError,
     startSync,
     refreshCounts,
   }

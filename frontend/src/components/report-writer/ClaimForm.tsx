@@ -5,6 +5,7 @@ import { StormPicker } from './StormPicker'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
+  boxSizing: 'border-box',
   padding: 8,
   borderRadius: 6,
   border: '1px solid #d0d7de',
@@ -72,7 +73,7 @@ export function ClaimForm({
         <p style={{ margin: '0 0 10px', fontSize: 13, color: '#57606a' }}>
           Start here. We use the address to find the job&apos;s photo folder in Google Drive.
         </p>
-        <label style={{ fontSize: 13 }}>
+        <label style={{ fontSize: 13, display: 'block' }}>
           <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Address</span>
           <input
             value={meta.address ?? ''}

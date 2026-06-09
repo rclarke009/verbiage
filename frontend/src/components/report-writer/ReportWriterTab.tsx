@@ -270,12 +270,14 @@ export function ReportWriterTab() {
               counts={photoSync.counts}
               batchStatus={photoSync.batchStatus}
               syncing={photoSync.syncing}
+              pollReconnecting={photoSync.pollReconnecting}
+              pollError={photoSync.pollError}
             />
 
             <GenerationProgress state={genState} />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 20 }}>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <ClaimForm
                   claim={draft}
                   claimId={activeId}

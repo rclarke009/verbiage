@@ -50,7 +50,12 @@ export async function apiFetch(
   return fetch(url, { ...rest, headers })
 }
 
-const RETRYABLE_STATUSES = new Set([502, 503, 504])
+export const RETRYABLE_HTTP_STATUSES = new Set([502, 503, 504])
+
+/** True for gateway/upstream blips where a later attempt usually succeeds. */
+export function isTransientHttpStatus(status: number): boolean {
+  return RETRYABLE_HTTP_STATUSES.has(status)
+}
 
 /**
  * apiFetch with retry/backoff for transient upstream failures (502/503/504) and
@@ -70,7 +75,7 @@ export async function apiFetchRetry(
     const isLast = attempt === retries - 1
     try {
       const res = await apiFetch(path, init)
-      if (res.ok || !RETRYABLE_STATUSES.has(res.status) || isLast) {
+      if (res.ok || !isTransientHttpStatus(res.status) || isLast) {
         return res
       }
     } catch (e) {
