@@ -4,18 +4,18 @@ export function GenerationProgress({ state }: { state: GenerationState }) {
   if (state.status === 'idle') return null
   const color =
     state.status === 'error'
-      ? '#cf222e'
+      ? 'var(--app-danger)'
       : state.status === 'refused'
-        ? '#bf8700'
+        ? 'var(--app-warning)'
         : state.status === 'running'
-          ? '#0969da'
-          : '#1a7f37'
+          ? 'var(--app-primary)'
+          : 'var(--app-success)'
   return (
     <div
       style={{
         padding: '8px 12px',
         borderRadius: 6,
-        background: '#f6f8fa',
+        background: 'var(--app-surface)',
         fontSize: 13,
         marginBottom: 12,
         borderLeft: `4px solid ${color}`,

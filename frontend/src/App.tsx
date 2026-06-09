@@ -5,10 +5,12 @@ import { LoginPanel } from './components/auth/LoginPanel'
 import { ChatTab } from './components/chat/ChatTab'
 import { DocumentsTab } from './components/documents/DocumentsTab'
 import { DriveTab } from './components/drive/DriveTab'
+import { PreferencesTab } from './components/preferences/PreferencesTab'
 import { ReportWriterTab } from './components/report-writer/ReportWriterTab'
 import { VisionTab } from './components/vision/VisionTab'
 import { TabBar } from './components/layout/TabBar'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 
 const queryClient = new QueryClient()
 
@@ -26,6 +28,7 @@ function AppInner() {
       { id: 'drive', label: 'Google Drive' },
     ]
     if (FEATURE_VISION) base.push({ id: 'vision', label: 'Photo analysis (preview)' })
+    base.push({ id: 'preferences', label: 'Preferences' })
     return base
   }, [])
 
@@ -33,10 +36,10 @@ function AppInner() {
     return (
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
         <header style={{ marginBottom: 24 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 650, margin: '0 0 6px', color: '#0969da' }}>
+          <h1 style={{ fontSize: 24, fontWeight: 650, margin: '0 0 6px', color: 'var(--app-primary)' }}>
             TrueAI
           </h1>
-          <p style={{ margin: 0, color: '#57606a', fontSize: 14 }}>Document RAG workspace — sign in to continue.</p>
+          <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 14 }}>Document RAG workspace — sign in to continue.</p>
         </header>
         <LoginPanel />
       </div>
@@ -47,11 +50,11 @@ function AppInner() {
     return (
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
         <header style={{ marginBottom: 24 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 650, margin: '0 0 6px', color: '#0969da' }}>
+          <h1 style={{ fontSize: 24, fontWeight: 650, margin: '0 0 6px', color: 'var(--app-primary)' }}>
             Set a new password
           </h1>
-          <p style={{ margin: 0, color: '#57606a', fontSize: 14 }}>
-            Signed in as <span style={{ color: '#24292f' }}>{session.user.email}</span>. Choose a new password to
+          <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 14 }}>
+            Signed in as <span style={{ color: 'var(--app-text)' }}>{session.user.email}</span>. Choose a new password to
             finish resetting your account.
           </p>
         </header>
@@ -73,8 +76,8 @@ function AppInner() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0969da', margin: '0 0 6px 0' }}>TrueAI</h1>
-          <p style={{ margin: 0, color: '#57606a', fontSize: 13 }}>RAG on the shared report library</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--app-primary)', margin: '0 0 6px 0' }}>TrueAI</h1>
+          <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 13 }}>RAG on the shared report library</p>
         </div>
         <LoginPanel />
       </header>
@@ -86,16 +89,19 @@ function AppInner() {
       {activeTab === 'documents' && <DocumentsTab />}
       {activeTab === 'drive' && <DriveTab />}
       {FEATURE_VISION && activeTab === 'vision' && <VisionTab />}
+      {activeTab === 'preferences' && <PreferencesTab />}
     </div>
   )
 }
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppInner />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <AppInner />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }

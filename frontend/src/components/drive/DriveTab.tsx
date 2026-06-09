@@ -42,12 +42,12 @@ function looksLikeAuthError(message: string): boolean {
 const detailsStyle: CSSProperties = {
   marginBottom: 14,
   fontSize: 13,
-  color: '#24292f',
+  color: 'var(--app-text)',
 }
 
 const detailsSummaryStyle: CSSProperties = {
   cursor: 'pointer',
-  color: '#0969da',
+  color: 'var(--app-primary)',
   fontWeight: 600,
   userSelect: 'none',
 }
@@ -56,15 +56,15 @@ const detailsBodyStyle: CSSProperties = {
   marginTop: 10,
   paddingLeft: 4,
   lineHeight: 1.6,
-  color: '#57606a',
+  color: 'var(--app-text-muted)',
 }
 
 function IndexStatusBadge({ file }: { file: DriveFileMeta }) {
   const status = file.index_status ?? 'not_indexed'
   const styles: Record<string, CSSProperties> = {
-    not_indexed: { background: '#f6f8fa', color: '#57606a', border: '1px solid #d0d7de' },
-    indexed: { background: '#dafbe1', color: '#1a7f37', border: '1px solid #aceebb' },
-    stale: { background: '#fff8c5', color: '#9a6700', border: '1px solid #fae17d' },
+    not_indexed: { background: 'var(--app-surface)', color: 'var(--app-text-muted)', border: '1px solid var(--app-border)' },
+    indexed: { background: 'var(--app-success-bg)', color: 'var(--app-success)', border: '1px solid var(--app-success-border)' },
+    stale: { background: 'var(--app-warning-bg)', color: 'var(--app-warning)', border: '1px solid var(--app-warning-border)' },
   }
   const labels: Record<string, string> = {
     not_indexed: 'Not indexed',
@@ -290,9 +290,9 @@ export function DriveTab() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, color: '#0969da', fontSize: 18 }}>Google Drive</h2>
+      <h2 style={{ marginTop: 0, color: 'var(--app-primary)', fontSize: 18 }}>Google Drive</h2>
 
-      <p style={{ fontSize: 13, color: '#57606a', lineHeight: 1.6, marginBottom: 14 }}>
+      <p style={{ fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
         List and ingest completed reports from Google Drive into the document repository.
       </p>
 
@@ -305,16 +305,16 @@ export function DriveTab() {
         }}
         style={{
           fontSize: 13,
-          color: '#24292f',
+          color: 'var(--app-text)',
           marginBottom: 16,
           padding: '12px 16px',
-          background: '#f6f8fa',
-          border: '1px solid #d0d7de',
+          background: 'var(--app-surface)',
+          border: '1px solid var(--app-border)',
           borderRadius: 8,
           lineHeight: 1.5,
         }}
       >
-        <summary style={{ ...detailsSummaryStyle, color: '#24292f' }}>
+        <summary style={{ ...detailsSummaryStyle, color: 'var(--app-text)' }}>
           How to ingest your files
         </summary>
         <ol style={{ margin: '10px 0 0', paddingLeft: 20 }}>
@@ -328,7 +328,7 @@ export function DriveTab() {
                   href={driveFolderUrl(effectiveFolderId)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#0969da', fontWeight: 600 }}
+                  style={{ color: 'var(--app-primary)', fontWeight: 600 }}
                 >
                   open in Drive
                 </a>
@@ -351,13 +351,13 @@ export function DriveTab() {
       </details>
 
       {teamInboxId ? (
-        <p style={{ fontSize: 13, color: '#24292f', lineHeight: 1.6, marginBottom: 14 }}>
+        <p style={{ fontSize: 13, color: 'var(--app-text)', lineHeight: 1.6, marginBottom: 14 }}>
           Our default folder for ingesting completed reports into the repository is{' '}
           <a
             href={driveFolderUrl(teamInboxId)}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#0969da', fontWeight: 600 }}
+            style={{ color: 'var(--app-primary)', fontWeight: 600 }}
           >
             {defaultFolderLinkText}
           </a>
@@ -368,9 +368,9 @@ export function DriveTab() {
         <div
           style={{
             ...banner,
-            background: '#fff8c5',
-            color: '#9a6700',
-            border: '1px solid #fae17d',
+            background: 'var(--app-warning-bg)',
+            color: 'var(--app-warning)',
+            border: '1px solid var(--app-warning-border)',
           }}
         >
           No team ingest folder is configured. An administrator must set{' '}
@@ -382,11 +382,11 @@ export function DriveTab() {
         <div
           style={{
             fontSize: 13,
-            color: '#24292f',
+            color: 'var(--app-text)',
             marginBottom: 12,
             padding: '10px 12px',
-            background: '#f6f8fa',
-            border: '1px solid #d0d7de',
+            background: 'var(--app-surface)',
+            border: '1px solid var(--app-border)',
             borderRadius: 6,
             lineHeight: 1.5,
           }}
@@ -394,7 +394,7 @@ export function DriveTab() {
           <strong>Folder:</strong>{' '}
           {folderLoading && !folderContext ? 'Loading…' : folderDisplayPath}
           {' · '}
-          <span style={{ color: '#57606a', fontStyle: 'italic' }}>
+          <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>
             {folderIsDefault ? 'Team inbox (default)' : 'Custom folder'}
           </span>
         </div>
@@ -406,7 +406,7 @@ export function DriveTab() {
             href={driveFolderUrl(effectiveFolderId)}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ fontSize: 12, color: '#0969da' }}
+            style={{ fontSize: 12, color: 'var(--app-primary)' }}
           >
             Open in Drive
           </a>
@@ -439,18 +439,18 @@ export function DriveTab() {
       </div>
 
       {!canIngestQuick && (
-        <p style={{ fontSize: 12, color: '#57606a', marginBottom: 12 }}>
+        <p style={{ fontSize: 12, color: 'var(--app-text-muted)', marginBottom: 12 }}>
           Select files below, or open <em>Use a different folder</em> to browse another location.
         </p>
       )}
 
       {msg && (
-        <div style={{ ...banner, background: '#dafbe1', color: '#1a7f37' }}>
+        <div style={{ ...banner, background: 'var(--app-success-bg)', color: 'var(--app-success)' }}>
           {msg}
         </div>
       )}
       {err && (
-        <div style={{ ...banner, background: '#FFEBEE', color: '#cf222e' }}>
+        <div style={{ ...banner, background: 'var(--app-danger-bg)', color: 'var(--app-danger)' }}>
           {err}
         </div>
       )}
@@ -470,7 +470,7 @@ export function DriveTab() {
           <button type="button" onClick={deselectAll} style={btnSecondary}>
             Deselect all
           </button>
-          <span style={{ fontSize: 12, color: '#57606a', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 12, color: 'var(--app-text-muted)', marginLeft: 'auto' }}>
             {selected.size} of {files.length} selected
           </span>
         </div>
@@ -482,7 +482,7 @@ export function DriveTab() {
             marginTop: 8,
             maxHeight: 360,
             overflow: 'auto',
-            border: '1px solid #d0d7de',
+            border: '1px solid var(--app-border)',
             borderRadius: 8,
           }}
         >
@@ -496,7 +496,7 @@ export function DriveTab() {
                   alignItems: 'center',
                   gap: 10,
                   padding: '8px 12px',
-                  borderBottom: '1px solid #f0f0f0',
+                  borderBottom: '1px solid var(--app-border)',
                   fontSize: 13,
                   opacity: isIndexed ? 0.75 : 1,
                 }}
@@ -509,7 +509,7 @@ export function DriveTab() {
                       style={{
                         marginLeft: 8,
                         fontSize: 11,
-                        color: '#57606a',
+                        color: 'var(--app-text-muted)',
                         fontWeight: 600,
                       }}
                     >
@@ -527,7 +527,7 @@ export function DriveTab() {
       <details style={detailsStyle} open={!teamInboxId}>
         <summary style={detailsSummaryStyle}>Use a different folder</summary>
         <div style={detailsBodyStyle}>
-          <label style={{ fontSize: 13, color: '#24292f', display: 'block', marginBottom: 8 }}>
+          <label style={{ fontSize: 13, color: 'var(--app-text)', display: 'block', marginBottom: 8 }}>
             Folder link or ID
             <input
               value={folderInput}
@@ -545,7 +545,7 @@ export function DriveTab() {
             />
           </label>
           {folderParseError && (
-            <p style={{ fontSize: 12, color: '#cf222e', marginTop: -4, marginBottom: 12 }}>
+            <p style={{ fontSize: 12, color: 'var(--app-danger)', marginTop: -4, marginBottom: 12 }}>
               {folderParseError}
             </p>
           )}
@@ -592,8 +592,8 @@ export function DriveTab() {
 }
 
 const btnPrimary: CSSProperties = {
-  background: '#0969da',
-  color: '#fff',
+  background: 'var(--app-primary)',
+  color: 'var(--app-on-primary)',
   border: 'none',
   borderRadius: 6,
   padding: '8px 16px',
@@ -604,9 +604,9 @@ const btnPrimary: CSSProperties = {
 
 const btnSecondary: CSSProperties = {
   ...btnPrimary,
-  background: '#f6f8fa',
-  color: '#24292f',
-  border: '1px solid #d0d7de',
+  background: 'var(--app-surface)',
+  color: 'var(--app-text)',
+  border: '1px solid var(--app-border)',
 }
 
 const inputStyle: CSSProperties = {
@@ -616,7 +616,7 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box',
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #d0d7de',
+  border: '1px solid var(--app-border)',
   fontSize: 13,
 }
 

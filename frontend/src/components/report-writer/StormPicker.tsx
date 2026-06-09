@@ -13,7 +13,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
   padding: 8,
   borderRadius: 6,
-  border: '1px solid #d0d7de',
+  border: '1px solid var(--app-border)',
 }
 
 export type StormPickerSelection =
@@ -88,9 +88,9 @@ export function StormPicker({
             fontSize: 12,
             padding: '8px 10px',
             borderRadius: 6,
-            background: '#f6f8fa',
-            border: '1px solid #d0d7de',
-            color: '#24292f',
+            background: 'var(--app-surface)',
+            border: '1px solid var(--app-border)',
+            color: 'var(--app-text)',
             lineHeight: 1.5,
           }}
         >

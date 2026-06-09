@@ -1,6 +1,18 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function () {
+        var key = 'trueai-theme-preference'
+        var theme = 'system'
+        try {
+          var stored = localStorage.getItem(key)
+          if (stored === 'light' || stored === 'dark' || stored === 'system') theme = stored
+        } catch (_) {}
+        document.documentElement.setAttribute('data-theme', theme)
+        if (theme !== 'system') document.documentElement.style.colorScheme = theme
+      })()
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

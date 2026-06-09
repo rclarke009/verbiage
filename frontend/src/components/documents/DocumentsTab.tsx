@@ -49,7 +49,7 @@ export function DocumentsTab() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, color: '#0969da', fontSize: 18 }}>
+      <h2 style={{ marginTop: 0, color: 'var(--app-primary)', fontSize: 18 }}>
         Document index
       </h2>
 
@@ -69,7 +69,7 @@ export function DocumentsTab() {
           width: '100%',
           boxSizing: 'border-box',
           marginBottom: 12,
-          border: '1px solid #d0d7de',
+          border: '1px solid var(--app-border)',
           borderRadius: 6,
           padding: '7px 12px',
           fontSize: 13,
@@ -77,7 +77,7 @@ export function DocumentsTab() {
       />
 
       {docsLoading ? (
-        <p style={{ color: '#888', fontSize: 13 }}>Loading…</p>
+        <p style={{ color: 'var(--app-text-subtle)', fontSize: 13 }}>Loading…</p>
       ) : (
         <DocumentTable
           documents={filtered}

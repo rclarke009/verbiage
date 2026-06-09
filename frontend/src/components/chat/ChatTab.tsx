@@ -14,7 +14,7 @@ export function ChatTab() {
         <ChatInput onSubmit={search} disabled={searching} />
 
         {results.length === 0 ? (
-          <div style={{ color: '#888', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
+          <div style={{ color: 'var(--app-text-subtle)', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
             <p>Search past engineering reports for a damage type.</p>
             <p style={{ fontSize: 12 }}>
               Each search is independent and grounded in retrieved passages. Save the text you
@@ -30,7 +30,7 @@ export function ChatTab() {
             </div>
             <button
               onClick={clearResults}
-              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: 12, padding: '4px 0' }}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--app-text-subtle)', cursor: 'pointer', fontSize: 12, padding: '4px 0' }}
             >
               Clear results
             </button>

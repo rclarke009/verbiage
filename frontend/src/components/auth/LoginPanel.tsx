@@ -8,7 +8,7 @@ const inp: React.CSSProperties = {
   marginTop: 4,
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #d0d7de',
+  border: '1px solid var(--app-border)',
   fontSize: 14,
 }
 
@@ -16,7 +16,7 @@ const linkBtn: React.CSSProperties = {
   padding: 0,
   border: 'none',
   background: 'none',
-  color: '#0969da',
+  color: 'var(--app-primary)',
   cursor: 'pointer',
   fontSize: 13,
   textDecoration: 'underline',
@@ -47,7 +47,7 @@ export function LoginPanel() {
   const [forgotSent, setForgotSent] = useState(false)
 
   if (loading) {
-    return <p style={{ color: '#57606a' }}>Connecting…</p>
+    return <p style={{ color: 'var(--app-text-muted)' }}>Connecting…</p>
   }
 
   if (bootErr) {
@@ -55,8 +55,8 @@ export function LoginPanel() {
       <div
         role="alert"
         style={{
-          background: '#FFEBEE',
-          color: '#c62828',
+          background: 'var(--app-danger-bg)',
+          color: 'var(--app-danger)',
           padding: 12,
           borderRadius: 8,
           fontSize: 14,
@@ -94,7 +94,7 @@ export function LoginPanel() {
     return (
       <div style={{ maxWidth: 360 }}>
         <form onSubmit={submitNew} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <label style={{ fontSize: 13, color: '#57606a' }}>
+          <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
             New password
             <input
               type="password"
@@ -106,7 +106,7 @@ export function LoginPanel() {
               style={inp}
             />
           </label>
-          <label style={{ fontSize: 13, color: '#57606a' }}>
+          <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
             Confirm password
             <input
               type="password"
@@ -126,8 +126,8 @@ export function LoginPanel() {
               padding: '10px 14px',
               borderRadius: 6,
               border: 'none',
-              background: '#0969da',
-              color: '#fff',
+              background: 'var(--app-primary)',
+              color: 'var(--app-on-primary)',
               fontWeight: 600,
               cursor: pending ? 'default' : 'pointer',
               opacity: pending ? 0.65 : 1,
@@ -137,7 +137,7 @@ export function LoginPanel() {
           </button>
         </form>
         {formErr && (
-          <div style={{ marginTop: 12, fontSize: 13, color: '#cf222e' }} role="alert">
+          <div style={{ marginTop: 12, fontSize: 13, color: 'var(--app-danger)' }} role="alert">
             {formErr}
           </div>
         )}
@@ -148,15 +148,15 @@ export function LoginPanel() {
   if (session?.user?.email) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <span style={{ color: '#24292f', fontSize: 14 }}>{session.user.email}</span>
+        <span style={{ color: 'var(--app-text)', fontSize: 14 }}>{session.user.email}</span>
         <button
           type="button"
           onClick={() => signOut()}
           style={{
             padding: '6px 12px',
             borderRadius: 6,
-            border: '1px solid #d0d7de',
-            background: '#f6f8fa',
+            border: '1px solid var(--app-border)',
+            background: 'var(--app-surface)',
             cursor: 'pointer',
             fontSize: 13,
           }}
@@ -190,9 +190,9 @@ export function LoginPanel() {
   const tabBtn = (active: boolean): React.CSSProperties => ({
     padding: '8px 14px',
     borderRadius: 6,
-    border: active ? '1px solid #0969da' : '1px solid #d0d7de',
-    background: active ? '#0969da' : '#fff',
-    color: active ? '#fff' : '#24292f',
+    border: active ? '1px solid var(--app-primary)' : '1px solid var(--app-border)',
+    background: active ? 'var(--app-primary)' : 'var(--app-bg)',
+    color: active ? 'var(--app-on-primary)' : 'var(--app-text)',
     cursor: 'pointer',
     fontSize: 13,
     fontWeight: active ? 600 : 400,
@@ -201,14 +201,14 @@ export function LoginPanel() {
   if (mode === 'forgot') {
     return (
       <div style={{ maxWidth: 360 }}>
-        <p style={{ fontSize: 14, color: '#24292f', margin: '0 0 12px 0' }}>Reset your password</p>
+        <p style={{ fontSize: 14, color: 'var(--app-text)', margin: '0 0 12px 0' }}>Reset your password</p>
         {forgotSent ? (
-          <p style={{ fontSize: 14, color: '#57606a', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ fontSize: 14, color: 'var(--app-text-muted)', margin: 0, lineHeight: 1.5 }}>
             If an account exists for that email, we sent a link. Check your inbox and spam folder.
           </p>
         ) : (
           <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label style={{ fontSize: 13, color: '#57606a' }}>
+            <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
               Email
               <input
                 type="email"
@@ -227,8 +227,8 @@ export function LoginPanel() {
                 padding: '10px 14px',
                 borderRadius: 6,
                 border: 'none',
-                background: '#0969da',
-                color: '#fff',
+                background: 'var(--app-primary)',
+                color: 'var(--app-on-primary)',
                 fontWeight: 600,
                 cursor: pending ? 'default' : 'pointer',
                 opacity: pending ? 0.65 : 1,
@@ -252,7 +252,7 @@ export function LoginPanel() {
           </button>
         </p>
         {formErr && (
-          <div style={{ marginTop: 12, fontSize: 13, color: '#cf222e' }} role="alert">
+          <div style={{ marginTop: 12, fontSize: 13, color: 'var(--app-danger)' }} role="alert">
             {formErr}
           </div>
         )}
@@ -285,7 +285,7 @@ export function LoginPanel() {
         </button>
       </div>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <label style={{ fontSize: 13, color: '#57606a' }}>
+        <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
           Email
           <input
             type="email"
@@ -296,7 +296,7 @@ export function LoginPanel() {
             style={inp}
           />
         </label>
-        <label style={{ fontSize: 13, color: '#57606a' }}>
+        <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
           Password
           <input
             type="password"
@@ -309,7 +309,7 @@ export function LoginPanel() {
           />
         </label>
         {mode === 'signup' && inviteEnabled && (
-          <label style={{ fontSize: 13, color: '#57606a' }}>
+          <label style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
             Invite code (required when enabled on server)
             <input
               type="password"
@@ -343,8 +343,8 @@ export function LoginPanel() {
             padding: '10px 14px',
             borderRadius: 6,
             border: 'none',
-            background: '#0969da',
-            color: '#fff',
+            background: 'var(--app-primary)',
+            color: 'var(--app-on-primary)',
             fontWeight: 600,
             cursor: pending ? 'default' : 'pointer',
             opacity: pending ? 0.65 : 1,
@@ -353,14 +353,14 @@ export function LoginPanel() {
           {pending ? '…' : mode === 'signup' ? 'Create account' : 'Sign in'}
         </button>
         {mode === 'signup' && (
-          <p style={{ fontSize: 11, color: '#57606a', margin: '4px 0 0 0', lineHeight: 1.4 }}>
+          <p style={{ fontSize: 11, color: 'var(--app-text-muted)', margin: '4px 0 0 0', lineHeight: 1.4 }}>
             Accounts are gated by invite code or allowlist on this server (
             {publicConfig?.signup_invite_enabled ? 'invite enforced' : 'allowlist unless invite configured'}).
           </p>
         )}
       </form>
       {formErr && (
-        <div style={{ marginTop: 12, fontSize: 13, color: '#cf222e' }} role="alert">
+        <div style={{ marginTop: 12, fontSize: 13, color: 'var(--app-danger)' }} role="alert">
           {formErr}
         </div>
       )}

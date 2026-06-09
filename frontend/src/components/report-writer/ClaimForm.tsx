@@ -8,13 +8,13 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
   padding: 8,
   borderRadius: 6,
-  border: '1px solid #d0d7de',
+  border: '1px solid var(--app-border)',
 }
 
 const stepLegend: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
-  color: '#0969da',
+  color: 'var(--app-primary)',
   padding: '0 4px',
 }
 
@@ -68,7 +68,7 @@ export function ClaimForm({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <fieldset
         style={{
-          border: '2px solid #0969da',
+          border: '2px solid var(--app-primary)',
           borderRadius: 8,
           padding: 14,
           margin: 0,
@@ -76,7 +76,7 @@ export function ClaimForm({
         disabled={typeLocked}
       >
         <legend style={stepLegend}>Step 1 — Property address</legend>
-        <p style={{ margin: '0 0 10px', fontSize: 13, color: '#57606a' }}>
+        <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--app-text-muted)' }}>
           Start here. We use the address to find the job&apos;s photo folder in Google Drive.
         </p>
         <label style={{ fontSize: 13, display: 'block' }}>
@@ -111,14 +111,14 @@ export function ClaimForm({
 
       <fieldset
         style={{
-          border: '1px solid #d0d7de',
+          border: '1px solid var(--app-border)',
           borderRadius: 6,
           padding: 12,
           margin: 0,
         }}
         disabled={typeLocked}
       >
-        <legend style={{ ...stepLegend, color: '#24292f' }}>Step 3 — Report type</legend>
+        <legend style={{ ...stepLegend, color: 'var(--app-text)' }}>Step 3 — Report type</legend>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {reportTypes.map(type => (
             <label
@@ -141,7 +141,7 @@ export function ClaimForm({
               />
               <span>
                 <span style={{ fontWeight: 600 }}>{type.label}</span>
-                <span style={{ display: 'block', color: '#57606a', fontSize: 12, marginTop: 2 }}>
+                <span style={{ display: 'block', color: 'var(--app-text-muted)', fontSize: 12, marginTop: 2 }}>
                   {type.description}
                 </span>
               </span>
@@ -149,32 +149,32 @@ export function ClaimForm({
           ))}
         </div>
         {typeLocked ? (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#57606a' }}>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--app-text-muted)' }}>
             Report type is locked after generation.
           </p>
         ) : null}
         {!meta.report_type ? (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#9a6700' }}>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--app-warning)' }}>
             Select a report type before generating a draft.
           </p>
         ) : null}
       </fieldset>
       {selectedType ? (
-        <p style={{ margin: 0, fontSize: 12, color: '#57606a' }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--app-text-muted)' }}>
           {selectedType.sections.length} sections: {selectedType.sections.map(s => s.label).join(', ')}
         </p>
       ) : null}
 
       <fieldset
         style={{
-          border: '1px solid #d0d7de',
+          border: '1px solid var(--app-border)',
           borderRadius: 6,
           padding: 12,
           margin: 0,
         }}
         disabled={typeLocked}
       >
-        <legend style={{ ...stepLegend, color: '#24292f' }}>Step 4 — Storm &amp; property</legend>
+        <legend style={{ ...stepLegend, color: 'var(--app-text)' }}>Step 4 — Storm &amp; property</legend>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
           <label style={{ fontSize: 13 }}>
             <span style={{ display: 'block', marginBottom: 4 }}>Property type</span>
@@ -203,8 +203,8 @@ export function ClaimForm({
             marginTop: 10,
             padding: 10,
             borderRadius: 6,
-            background: '#f6f8fa',
-            border: '1px solid #d0d7de',
+            background: 'var(--app-surface)',
+            border: '1px solid var(--app-border)',
             fontSize: 13,
           }}
         >
@@ -218,8 +218,8 @@ export function ClaimForm({
                 style={{
                   padding: '4px 10px',
                   borderRadius: 6,
-                  border: '1px solid #d0d7de',
-                  background: '#fff',
+                  border: '1px solid var(--app-border)',
+                  background: 'var(--app-bg)',
                   cursor: weatherLoading || typeLocked ? 'not-allowed' : 'pointer',
                   fontSize: 12,
                 }}
@@ -229,9 +229,9 @@ export function ClaimForm({
             ) : null}
           </div>
           {weatherLoading ? (
-            <p style={{ margin: '8px 0 0', color: '#57606a' }}>Loading wind speeds for this address and date…</p>
+            <p style={{ margin: '8px 0 0', color: 'var(--app-text-muted)' }}>Loading wind speeds for this address and date…</p>
           ) : meta.wind_speed_mph || meta.wind_gust_mph ? (
-            <div style={{ marginTop: 8, color: '#24292f' }}>
+            <div style={{ marginTop: 8, color: 'var(--app-text)' }}>
               {meta.wind_speed_mph ? (
                 <p style={{ margin: '0 0 4px' }}>
                   Sustained wind: <strong>{meta.wind_speed_mph} mph</strong>
@@ -243,26 +243,26 @@ export function ClaimForm({
                 </p>
               ) : null}
               {meta.weather_stations ? (
-                <p style={{ margin: '0 0 4px', color: '#57606a' }}>Stations: {meta.weather_stations}</p>
+                <p style={{ margin: '0 0 4px', color: 'var(--app-text-muted)' }}>Stations: {meta.weather_stations}</p>
               ) : null}
               {meta.weather_resolved_address ? (
-                <p style={{ margin: '0 0 4px', color: '#57606a' }}>
+                <p style={{ margin: '0 0 4px', color: 'var(--app-text-muted)' }}>
                   Resolved: {meta.weather_resolved_address}
                 </p>
               ) : null}
               {meta.weather_fetched_at ? (
-                <p style={{ margin: 0, fontSize: 12, color: '#57606a' }}>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--app-text-muted)' }}>
                   Fetched {new Date(meta.weather_fetched_at).toLocaleString()}
                 </p>
               ) : null}
             </div>
           ) : (
-            <p style={{ margin: '8px 0 0', color: '#57606a' }}>
+            <p style={{ margin: '8px 0 0', color: 'var(--app-text-muted)' }}>
               Enter address and storm date to auto-fetch wind speeds for the weather section.
             </p>
           )}
           {weatherError ? (
-            <p style={{ margin: '8px 0 0', color: '#cf222e', fontSize: 12 }}>{weatherError}</p>
+            <p style={{ margin: '8px 0 0', color: 'var(--app-danger)', fontSize: 12 }}>{weatherError}</p>
           ) : null}
         </div>
         <StormPicker
@@ -293,7 +293,7 @@ export function ClaimForm({
       </fieldset>
 
       <label style={{ fontSize: 13 }}>
-        <span style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#0969da' }}>
+        <span style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: 'var(--app-primary)' }}>
           Step 5 — Field notes
         </span>
         <textarea
