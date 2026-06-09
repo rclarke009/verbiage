@@ -98,5 +98,5 @@ def claim_photo_analysis_counts(conn, claim_id: str, user_id: str) -> dict[str, 
     from app.report_writer.queries import count_claim_image_analysis, get_claim
 
     if not get_claim(conn, claim_id, user_id):
-        return {"total": 0, "pending": 0, "running": 0, "succeeded": 0, "failed": 0}
+        return {"total": 0, "pending": 0, "running": 0, "succeeded": 0, "failed": 0, "with_damage": 0}
     return count_claim_image_analysis(conn, claim_id)

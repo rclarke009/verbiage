@@ -10,7 +10,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from typing import Literal
 
 from google.auth.exceptions import RefreshError
@@ -27,7 +26,8 @@ from app.config import (
 )
 from app.docx_extract import extract_text_from_docx
 from app.pdf_extract import extract_text_from_pdf
-from app.similar_titles import normalize_for_similarity, parse_base_and_version
+from app.address_match import address_folder_similarity, extract_street_line, house_numbers_conflict
+from app.similar_titles import parse_base_and_version
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,8 @@ IMAGE_MIMES: tuple[str, ...] = (
     "image/jpeg",
     "image/png",
     "image/webp",
+    "image/heic",
+    "image/heif",
 )
 
 MAX_DRIVE_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
@@ -355,37 +357,43 @@ def match_folders_by_address(
     jobs_root_id: str,
     *,
     min_score: float = 0.85,
+    min_display_score: float = 0.70,
     limit: int = 5,
 ) -> dict:
     """
     Fuzzy-match address against immediate subfolder names of jobs_root_id.
     Returns { matches: [{id, name, score, source_url}], suggested_id }.
     """
-    street = address.split(",", 1)[0].strip()
-    addr_base = normalize_for_similarity(street)
-    if not addr_base:
+    if not extract_street_line(address):
         return {"matches": [], "suggested_id": None}
     folders = list_job_folder_candidates(jobs_root_id)
     scored: list[dict] = []
     for f in folders:
-        folder_base, _ = parse_base_and_version(f.get("name") or "")
-        if not folder_base:
-            folder_base = normalize_for_similarity(f.get("name") or "")
+        folder_name = f.get("name") or ""
+        folder_base, _ = parse_base_and_version(folder_name)
         if not folder_base:
             continue
-        score = SequenceMatcher(None, addr_base, folder_base).ratio()
+        if house_numbers_conflict(address, folder_base):
+            continue
+        score = address_folder_similarity(address, folder_base)
         scored.append(
             {
                 "id": f["id"],
-                "name": f.get("name") or f["id"],
+                "name": folder_name or f["id"],
                 "score": round(score, 4),
                 "source_url": drive_folder_url(f["id"]),
             }
         )
     scored.sort(key=lambda x: (-x["score"], x["name"]))
-    strong = [s for s in scored if s["score"] >= min_score]
-    suggested_id = strong[0]["id"] if len(strong) == 1 else None
-    return {"matches": scored[:limit], "suggested_id": suggested_id}
+    displayed = [s for s in scored if s["score"] >= min_display_score]
+    suggested_id = None
+    strong = [s for s in displayed if s["score"] >= min_score]
+    if len(strong) == 1:
+        suggested_id = strong[0]["id"]
+    elif displayed and displayed[0]["score"] >= min_score:
+        if len(displayed) == 1 or displayed[0]["score"] - displayed[1]["score"] >= 0.08:
+            suggested_id = displayed[0]["id"]
+    return {"matches": displayed[:limit], "suggested_id": suggested_id}
 
 
 def drive_folder_url(folder_id: str) -> str:
@@ -409,10 +417,16 @@ async def match_folders_by_address_async(
     jobs_root_id: str,
     *,
     min_score: float = 0.85,
+    min_display_score: float = 0.70,
     limit: int = 5,
 ) -> dict:
     return await asyncio.to_thread(
-        match_folders_by_address, address, jobs_root_id, min_score=min_score, limit=limit
+        match_folders_by_address,
+        address,
+        jobs_root_id,
+        min_score=min_score,
+        min_display_score=min_display_score,
+        limit=limit,
     )
 
 

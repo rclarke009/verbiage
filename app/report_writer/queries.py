@@ -402,13 +402,35 @@ def count_claim_image_analysis(conn, claim_id: str) -> dict[str, int]:
         )
         counts = {row[0]: row[1] for row in cur.fetchall()}
         total = sum(counts.values())
-        return {
+        status_counts = {
             "total": total,
             "pending": counts.get("pending", 0),
             "running": counts.get("running", 0),
             "succeeded": counts.get("succeeded", 0),
             "failed": counts.get("failed", 0),
         }
+        status_counts["with_damage"] = _count_claim_photo_damage(conn, claim_id)
+        return status_counts
+    finally:
+        cur.close()
+
+
+def _count_claim_photo_damage(conn, claim_id: str) -> int:
+    from app.report_writer.damage_detection import analysis_shows_damage
+
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            SELECT vision_analysis
+            FROM report_claim_images
+            WHERE claim_id = %s::uuid AND analysis_status = 'succeeded'
+            """,
+            (claim_id,),
+        )
+        return sum(
+            1 for row in cur.fetchall() if analysis_shows_damage(row.get("vision_analysis"))
+        )
     finally:
         cur.close()
 

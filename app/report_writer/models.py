@@ -116,6 +116,7 @@ class PhotoAnalysisCountsResponse(BaseModel):
     running: int = 0
     succeeded: int = 0
     failed: int = 0
+    with_damage: int = 0
 
 
 class PhotoSyncRequest(BaseModel):

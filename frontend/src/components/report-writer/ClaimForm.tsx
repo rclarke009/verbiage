@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Claim, ReportTypeDefinition } from '../../types'
+import type { Claim, PhotoAnalysisCounts, ReportTypeDefinition } from '../../types'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { StormPicker } from './StormPicker'
 
@@ -26,6 +26,7 @@ export function ClaimForm({
   onConfirmPhotoSync,
   photoSyncing,
   photoSyncError,
+  photoCounts,
 }: {
   claim: Claim
   claimId: string
@@ -35,6 +36,7 @@ export function ClaimForm({
   onConfirmPhotoSync: () => void
   photoSyncing: boolean
   photoSyncError: string | null
+  photoCounts?: PhotoAnalysisCounts | null
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
@@ -97,6 +99,7 @@ export function ClaimForm({
         onConfirmSync={onConfirmPhotoSync}
         syncing={photoSyncing}
         syncError={photoSyncError}
+        photoCounts={photoCounts}
       />
 
       <fieldset

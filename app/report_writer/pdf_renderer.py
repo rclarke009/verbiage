@@ -135,6 +135,7 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
                 y -= 0.25 * inch
 
     # Build content starting page 2
+    story.append(PageBreak())
     story.append(Spacer(1, 0.1 * inch))
     story.append(Paragraph("OVERVIEW", styles["title"]))
     if doc.address_line1:
