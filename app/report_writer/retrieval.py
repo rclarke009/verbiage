@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models import AskRequest, RetrievedChunk
+from app.models import RetrievedChunk
+from app.report_writer.constants import corpus_title_terms_for
 from app.retrieval import (
     FusedHit,
     lexical_query_text,
@@ -13,6 +14,32 @@ from app.retrieval import (
     retrieve_top_k_hybrid,
     retrieve_top_k_lexical,
 )
+
+MIN_FILTERED_CHUNKS = 3
+
+
+def _title_matches(chunk: RetrievedChunk, terms: tuple[str, ...]) -> bool:
+    title = (chunk.document_title or "").lower()
+    if title and any(term in title for term in terms):
+        return True
+    content = (chunk.content_snippet or "").lower()
+    return any(term in content for term in terms)
+
+
+def filter_chunks_for_report_type(
+    chunks: list[RetrievedChunk],
+    type_id: str,
+    *,
+    min_keep: int = MIN_FILTERED_CHUNKS,
+) -> list[RetrievedChunk]:
+    """Prefer chunks from documents matching this report type; fall back if too few hits."""
+    terms = tuple(t.lower() for t in corpus_title_terms_for(type_id))
+    if not terms or not chunks:
+        return chunks
+    matched = [c for c in chunks if _title_matches(c, terms)]
+    if len(matched) >= min_keep:
+        return matched
+    return chunks
 
 
 async def _rerank_chunks(
@@ -38,6 +65,7 @@ async def retrieve_similar_chunks(
     embedding_model: str | None,
     reranker,
     top_k: int = 8,
+    report_type: str | None = None,
 ) -> tuple[list[RetrievedChunk], float | None]:
     """Retrieve candidates; return (chunks, best_cosine) for the gate node."""
     pool_k = max(top_k * 4, 20) if reranker is not None else top_k
@@ -67,4 +95,6 @@ async def retrieve_similar_chunks(
 
     candidates, best_cosine = await asyncio.to_thread(_run_retrieval)
     ranked = await _rerank_chunks(query, candidates, top_k, reranker)
+    if report_type:
+        ranked = filter_chunks_for_report_type(ranked, report_type)
     return ranked, best_cosine
