@@ -11,7 +11,12 @@ async def validate_draft(state: ReportWriterState) -> dict:
     sections = state.get("sections") or {}
     if not any(s.get("content") for s in sections.values()):
         return {"errors": ["Draft has no section content."]}
-    prompt = build_validate_prompt(sections, state.get("field_notes") or "")
+    prompt = build_validate_prompt(
+        sections,
+        state.get("field_notes") or "",
+        report_type=state.get("report_type"),
+        property_metadata=state.get("property_metadata"),
+    )
     result = (await llm_client.answer_with_context(prompt, temperature=0.0)).strip()
     if result.upper().startswith("OK"):
         return {}

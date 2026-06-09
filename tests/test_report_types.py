@@ -57,6 +57,8 @@ def test_section_prompt_uses_type_preamble():
 def test_generate_sections_emits_roof_section_keys():
     import asyncio
 
+    from app.models import RetrievedChunk
+
     state = {
         "field_notes": "Roof has debris impacts",
         "property_metadata": {"report_type": "roof"},
@@ -65,11 +67,35 @@ def test_generate_sections_emits_roof_section_keys():
         "retrieved_chunks": [{"chunk_id": "c1", "content_snippet": "roof report"}],
         "image_analyses": [],
     }
+    fake_chunks = [
+        RetrievedChunk(
+            chunk_id="c1",
+            doc_id="d1",
+            score=0.8,
+            content_snippet="roof report",
+            document_title="Roof Report",
+        )
+    ]
+    mock_deps = MagicMock()
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.getconn.return_value = mock_conn
+    mock_deps.db_pool = mock_pool
 
     with (
         patch("app.report_writer.nodes.generate.get_stream_writer", return_value=None),
+        patch("app.report_writer.nodes.generate.get_report_writer_deps", return_value=mock_deps),
+        patch("app.report_writer.nodes.generate.HttpEmbedder") as mock_embedder_cls,
+        patch(
+            "app.report_writer.nodes.generate.retrieve_similar_chunks",
+            new=AsyncMock(return_value=(fake_chunks, 0.8)),
+        ),
         patch("app.report_writer.nodes.generate.llm_client.answer_with_context_stream") as mock_stream,
     ):
+        mock_embedder = mock_embedder_cls.return_value
+        mock_embedder.model = "test-model"
+        mock_embedder.embed_many = AsyncMock(return_value=[[0.1, 0.2]])
+
         async def _stream(_prompt):
             yield "Test content."
 

@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from app.report_writer.constants import (
     REPORT_TYPE_KEY,
+    corpus_title_terms_for,
     get_report_type,
     report_type_def,
     section_guidance_for,
     section_labels_for_type,
+    section_outline_for,
+    section_retrieval_extra_for,
+    terminology_rules_for,
+    vocabulary_contract,
 )
 from app.report_writer.photo_summary import build_photo_context_block
 
@@ -45,6 +50,25 @@ def build_retrieval_query(
     return "\n".join(parts).strip() or field_notes.strip() or "storm damage inspection"
 
 
+def build_section_retrieval_query(
+    section_key: str,
+    field_notes: str,
+    property_metadata: dict | None,
+    image_analyses: list[dict] | None = None,
+    report_type: str | None = None,
+) -> str:
+    """Compose a section-targeted retrieval query from the base claim query."""
+    base = build_retrieval_query(field_notes, property_metadata, image_analyses)
+    meta = property_metadata or {}
+    type_id = report_type or get_report_type(meta)
+    label = section_labels_for_type(type_id).get(section_key, section_key)
+    extra = section_retrieval_extra_for(type_id, section_key)
+    parts = [base, f"section: {label}"]
+    if extra:
+        parts.append(extra)
+    return "\n".join(parts).strip()
+
+
 def _context_block(chunks: list[dict]) -> str:
     parts: list[str] = []
     total = 0
@@ -52,15 +76,32 @@ def _context_block(chunks: list[dict]) -> str:
         title = (c.get("document_title") or "").strip() or c.get("doc_id", "")
         link = (c.get("source_url") or "").strip()
         link_line = f"Link: {link}\n" if link else ""
+        section = (c.get("section_label") or "").strip()
+        section_line = f"Section: {section}\n" if section else ""
         block = (
             f"[doc_id={c.get('doc_id')} title={title!r} chunk_id={c.get('chunk_id')}]\n"
-            f"{link_line}{c.get('content_snippet', '')}\n"
+            f"{link_line}{section_line}{c.get('content_snippet', '')}\n"
         )
         if total + len(block) > MAX_CONTEXT_CHARS:
             break
         parts.append(block)
         total += len(block)
     return "\n".join(parts) if parts else "(No relevant context found.)"
+
+
+def _terminology_block(type_id: str) -> str:
+    rules = terminology_rules_for(type_id)
+    if not rules:
+        return ""
+    lines = "\n".join(f"- {rule}" for rule in rules)
+    return f"Terminology rules:\n{lines}\n\n"
+
+
+def _outline_block(type_id: str, section_key: str) -> str:
+    outline = section_outline_for(type_id, section_key)
+    if not outline:
+        return ""
+    return f"Suggested structure (adapt to this claim; mirror vocabulary from notes and prior sections):\n{outline}\n\n"
 
 
 def build_section_prompt(
@@ -94,6 +135,8 @@ def build_section_prompt(
 
     guidance = section_guidance_for(type_id, section_key)
     guidance_block = f"Section guidance: {guidance}\n\n" if guidance else ""
+    terminology_block = _terminology_block(type_id)
+    outline_block = _outline_block(type_id, section_key)
 
     return (
         f"{type_def.prompt_preamble} "
@@ -101,24 +144,41 @@ def build_section_prompt(
         f"Report type: {type_def.label}\n"
         f"Section to write: {section_label}\n\n"
         f"{guidance_block}"
+        f"{terminology_block}"
+        f"Vocabulary contract: {vocabulary_contract()}\n\n"
+        f"{outline_block}"
         f"Property metadata:\n{meta_lines or '(none)'}\n\n"
         f"{image_block}"
         f"Field notes for this claim:\n{field_notes.strip() or '(none)'}\n\n"
-        + (f"Prior sections already drafted (keep consistent):\n{prior}\n\n" if prior else "")
-        + "Similar language from past reports (use for style and phrasing, adapt to this claim):\n"
+        + (f"Prior sections already drafted (keep consistent; reuse their terminology verbatim):\n{prior}\n\n" if prior else "")
+        + "Similar language from past reports of the same report type "
+        "(mirror phrasing and domain vocabulary; adapt facts to this claim):\n"
         f"{context}\n\n"
         f"Write only the {section_label} section body. No heading line, no markdown fences."
     )
 
 
-def build_validate_prompt(sections: dict[str, dict], field_notes: str) -> str:
+def build_validate_prompt(
+    sections: dict[str, dict],
+    field_notes: str,
+    *,
+    report_type: str | None = None,
+    property_metadata: dict | None = None,
+) -> str:
+    type_id = report_type or get_report_type(property_metadata)
+    terminology = terminology_rules_for(type_id)
+    terminology_block = "\n".join(f"- {rule}" for rule in terminology) if terminology else "(none)"
     body = "\n\n".join(
         f"{key}:\n{sec.get('content', '')}" for key, sec in sections.items() if sec.get("content")
     )
     return (
-        "Review this draft report against the field notes. "
-        "Reply with exactly OK if every statement is supported by the notes or standard "
-        "professional phrasing. Otherwise reply ISSUE: followed by one sentence describing "
-        "the main unsupported claim.\n\n"
+        "Review this draft report against the field notes, terminology rules, and vocabulary contract.\n"
+        "Reply with exactly OK if every statement is supported by the notes AND terminology/style "
+        "rules are followed.\n"
+        "Otherwise reply ISSUE: followed by one sentence describing the main problem "
+        "(unsupported claim, invented inspection recommendation, wrong domain terminology such as "
+        "'structural integrity' for shingles, or unnecessary redundancy between sections).\n\n"
+        f"Vocabulary contract: {vocabulary_contract()}\n\n"
+        f"Terminology rules:\n{terminology_block}\n\n"
         f"Field notes:\n{field_notes}\n\nDraft:\n{body}"
     )

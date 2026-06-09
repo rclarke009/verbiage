@@ -11,6 +11,40 @@ DEFAULT_REPORT_TYPE: ReportTypeId = "engineering"
 REPORT_TYPE_KEY = "report_type"
 
 
+_VOCABULARY_CONTRACT = (
+    "Reuse terminology from field notes and prior sections verbatim where possible. "
+    "Do not substitute synonyms for technical findings (e.g. if notes say 'brittle test failed,' "
+    "do not rephrase as 'loss of structural integrity'). "
+    "Do not recommend inspections of components not mentioned in field notes or prior sections. "
+    "Do not open with generic phrases like 'In conclusion' unless mirrored in retrieved context."
+)
+
+_ROOF_TERMINOLOGY = (
+    "Use roofing inspection vocabulary for shingles and roof coverings.",
+    "After a failed brittle test, state shingles are brittle and not suitable for repair.",
+    (
+        "Do not use structural engineering terms (e.g. structural integrity, load-bearing, "
+        "compromised structure) when referring to shingles or roof coverings."
+    ),
+    "Do not recommend inspections of soffit, fascia, or other components unless field notes or "
+    "prior sections mention them.",
+)
+
+_ENGINEERING_TERMINOLOGY = (
+    "Reserve structural engineering terms for framing, decking, and load-bearing elements.",
+    (
+        "When describing shingle or roof covering condition, use roofing terminology "
+        "(brittle, creased, torn, lifted); do not describe shingles as losing structural integrity."
+    ),
+    "Do not recommend inspections of building components not mentioned in field notes or prior sections.",
+)
+
+_WINDOW_TEST_TERMINOLOGY = (
+    "Use ASTM E1105 and fenestration testing vocabulary.",
+    "Do not recommend additional testing or inspections not supported by field notes.",
+)
+
+
 @dataclass(frozen=True)
 class ReportTypeDef:
     id: ReportTypeId
@@ -21,6 +55,10 @@ class ReportTypeDef:
     export_title: str
     prompt_preamble: str
     section_guidance: tuple[tuple[str, str], ...] = ()
+    corpus_title_terms: tuple[str, ...] = ()
+    terminology_rules: tuple[str, ...] = ()
+    section_retrieval_extra: tuple[tuple[str, str], ...] = ()
+    section_outline: tuple[tuple[str, str], ...] = ()
 
 
 REPORT_TYPES: dict[ReportTypeId, ReportTypeDef] = {
@@ -63,6 +101,28 @@ REPORT_TYPES: dict[ReportTypeId, ReportTypeDef] = {
                 "State repair recommendations and professional conclusions; mention FBC compliance where appropriate.",
             ),
         ),
+        corpus_title_terms=("engineering report", "engineering inspection", "storm damage report"),
+        terminology_rules=_ENGINEERING_TERMINOLOGY,
+        section_retrieval_extra=(
+            ("property_overview", "property overview purpose date of loss"),
+            ("summary_findings", "summary of findings storm damage"),
+            ("roof_observations", "roof observations brittle test shingle damage"),
+            ("interior_observations", "interior observations water intrusion drywall"),
+            ("exterior_observations", "exterior observations siding structural"),
+            (
+                "recommendations_conclusion",
+                "recommendations conclusion repair replacement Florida Building Code",
+            ),
+        ),
+        section_outline=(
+            (
+                "recommendations_conclusion",
+                "Structure example (adapt to this claim): Based on field observations at [address], "
+                "storm-related damage consistent with [storm] was documented. "
+                "[State repair/replacement recommendations per notes.] "
+                "All repairs must comply with the Florida Building Code: Existing Building 2023.",
+            ),
+        ),
     ),
     "roof": ReportTypeDef(
         id="roof",
@@ -99,6 +159,33 @@ REPORT_TYPES: dict[ReportTypeId, ReportTypeDef] = {
             ),
             ("recommendations", "State repair or replacement recommendations for the roof system."),
             ("conclusion", "Conclude whether wind storm damage is evident and if repairs are feasible."),
+        ),
+        corpus_title_terms=("roof report", "roof inspection"),
+        terminology_rules=_ROOF_TERMINOLOGY,
+        section_retrieval_extra=(
+            ("summary", "roof report summary storm damage findings"),
+            ("areas_of_concern", "areas of concern roof damage debris"),
+            ("recommendations", "roof recommendations replacement brittle test repair"),
+            (
+                "conclusion",
+                "roof report conclusion brittle test replacement not feasible wind damage",
+            ),
+        ),
+        section_outline=(
+            (
+                "recommendations",
+                "If brittle test failed, state shingles are brittle and not suitable for repair; "
+                "recommend full roof replacement when repairs are not feasible.",
+            ),
+            (
+                "conclusion",
+                "Structure example (adapt to this claim): Based on the field inspection of the roof at "
+                "[address], wind-related storm damage consistent with [storm] was observed, including "
+                "[primary findings from notes]. [If brittle test failed: The brittle test failed, "
+                "indicating the shingles are brittle and not suitable for repair.] Given the extent of "
+                "damage documented, repairs to the existing roof are not feasible and full roof "
+                "replacement is recommended.",
+            ),
         ),
     ),
     "window_test": ReportTypeDef(
@@ -137,6 +224,24 @@ REPORT_TYPES: dict[ReportTypeId, ReportTypeDef] = {
             (
                 "recommendations_conclusion",
                 "State repair/replacement recommendations and cyclical wind pressure context where relevant.",
+            ),
+        ),
+        corpus_title_terms=("window test", "ASTM E1105", "fenestration"),
+        terminology_rules=_WINDOW_TEST_TERMINOLOGY,
+        section_retrieval_extra=(
+            ("overview", "window test report overview purpose scope"),
+            ("weather_history", "weather history storm wind data"),
+            ("test_summary", "ASTM E1105 test summary specimen pass fail"),
+            (
+                "recommendations_conclusion",
+                "window test recommendations conclusion repair replacement",
+            ),
+        ),
+        section_outline=(
+            (
+                "recommendations_conclusion",
+                "State repair or replacement recommendations based on specimen pass/fail results; "
+                "reference cyclical wind pressure only when supported by notes.",
             ),
         ),
     ),
@@ -184,6 +289,28 @@ def section_labels_for_type(type_id: str) -> dict[str, str]:
 def section_guidance_for(type_id: str, section_key: str) -> str:
     guidance = dict(report_type_def(type_id).section_guidance)
     return guidance.get(section_key, "")
+
+
+def terminology_rules_for(type_id: str) -> tuple[str, ...]:
+    return report_type_def(type_id).terminology_rules
+
+
+def section_retrieval_extra_for(type_id: str, section_key: str) -> str:
+    extra = dict(report_type_def(type_id).section_retrieval_extra)
+    return extra.get(section_key, "")
+
+
+def section_outline_for(type_id: str, section_key: str) -> str:
+    outlines = dict(report_type_def(type_id).section_outline)
+    return outlines.get(section_key, "")
+
+
+def corpus_title_terms_for(type_id: str) -> tuple[str, ...]:
+    return report_type_def(type_id).corpus_title_terms
+
+
+def vocabulary_contract() -> str:
+    return _VOCABULARY_CONTRACT
 
 
 # Backward-compatible aliases (engineering template).
