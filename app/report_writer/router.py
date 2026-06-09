@@ -5,11 +5,20 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from app.auth import get_current_user
-from app.db import get_valid_conn
+from app.config import GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID, GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL
+from app.db import get_ingest_batch, get_ingest_batch_errors, get_valid_conn
+from app.drive_client import (
+    DriveClientError,
+    build_drive_folder_context,
+    match_folders_by_address_async,
+    parse_drive_folder_id,
+    resolve_drive_folder_id,
+)
+from app.ingest_jobs import IngestBatchStatusResponse
 from app.report_writer.deps import ReportWriterDeps, reset_report_writer_deps, set_report_writer_deps
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
 from app.report_writer.constants import REPORT_TYPES, get_report_type, report_type_def, section_keys_for_type
@@ -18,9 +27,13 @@ from app.report_writer.models import (
     ClaimResponse,
     ClaimUpdateRequest,
     ClaimsListResponse,
+    DriveFolderMatchResponse,
     GenerateRequest,
     GenerationRunResponse,
     GenerationRunsListResponse,
+    PhotoAnalysisCountsResponse,
+    PhotoSyncRequest,
+    PhotoSyncResponse,
     RegenerateSectionRequest,
     ReportTypeModel,
     ReportTypeSectionModel,
@@ -45,6 +58,7 @@ from app.report_writer.queries import (
     list_generation_runs,
     update_claim,
 )
+from app.report_writer.photo_sync import claim_photo_analysis_counts, sync_claim_photos_from_drive
 from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
 from app.report_writer.storage import storage_path_for, write_claim_image
@@ -97,6 +111,137 @@ async def _with_conn(request: Request, fn):
         return await asyncio.to_thread(fn, conn)
     finally:
         pool.putconn(conn)
+
+
+@router.get("/drive/match-folder", response_model=DriveFolderMatchResponse)
+async def match_photo_folder(
+    address: str = Query(..., min_length=3),
+    user_id: str = Depends(get_current_user),
+):
+    jobs_root = resolve_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID)
+    if not jobs_root:
+        raise HTTPException(
+            status_code=503,
+            detail="GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID is not configured on the server",
+        )
+    try:
+        result = await match_folders_by_address_async(address.strip(), jobs_root)
+    except DriveClientError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    jobs_root_ctx = build_drive_folder_context(jobs_root)
+    if jobs_root_ctx and GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL:
+        jobs_root_ctx["display_path"] = GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL
+    return DriveFolderMatchResponse(
+        matches=result["matches"],
+        suggested_id=result.get("suggested_id"),
+        jobs_root=jobs_root_ctx,
+    )
+
+
+@router.get("/claims/{claim_id}/photos/analysis-counts", response_model=PhotoAnalysisCountsResponse)
+async def get_photo_analysis_counts(
+    request: Request,
+    claim_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    def _counts(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        return claim_photo_analysis_counts(conn, claim_id, user_id)
+
+    counts = await _with_conn(request, _counts)
+    if counts is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return PhotoAnalysisCountsResponse(**counts)
+
+
+@router.post("/claims/{claim_id}/photos/sync-drive", response_model=PhotoSyncResponse, status_code=202)
+async def sync_photos_from_drive(
+    request: Request,
+    claim_id: str,
+    body: PhotoSyncRequest | None = None,
+    user_id: str = Depends(get_current_user),
+):
+    def _folder_for_claim(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        meta = claim.get("property_metadata") or {}
+        folder_raw = (body.folder_id if body and body.folder_id else None) or meta.get(
+            "drive_photo_folder_id"
+        )
+        return parse_drive_folder_id(folder_raw) if folder_raw else None
+
+    folder_id = await _with_conn(request, _folder_for_claim)
+    if folder_id is None:
+        claim_exists = await _with_conn(
+            request, lambda conn: get_claim(conn, claim_id, user_id) is not None
+        )
+        if not claim_exists:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        raise HTTPException(
+            status_code=400,
+            detail="No photo folder linked. Set drive_photo_folder_id on the claim or pass folder_id.",
+        )
+
+    conn = get_valid_conn(request.app.state.db_pool)
+    try:
+        try:
+            result = await sync_claim_photos_from_drive(
+                conn,
+                claim_id=claim_id,
+                user_id=user_id,
+                folder_id=folder_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+    finally:
+        request.app.state.db_pool.putconn(conn)
+
+    return PhotoSyncResponse(**result)
+
+
+@router.get("/claims/{claim_id}/photos/batch/{batch_id}", response_model=IngestBatchStatusResponse)
+async def get_photo_batch_status(
+    request: Request,
+    claim_id: str,
+    batch_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    def _get(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        batch = get_ingest_batch(conn, batch_id)
+        if not batch or batch["kind"] != "claim_photo_sync":
+            return None
+        from app.db import get_ingest_batch_claim_context
+
+        ctx = get_ingest_batch_claim_context(conn, batch_id)
+        if not ctx or ctx.get("claim_id") != claim_id:
+            return None
+        errors = get_ingest_batch_errors(conn, batch_id)
+        return batch, errors
+
+    result = await _with_conn(request, _get)
+    if not result:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    batch, errors = result
+    return IngestBatchStatusResponse(
+        batch_id=batch["id"],
+        kind=batch["kind"],
+        status=batch["status"],
+        total=batch["total"],
+        pending=batch["pending"],
+        running=batch["running"],
+        succeeded=batch["succeeded"],
+        failed=batch["failed"],
+        skipped=batch["skipped"],
+        errors=errors,
+        created_at=batch["created_at"],
+        updated_at=batch["updated_at"],
+    )
 
 
 @router.post("/claims", response_model=ClaimResponse)

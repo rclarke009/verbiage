@@ -88,3 +88,35 @@ class ReportTypeModel(BaseModel):
 
 class ReportTypesListResponse(BaseModel):
     report_types: list[ReportTypeModel]
+
+
+class DriveFolderMatchItem(BaseModel):
+    id: str
+    name: str
+    score: float
+    source_url: str
+
+
+class DriveFolderMatchResponse(BaseModel):
+    matches: list[DriveFolderMatchItem]
+    suggested_id: str | None = None
+    jobs_root: dict | None = None
+
+
+class PhotoSyncResponse(BaseModel):
+    batch_id: str | None = None
+    total: int = 0
+    image_count: int = 0
+    job_ids: list[str] = Field(default_factory=list)
+
+
+class PhotoAnalysisCountsResponse(BaseModel):
+    total: int = 0
+    pending: int = 0
+    running: int = 0
+    succeeded: int = 0
+    failed: int = 0
+
+
+class PhotoSyncRequest(BaseModel):
+    folder_id: str | None = Field(default=None, description="Override drive_photo_folder_id on claim")

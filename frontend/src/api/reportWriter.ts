@@ -98,6 +98,43 @@ export async function listClaimImages(claimId: string): Promise<ReportWriterImag
   return data.images
 }
 
+export async function matchDrivePhotoFolder(address: string) {
+  const q = new URLSearchParams({ address })
+  const res = await apiFetch(`${BASE}/drive/match-folder?${q}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{
+    matches: import('../types').DriveFolderMatch[]
+    suggested_id?: string | null
+    jobs_root?: { id: string; display_path?: string } | null
+  }>
+}
+
+export async function syncClaimPhotosFromDrive(claimId: string, folderId?: string) {
+  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/sync-drive`, {
+    method: 'POST',
+    body: JSON.stringify(folderId ? { folder_id: folderId } : {}),
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{
+    batch_id: string | null
+    total: number
+    image_count: number
+    job_ids: string[]
+  }>
+}
+
+export async function getClaimPhotoBatchStatus(claimId: string, batchId: string) {
+  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/batch/${batchId}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<import('../types').IngestBatchStatusResponse>
+}
+
+export async function getPhotoAnalysisCounts(claimId: string) {
+  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/analysis-counts`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<import('../types').PhotoAnalysisCounts>
+}
+
 export function generateStreamUrl(claimId: string): string {
   return `${apiOrigin()}/report-writer/claims/${claimId}/generate`
 }

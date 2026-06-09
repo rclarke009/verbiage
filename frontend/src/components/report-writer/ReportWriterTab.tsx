@@ -12,14 +12,15 @@ import {
   listRuns,
   updateClaim,
   updateSection,
-  uploadClaimImage,
 } from '../../api/reportWriter'
 import type { Claim } from '../../types'
+import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
 import { DraftEditor } from './DraftEditor'
 import { GenerationProgress } from './GenerationProgress'
+import { PhotoAnalysisBanner } from './PhotoAnalysisBanner'
 import { RunHistory } from './RunHistory'
 import { SourcesPanel } from './SourcesPanel'
 
@@ -40,6 +41,7 @@ export function ReportWriterTab() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const { state: genState, generating, generate, reset: resetStream } = useReportWriterStream()
+  const photoSync = useClaimPhotoSync(activeId)
 
   const reportTypesQuery = useQuery({
     queryKey: ['report-writer-types'],
@@ -122,12 +124,27 @@ export function ReportWriterTab() {
 
   const handleGenerate = async () => {
     if (!activeId) return
+    const pending =
+      (photoSync.counts?.pending ?? 0) + (photoSync.counts?.running ?? 0)
+    if (pending > 0) {
+      const ok = window.confirm(
+        `${pending} photo(s) still analyzing. Generate draft anyway?`,
+      )
+      if (!ok) return
+    }
     await saveMutation.mutateAsync()
     resetStream()
     await generate(activeId, `/report-writer/claims/${activeId}/generate`, undefined, sectionKeys)
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
     queryClient.invalidateQueries({ queryKey: ['report-writer-runs', activeId] })
+  }
+
+  const handleConfirmPhotoSync = async () => {
+    if (!activeId) return
+    await saveMutation.mutateAsync()
+    const folderId = draft.property_metadata?.drive_photo_folder_id
+    await photoSync.startSync(folderId)
   }
 
   const handleRegenerateSection = async (sectionKey: string) => {
@@ -140,12 +157,6 @@ export function ReportWriterTab() {
     )
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!activeId || !e.target.files?.[0]) return
-    await uploadClaimImage(activeId, e.target.files[0])
-    e.target.value = ''
   }
 
   const sources =
@@ -188,7 +199,13 @@ export function ReportWriterTab() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={generating || !canGenerate}
-                title={!draft.property_metadata?.report_type ? 'Select a report type first' : undefined}
+                title={
+                  !draft.property_metadata?.report_type
+                    ? 'Select a report type first'
+                    : !draft.property_metadata?.drive_photo_folder_id
+                      ? 'Link a photo folder in Step 2 for better draft quality'
+                      : undefined
+                }
                 style={{
                   padding: '6px 12px',
                   borderRadius: 6,
@@ -200,10 +217,6 @@ export function ReportWriterTab() {
               >
                 {generating ? 'Generating…' : 'Generate draft'}
               </button>
-              <label style={{ fontSize: 13, cursor: 'pointer', padding: '6px 12px', border: '1px solid #d0d7de', borderRadius: 6 }}>
-                Upload photo
-                <input type="file" accept="image/*" hidden onChange={handleUpload} />
-              </label>
               <button
                 type="button"
                 disabled={pdfLoading}
@@ -251,15 +264,27 @@ export function ReportWriterTab() {
               </button>
             </div>
 
+            <PhotoAnalysisBanner
+              hasAddress={!!draft.property_metadata?.address?.trim()}
+              hasFolder={!!draft.property_metadata?.drive_photo_folder_id}
+              counts={photoSync.counts}
+              batchStatus={photoSync.batchStatus}
+              syncing={photoSync.syncing}
+            />
+
             <GenerationProgress state={genState} />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 20 }}>
               <div>
                 <ClaimForm
                   claim={draft}
+                  claimId={activeId}
                   reportTypes={reportTypes}
                   typeLocked={hasGeneratedContent}
                   onChange={patch => updateDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
+                  onConfirmPhotoSync={handleConfirmPhotoSync}
+                  photoSyncing={photoSync.syncing}
+                  photoSyncError={photoSync.syncError}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
                 <DraftEditor
