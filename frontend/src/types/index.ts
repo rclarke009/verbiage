@@ -243,6 +243,7 @@ export interface PhotoAnalysisCounts {
   running: number
   succeeded: number
   failed: number
+  with_damage?: number
 }
 
 export interface GenerationSectionState {

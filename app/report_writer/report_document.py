@@ -15,6 +15,7 @@ from app.report_writer.boilerplate import (
     weather_text,
 )
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
+from app.report_writer.damage_detection import count_photo_stats, photo_review_summary
 from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
@@ -142,6 +143,13 @@ def build_report_document(
             )
         )
 
+    obs = observations_text(meta)
+    if not (meta.get("boilerplate_observations") or "").strip():
+        stats = count_photo_stats(images or [])
+        summary = photo_review_summary(stats["examined"], stats["with_damage"])
+        if summary:
+            obs = f"{obs} {summary}"
+
     return ReportDocument(
         title=title,
         claim_id=claim_id,
@@ -154,7 +162,7 @@ def build_report_document(
         prepared_by=default_prepared_by(meta),
         include_engineering_letter=type_id == "engineering" and include_engineering_letter(meta),
         purpose_text=purpose_text(meta),
-        observations_text=observations_text(meta),
+        observations_text=obs,
         weather_text=weather_text(meta),
         engineering_letter_paragraphs=engineering_letter_paragraphs(meta, line1 or address_raw, conclusion),
         sections=doc_sections,

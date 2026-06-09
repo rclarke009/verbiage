@@ -285,6 +285,7 @@ export function ReportWriterTab() {
                   onConfirmPhotoSync={handleConfirmPhotoSync}
                   photoSyncing={photoSync.syncing}
                   photoSyncError={photoSync.syncError}
+                  photoCounts={photoSync.counts}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #d0d7de' }} />
                 <DraftEditor

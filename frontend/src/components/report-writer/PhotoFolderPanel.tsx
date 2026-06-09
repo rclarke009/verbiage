@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { listClaimImages, uploadClaimImage } from '../../api/reportWriter'
 import { useAddressFolderMatch } from '../../hooks/useAddressFolderMatch'
 import { driveFolderUrl, parseDriveFolderInput } from '../../lib/driveFolder'
-import type { Claim } from '../../types'
+import type { Claim, PhotoAnalysisCounts } from '../../types'
 
 const stepLegend: React.CSSProperties = {
   fontSize: 13,
@@ -13,6 +13,8 @@ const stepLegend: React.CSSProperties = {
   margin: '0 0 8px',
 }
 
+const MIN_FOLDER_MATCH_SCORE = 0.7
+
 export function PhotoFolderPanel({
   claimId,
   claim,
@@ -20,6 +22,7 @@ export function PhotoFolderPanel({
   onConfirmSync,
   syncing,
   syncError,
+  photoCounts,
 }: {
   claimId: string
   claim: Claim
@@ -27,12 +30,16 @@ export function PhotoFolderPanel({
   onConfirmSync: () => void
   syncing: boolean
   syncError: string | null
+  photoCounts?: PhotoAnalysisCounts | null
 }) {
   const meta = claim.property_metadata || {}
   const address = meta.address ?? ''
   const folderId = meta.drive_photo_folder_id ?? ''
   const folderLabel = meta.drive_photo_folder_label ?? ''
   const { matches, suggestedId, status: matchStatus, error: matchError } = useAddressFolderMatch(address)
+  const visibleMatches = matches.filter(m => m.score >= MIN_FOLDER_MATCH_SCORE)
+  const possibleMatch =
+    !suggestedId && visibleMatches.length === 1 ? visibleMatches[0] : null
   const [manualInput, setManualInput] = useState('')
   const [manualError, setManualError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -76,6 +83,8 @@ export function PhotoFolderPanel({
 
   const folderUrl = folderId ? driveFolderUrl(folderId) : null
   const images = imagesQuery.data ?? []
+  const examined = photoCounts?.succeeded ?? images.filter(i => i.analysis_status === 'succeeded').length
+  const withDamage = photoCounts?.with_damage ?? 0
 
   return (
     <fieldset
@@ -133,11 +142,44 @@ export function PhotoFolderPanel({
         </div>
       )}
 
-      {matchStatus === 'done' && matches.length > 1 && !folderId && (
+      {possibleMatch && !folderId && matchStatus === 'done' && (
+        <div
+          style={{
+            padding: 10,
+            borderRadius: 6,
+            background: '#fff8c5',
+            border: '1px solid #d4a72c',
+            marginBottom: 10,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13 }}>
+            Possible match ({Math.round(possibleMatch.score * 100)}%):{' '}
+            <strong>{possibleMatch.name}</strong>
+          </p>
+          <button
+            type="button"
+            onClick={() => pickFolder(possibleMatch.id, possibleMatch.name)}
+            style={{
+              marginTop: 8,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#0969da',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+          >
+            Use this folder
+          </button>
+        </div>
+      )}
+
+      {matchStatus === 'done' && visibleMatches.length > 1 && !folderId && (
         <div style={{ marginBottom: 10 }}>
           <p style={{ fontSize: 13, margin: '0 0 6px' }}>Multiple folders match — pick one:</p>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-            {matches.map(m => (
+            {visibleMatches.map(m => (
               <li key={m.id} style={{ marginBottom: 4 }}>
                 <button
                   type="button"
@@ -153,7 +195,7 @@ export function PhotoFolderPanel({
         </div>
       )}
 
-      {matchStatus === 'done' && matches.length === 0 && address.trim().length >= 5 && !folderId && (
+      {matchStatus === 'done' && visibleMatches.length === 0 && address.trim().length >= 5 && !folderId && (
         <p style={{ fontSize: 13, color: '#9a6700', margin: '0 0 8px' }}>
           No folder found for this address. Paste a folder link below.
         </p>
@@ -214,7 +256,8 @@ export function PhotoFolderPanel({
       {images.length > 0 && (
         <details style={{ marginTop: 10, fontSize: 13 }}>
           <summary style={{ cursor: 'pointer', color: '#0969da' }}>
-            {images.length} photo(s) — {images.filter(i => i.analysis_status === 'succeeded').length} analyzed
+            {images.length} photo{images.length === 1 ? '' : 's'} — {examined} examined
+            {examined > 0 ? `, ${withDamage} with damage` : ''}
           </summary>
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 160, overflow: 'auto' }}>
             {images.slice(0, 30).map(img => (

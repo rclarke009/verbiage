@@ -1,5 +1,10 @@
 import type { IngestBatchStatusResponse, PhotoAnalysisCounts } from '../../types'
 
+function damageClause(examined: number, withDamage: number): string {
+  if (examined <= 0) return ''
+  return ` (${withDamage} with damage so far)`
+}
+
 export function PhotoAnalysisBanner({
   hasFolder,
   hasAddress,
@@ -37,15 +42,18 @@ export function PhotoAnalysisBanner({
     (counts?.pending ?? 0) > 0 ||
     (counts?.running ?? 0) > 0
 
-  const analyzed = counts?.succeeded ?? 0
+  const examined = counts?.succeeded ?? 0
   const total = counts?.total ?? 0
   const failed = counts?.failed ?? 0
+  const withDamage = counts?.with_damage ?? 0
 
   if (inFlight) {
     const batchDone = (batchStatus?.succeeded ?? 0) + (batchStatus?.skipped ?? 0)
     const batchTotal = batchStatus?.total ?? 0
     const progress =
-      batchTotal > 0 ? `${batchDone} of ${batchTotal} vision jobs` : `${analyzed} of ${total} photos analyzed`
+      batchTotal > 0
+        ? `${batchDone} of ${batchTotal} vision jobs`
+        : `${examined} of ${total} examined${damageClause(examined, withDamage)}`
     return (
       <div
         style={{
@@ -63,6 +71,10 @@ export function PhotoAnalysisBanner({
   }
 
   if (total > 0 && failed === 0) {
+    const damageText =
+      examined > 0
+        ? `Examined ${examined} photo${examined === 1 ? '' : 's'}; ${withDamage} showed evidence of damage. `
+        : `${total} photo${total === 1 ? '' : 's'} ready. `
     return (
       <div
         style={{
@@ -74,12 +86,14 @@ export function PhotoAnalysisBanner({
           marginBottom: 12,
         }}
       >
-        {total} photo{total === 1 ? '' : 's'} ready. Generate when field notes are done.
+        {damageText}Generate when field notes are done.
       </div>
     )
   }
 
   if (failed > 0) {
+    const damageText =
+      examined > 0 ? `; ${withDamage} showed evidence of damage` : ''
     return (
       <div
         style={{
@@ -91,7 +105,7 @@ export function PhotoAnalysisBanner({
           marginBottom: 12,
         }}
       >
-        {analyzed} of {total} photos analyzed; {failed} failed. You can still generate a draft.
+        Examined {examined} of {total} photos{damageText}; {failed} failed. You can still generate a draft.
       </div>
     )
   }

@@ -77,6 +77,57 @@ def test_build_report_document(sample_claim: dict, sample_sections: dict[str, di
     assert any("Hurricane Ian" in p for p in doc.engineering_letter_paragraphs)
 
 
+def test_build_report_document_includes_photo_review_summary(
+    sample_claim: dict,
+    sample_sections: dict[str, dict],
+) -> None:
+    images = [
+        {
+            "analysis_status": "succeeded",
+            "vision_analysis": {"has_damage": True, "observations": "Missing shingles."},
+            "storage_path": None,
+            "drive_file_id": None,
+        },
+        {
+            "analysis_status": "succeeded",
+            "vision_analysis": {"has_damage": False, "observations": "No visible damage."},
+            "storage_path": None,
+            "drive_file_id": None,
+        },
+        {
+            "analysis_status": "pending",
+            "vision_analysis": None,
+            "storage_path": None,
+            "drive_file_id": None,
+        },
+    ]
+    doc = build_report_document(sample_claim, sample_sections, images=images)
+    assert "2 inspection photographs were reviewed" in doc.observations_text
+    assert "1 showed evidence of storm-related damage" in doc.observations_text
+
+
+def test_build_report_document_skips_photo_summary_with_boilerplate_override(
+    sample_claim: dict,
+    sample_sections: dict[str, dict],
+) -> None:
+    claim = {
+        **sample_claim,
+        "property_metadata": {
+            **sample_claim["property_metadata"],
+            "boilerplate_observations": "Custom observations only.",
+        },
+    }
+    images = [
+        {
+            "analysis_status": "succeeded",
+            "vision_analysis": {"has_damage": True},
+        },
+    ]
+    doc = build_report_document(claim, sample_sections, images=images)
+    assert doc.observations_text == "Custom observations only."
+    assert "inspection photograph" not in doc.observations_text
+
+
 def test_docx_export_structure(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
     data = draft_to_docx_bytes(sample_sections, claim=sample_claim, images=[])
     assert data[:2] == b"PK"
