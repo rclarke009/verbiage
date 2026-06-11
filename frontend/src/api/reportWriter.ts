@@ -155,9 +155,15 @@ export function regenerateSectionStreamUrl(claimId: string, sectionKey: string):
   return `${apiOrigin()}/report-writer/claims/${claimId}/sections/${sectionKey}/regenerate`
 }
 
+/** Export endpoints can be slow (Drive photo fetch + render); retry transient gateway blips. */
+const EXPORT_FETCH_OPTS = { retries: 4, baseDelayMs: 1500 } as const
+
 export async function exportClaimDocx(claimId: string, title: string): Promise<void> {
-  const init = await getAuthFetchInit()
-  const res = await fetch(`${apiOrigin()}/report-writer/claims/${claimId}/export/docx`, init)
+  const res = await apiFetchRetry(
+    `${BASE}/claims/${claimId}/export/docx`,
+    { method: 'GET' },
+    EXPORT_FETCH_OPTS,
+  )
   if (!res.ok) throw new Error(await readErrorDetail(res))
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
@@ -169,8 +175,11 @@ export async function exportClaimDocx(claimId: string, title: string): Promise<v
 }
 
 export async function fetchClaimPdfBlob(claimId: string): Promise<Blob> {
-  const init = await getAuthFetchInit()
-  const res = await fetch(`${apiOrigin()}/report-writer/claims/${claimId}/export/pdf`, init)
+  const res = await apiFetchRetry(
+    `${BASE}/claims/${claimId}/export/pdf`,
+    { method: 'GET' },
+    EXPORT_FETCH_OPTS,
+  )
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.blob()
 }

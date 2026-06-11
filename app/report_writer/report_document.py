@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from app.report_writer.boilerplate import (
@@ -125,8 +126,15 @@ def build_report_document(
             doc_sections.append(ReportSection(key=key, label=label.upper(), content=content))
 
     photos: list[ReportPhoto] = []
-    for img in images or []:
-        raw = _read_image_bytes(img)
+    img_list = images or []
+    if img_list:
+        workers = min(8, len(img_list))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            raw_bytes_list = list(pool.map(_read_image_bytes, img_list))
+    else:
+        raw_bytes_list = []
+
+    for img, raw in zip(img_list, raw_bytes_list):
         if not raw:
             continue
         data, ext = compress_image_bytes(raw)

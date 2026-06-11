@@ -8,9 +8,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app.breadcrumb import apply_document_breadcrumb, build_document_breadcrumb_prefix
 from app.chunking import chunk_text
 from app.db import (
     delete_chunks_for_doc,
+    get_document_breadcrumb_fields,
     insert_chunk,
     insert_embedding,
     update_document_indexing_metadata,
@@ -26,6 +28,14 @@ def _chunk_and_insert(conn, doc_id: str, text: str, opts: ChunkingOptions):
     """CPU-bound chunking + sync chunk inserts; run via asyncio.to_thread."""
     delete_chunks_for_doc(conn, doc_id)
     chunks = chunk_text(text, opts)
+    title, source, source_filename = get_document_breadcrumb_fields(conn, doc_id)
+    prefix = build_document_breadcrumb_prefix(
+        doc_id=doc_id,
+        title=title,
+        source=source,
+        source_filename=source_filename,
+    )
+    chunks = apply_document_breadcrumb(chunks, prefix)
     for chunk in chunks:
         chunk_id = f"{doc_id}:{chunk.chunk_index}"
         insert_chunk(
