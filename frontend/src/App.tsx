@@ -18,7 +18,7 @@ const FEATURE_VISION = String(import.meta.env.VITE_FEATURE_VISION ?? '').toLower
 
 function AppInner() {
   const { session, passwordRecovery } = useAuth()
-  const [activeTab, setActiveTab] = useState('report-writer')
+  const [activeTab, setActiveTab] = useState('chat')
 
   const tabs = useMemo(() => {
     const base = [
