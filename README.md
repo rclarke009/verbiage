@@ -142,20 +142,16 @@ uvicorn app.main:app --reload
 
 ### Deploy (Render)
 
-Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml) is a [Blueprint](https://render.com/docs/blueprint-spec) with **two services**:
+Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml) defines a **single web service** (API + in-process photo worker). No extra worker service required.
 
-| Service | Role |
-|---------|------|
-| **Web** (`rag-document-analysis-backend`) | API, Report Writer, RAG, SPA |
-| **Worker** (`rag-ingest-worker`) | Drive ingest + claim photo vision jobs (`python -m app.worker_main`) |
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `RERANK_ENABLED=0` | On | Saves ~100MB RAM; avoids reranker warm-up 503s on small instances |
+| `INGEST_WORKER_ENABLED=1` | On | Processes photo vision jobs in the same process (no +$7 worker) |
 
-**Small instances (<2GB RAM):**
+**Optional:** a separate [`rag-ingest-worker`](docs/render-worker-setup.md) isolates OOM from the API (~$7/mo on Render) — only needed for large photo batches on tiny instances.
 
-- Web sets **`RERANK_ENABLED=0`** — skips the ~100MB cross-encoder and avoids `/health/ready` 503s during reranker warm-up. `/ask` uses RRF fusion only until you upgrade and re-enable reranker.
-- Web sets **`INGEST_WORKER_ENABLED=0`** — background jobs run on the worker service so OOM during photo analysis does not restart the API.
-- Size both services in the Render dashboard (Starter minimum for production).
-
-**Health check** → `/health/ready` (Postgres only when reranker disabled).
+**Health check** → `/health/ready` (Postgres when reranker disabled).
 
 Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
 

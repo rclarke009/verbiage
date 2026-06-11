@@ -1,13 +1,12 @@
 # Render Blueprint (https://render.com/docs/blueprint-spec)
 #
-# Web service: API + Report Writer + RAG. Ingest/vision jobs run on a separate worker
-# so OOM during photo analysis does not take down HTTP health checks.
+# Single web service: API + in-process ingest worker + Report Writer + RAG.
+# Optional separate worker (extra ~$7/mo): see docs/render-worker-setup.md
 #
-# Sub-2GB web instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
-# Re-enable reranker when the web instance has >=2GB RAM headroom.
+# Sub-2GB instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
+# INGEST_WORKER_ENABLED=1 processes photo vision on this service (no second worker).
 #
-# Secrets (DATABASE_URL, OPENAI_API_KEY, SUPABASE_*, GOOGLE_*, etc.) use sync: false.
-# Worker setup: docs/render-worker-setup.md
+# Secrets use sync: false — managed in the Render dashboard.
 services:
   - type: web
     name: rag-document-analysis-backend
@@ -18,7 +17,7 @@ services:
       - key: RERANK_ENABLED
         value: "0"
       - key: INGEST_WORKER_ENABLED
-        value: "0"
+        value: "1"
       - key: HF_HOME
         value: /app/hf-cache
       - key: HF_HUB_OFFLINE
@@ -52,25 +51,4 @@ services:
       - key: GOOGLE_DRIVE_DEFAULT_FOLDER_ID
         sync: false
       - key: GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL
-        sync: false
-
-  - type: worker
-    name: rag-ingest-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerCommand: python -m app.worker_main
-    envVars:
-      - key: INGEST_WORKER_ENABLED
-        value: "1"
-      - key: DATABASE_URL
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: GOOGLE_REFRESH_TOKEN
-        sync: false
-      - key: GOOGLE_REDIRECT_URI
         sync: false
