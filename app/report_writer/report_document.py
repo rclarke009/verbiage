@@ -21,23 +21,27 @@ from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
 
+def _download_drive_image(img: dict) -> bytes | None:
+    drive_file_id = img.get("drive_file_id")
+    if not drive_file_id:
+        return None
+    try:
+        from app.drive_client import download_drive_file_bytes
+
+        data, _ = download_drive_file_bytes(drive_file_id, img.get("filename") or drive_file_id)
+        return data
+    except Exception:
+        return None
+
+
 def _read_image_bytes(img: dict) -> bytes | None:
     path = img.get("storage_path")
     if path:
         try:
             return read_claim_image_bytes(path)
         except OSError:
-            return None
-    drive_file_id = img.get("drive_file_id")
-    if drive_file_id:
-        try:
-            from app.drive_client import download_drive_file_bytes
-
-            data, _ = download_drive_file_bytes(drive_file_id, img.get("filename") or drive_file_id)
-            return data
-        except Exception:
-            return None
-    return None
+            pass
+    return _download_drive_image(img)
 
 
 @dataclass
@@ -137,7 +141,8 @@ def build_report_document(
     for img, raw in zip(img_list, raw_bytes_list):
         if not raw:
             continue
-        data, ext = compress_image_bytes(raw)
+        # Sized for ~3.5" embed in PDF/DOCX; keeps memory and render time down on large claims.
+        data, ext = compress_image_bytes(raw, max_dimension=800, quality=75)
         from app.report_writer.image_utils import image_emu_size
 
         cx, cy = image_emu_size(data)

@@ -20,13 +20,13 @@ from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 import psycopg2
-from psycopg2 import pool as psycopg2_pool
 
 from app.reranker import Reranker
 
 from app.db import (
     INGEST_JOB_KIND_GOOGLE_DRIVE,
     create_db,
+    create_db_pool,
     create_ingest_batch,
     delete_document as remove_document_from_db,
     email_in_signup_allowlist,
@@ -39,7 +39,6 @@ from app.db import (
     is_connection_error,
     list_documents,
     list_doc_title_pairs,
-    NoPrepareConnection,
 )
 from app.models import (
     AskRequest,
@@ -92,7 +91,6 @@ from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
 from app.health import build_deep_response, build_ready_response
 from app.config import (
-    DATABASE_CONNECTION_KWARGS,
     DATABASE_URL,
     report_writer_database_url,
     GOOGLE_CLIENT_ID,
@@ -142,20 +140,6 @@ logging.getLogger("app").addHandler(_file_handler)
 logger.info("App log file: %s", _FILE_LOG)
 
 
-
-def _create_db_pool():
-    """Create Postgres connection pool. Supabase: SSL is added in config; use NoPrepare for transaction mode (6543)."""
-    # Use parsed connection kwargs when available (handles passwords with =, &, ? in DATABASE_URL).
-    if DATABASE_CONNECTION_KWARGS:
-        conn_kwargs = dict(DATABASE_CONNECTION_KWARGS)
-        if "pooler.supabase.com" in conn_kwargs.get("host", "") and conn_kwargs.get("port") == 6543:
-            conn_kwargs["connection_factory"] = NoPrepareConnection
-        return psycopg2_pool.ThreadedConnectionPool(1, 10, **conn_kwargs)
-    kwargs = {"minconn": 1, "maxconn": 10, "dsn": DATABASE_URL}
-    if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
-        kwargs["connection_factory"] = NoPrepareConnection
-    return psycopg2_pool.ThreadedConnectionPool(**kwargs)
-
 async def _warm_reranker(app):
     # Marks readiness once the load attempt finishes so /health/ready gates traffic
     # until the model is in memory (or the attempt has terminally failed).
@@ -181,7 +165,7 @@ async def lifespan(app):
     last_error = None
     for attempt in range(1, 4):
         try:
-            db_pool = _create_db_pool()
+            db_pool = create_db_pool()
             conn = db_pool.getconn()
             try:
                 create_db(conn)

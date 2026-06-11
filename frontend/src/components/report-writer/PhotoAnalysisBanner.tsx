@@ -11,16 +11,20 @@ export function PhotoAnalysisBanner({
   counts,
   batchStatus,
   syncing,
+  retrying,
   pollReconnecting,
   pollError,
+  onRetryStuck,
 }: {
   hasFolder: boolean
   hasAddress: boolean
   counts: PhotoAnalysisCounts | null
   batchStatus: IngestBatchStatusResponse | null
   syncing: boolean
+  retrying?: boolean
   pollReconnecting?: boolean
   pollError?: string | null
+  onRetryStuck?: () => void
 }) {
   if (!hasAddress && !hasFolder && !counts?.total) {
     return (
@@ -39,6 +43,36 @@ export function PhotoAnalysisBanner({
     )
   }
 
+  const examined = counts?.succeeded ?? 0
+  const total = counts?.total ?? 0
+  const failed = counts?.failed ?? 0
+  const withDamage = counts?.with_damage ?? 0
+  const running = counts?.running ?? 0
+  const showRetryStuck =
+    !!onRetryStuck &&
+    !syncing &&
+    !retrying &&
+    (failed > 0 || running > 0 || !!pollReconnecting || !!pollError)
+
+  const retryButton = showRetryStuck ? (
+    <button
+      type="button"
+      disabled={retrying}
+      onClick={onRetryStuck}
+      style={{
+        marginTop: 8,
+        padding: '6px 12px',
+        borderRadius: 6,
+        border: '1px solid var(--app-border)',
+        background: 'var(--app-surface)',
+        cursor: retrying ? 'wait' : 'pointer',
+        fontSize: 13,
+      }}
+    >
+      {retrying ? 'Retrying…' : 'Retry stuck photos'}
+    </button>
+  ) : null
+
   if (pollError) {
     return (
       <div
@@ -53,6 +87,7 @@ export function PhotoAnalysisBanner({
       >
         Photo status check stopped: {pollError}. Refresh the page or click Confirm &amp; start analysis
         again.
+        {retryButton}
       </div>
     )
   }
@@ -64,11 +99,6 @@ export function PhotoAnalysisBanner({
     batchStatus?.status === 'running' ||
     (counts?.pending ?? 0) > 0 ||
     (counts?.running ?? 0) > 0
-
-  const examined = counts?.succeeded ?? 0
-  const total = counts?.total ?? 0
-  const failed = counts?.failed ?? 0
-  const withDamage = counts?.with_damage ?? 0
 
   if (inFlight) {
     const batchDone = (batchStatus?.succeeded ?? 0) + (batchStatus?.skipped ?? 0)
@@ -91,6 +121,7 @@ export function PhotoAnalysisBanner({
         Analyzing photos… {progress}.
         {pollReconnecting ? ' Server reconnecting — progress will resume shortly.' : ''} You can keep
         editing field notes.
+        {retryButton}
       </div>
     )
   }
@@ -131,6 +162,7 @@ export function PhotoAnalysisBanner({
         }}
       >
         Examined {examined} of {total} photos{damageText}; {failed} failed. You can still generate a draft.
+        {retryButton}
       </div>
     )
   }

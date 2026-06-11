@@ -32,6 +32,7 @@ from app.report_writer.models import (
     GenerationRunResponse,
     GenerationRunsListResponse,
     PhotoAnalysisCountsResponse,
+    PhotoRetryStuckResponse,
     PhotoSyncRequest,
     PhotoSyncResponse,
     RegenerateSectionRequest,
@@ -55,11 +56,16 @@ from app.report_writer.queries import (
     get_generation_run,
     insert_claim_image,
     list_claim_images,
+    reset_stuck_claim_photos,
     list_claims,
     list_generation_runs,
     update_claim,
 )
-from app.report_writer.photo_sync import claim_photo_analysis_counts, sync_claim_photos_from_drive
+from app.report_writer.photo_sync import (
+    claim_photo_analysis_counts,
+    enqueue_vision_jobs_for_claim,
+    sync_claim_photos_from_drive,
+)
 from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
 from app.report_writer.storage import storage_path_for, write_claim_image
@@ -228,6 +234,34 @@ async def sync_photos_from_drive(
         request.app.state.db_pool.putconn(conn)
 
     return PhotoSyncResponse(**result)
+
+
+@router.post("/claims/{claim_id}/photos/retry-stuck", response_model=PhotoRetryStuckResponse, status_code=202)
+async def retry_stuck_photos(
+    request: Request,
+    claim_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Reset orphaned running/failed image rows and re-enqueue vision jobs."""
+
+    def _retry(conn):
+        reset = reset_stuck_claim_photos(conn, claim_id, user_id, max_age_minutes=None)
+        if reset is None:
+            return None
+        images = list_claim_images(conn, claim_id, user_id)
+        enqueue = enqueue_vision_jobs_for_claim(
+            conn,
+            claim_id=claim_id,
+            user_id=user_id,
+            images=images,
+            skip_active=True,
+        )
+        return {**reset, **enqueue}
+
+    result = await _with_conn(request, _retry)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return PhotoRetryStuckResponse(**result)
 
 
 @router.get("/claims/{claim_id}/photos/batch/{batch_id}", response_model=IngestBatchStatusResponse)
@@ -741,8 +775,13 @@ async def export_docx(
         raise HTTPException(status_code=404, detail="Claim not found")
     claim, sections, images = result
     export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
-    data = draft_to_docx_bytes(sections, title=claim["title"] or export_title, claim=claim, images=images)
-    filename = (claim["title"] or "report").replace(" ", "_")[:80] + ".docx"
+    title = claim["title"] or export_title
+
+    def _render_docx() -> bytes:
+        return draft_to_docx_bytes(sections, title=title, claim=claim, images=images)
+
+    data = await asyncio.to_thread(_render_docx)
+    filename = (title or "report").replace(" ", "_")[:80] + ".docx"
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -769,8 +808,13 @@ async def export_pdf(
         raise HTTPException(status_code=404, detail="Claim not found")
     claim, sections, images = result
     export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
-    data = draft_to_pdf_bytes(sections, title=claim["title"] or export_title, claim=claim, images=images)
-    filename = (claim["title"] or "report").replace(" ", "_")[:80] + ".pdf"
+    title = claim["title"] or export_title
+
+    def _render_pdf() -> bytes:
+        return draft_to_pdf_bytes(sections, title=title, claim=claim, images=images)
+
+    data = await asyncio.to_thread(_render_pdf)
+    filename = (title or "report").replace(" ", "_")[:80] + ".pdf"
     return Response(
         content=data,
         media_type="application/pdf",

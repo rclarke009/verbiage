@@ -522,6 +522,68 @@ def upsert_drive_claim_image(
         cur.close()
 
 
+def update_image_storage_path(
+    conn,
+    image_id: str,
+    storage_path: str,
+    size_bytes: int,
+) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE report_claim_images
+            SET storage_path = %s, size_bytes = %s
+            WHERE image_id = %s::uuid
+            """,
+            (storage_path, size_bytes, image_id),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def reset_stuck_claim_photos(
+    conn,
+    claim_id: str,
+    user_id: str,
+    *,
+    max_age_minutes: int | None = None,
+) -> dict[str, int] | None:
+    """Reset stuck/failed image rows and requeue running ingest jobs for one claim."""
+    from app.db import reclaim_stale_ingest_jobs
+
+    if not get_claim(conn, claim_id, user_id):
+        return None
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE report_claim_images i
+            SET analysis_status = 'pending'
+            FROM report_claims c
+            WHERE i.claim_id = c.claim_id
+              AND i.claim_id = %s::uuid
+              AND c.user_id = %s
+              AND i.vision_analysis IS NULL
+              AND i.analysis_status IN ('running', 'failed')
+            """,
+            (claim_id, user_id),
+        )
+        reset_images = cur.rowcount
+    finally:
+        cur.close()
+
+    reclaimed_jobs = reclaim_stale_ingest_jobs(
+        conn,
+        max_age_minutes=max_age_minutes,
+        claim_id=claim_id,
+    )
+    conn.commit()
+    return {"reset_images": reset_images, "reclaimed_jobs": reclaimed_jobs}
+
+
 def update_image_analysis_status(conn, image_id: str, status: str) -> None:
     cur = conn.cursor()
     try:

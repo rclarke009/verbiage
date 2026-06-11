@@ -135,6 +135,24 @@ export async function syncClaimPhotosFromDrive(claimId: string, folderId?: strin
   }>
 }
 
+export async function retryStuckClaimPhotos(claimId: string) {
+  const res = await apiFetchRetry(
+    `${BASE}/claims/${claimId}/photos/retry-stuck`,
+    { method: 'POST', body: '{}' },
+    { retries: 4, baseDelayMs: 1500 },
+  )
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{
+    reset_images: number
+    reclaimed_jobs: number
+    batch_id: string | null
+    enqueued: number
+    total: number
+    image_count: number
+    job_ids: string[]
+  }>
+}
+
 export async function getClaimPhotoBatchStatus(claimId: string, batchId: string) {
   const res = await apiFetchRetry(`${BASE}/claims/${claimId}/photos/batch/${batchId}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))

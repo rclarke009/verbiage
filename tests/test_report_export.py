@@ -11,7 +11,7 @@ import pytest
 from app.report_writer.boilerplate import purpose_text, weather_text
 from app.report_writer.docx_ooxml import xml_escape
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
-from app.report_writer.report_document import build_report_document
+from app.report_writer.report_document import _read_image_bytes, build_report_document
 
 
 @pytest.fixture
@@ -78,6 +78,24 @@ def test_weather_boilerplate_includes_mph_when_metadata_present(sample_claim: di
     assert "58 mph" in weather
     assert "72 mph" in weather
     assert "KRSW" in weather
+
+
+def test_read_image_bytes_falls_back_to_drive_when_storage_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_read(_path: str) -> bytes:
+        raise OSError("missing file")
+
+    def fake_download(file_id: str, _name: str) -> tuple[bytes, str]:
+        calls.append(file_id)
+        return b"\xff\xd8\xff", "image/jpeg"
+
+    monkeypatch.setattr("app.report_writer.report_document.read_claim_image_bytes", fake_read)
+    monkeypatch.setattr("app.drive_client.download_drive_file_bytes", fake_download)
+
+    data = _read_image_bytes({"storage_path": "user/claim/img.jpg", "drive_file_id": "drive-123"})
+    assert data == b"\xff\xd8\xff"
+    assert calls == ["drive-123"]
 
 
 def test_build_report_document(sample_claim: dict, sample_sections: dict[str, dict]) -> None:

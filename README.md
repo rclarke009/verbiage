@@ -142,12 +142,31 @@ uvicorn app.main:app --reload
 
 ### Deploy (Render)
 
-Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml) is a [Blueprint](https://render.com/docs/blueprint-spec) that codifies the deploy settings:
+Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml) is a [Blueprint](https://render.com/docs/blueprint-spec) with **two services**:
 
-- **Health check** → `/health/ready`, which returns 503 until both Postgres is reachable and the cross-encoder reranker has finished warming up, so Render holds traffic off the instance until the model is loaded (instead of loading it on the request path).
-- **`RERANK_ENABLED=1`** plus **`HF_HOME` / `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE`** mirror the Dockerfile, which bakes the reranker model into the image so cold starts never re-download it.
-- Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard, never in git, and untouched by a blueprint sync.
-- Instance plan/memory is intentionally not pinned in the blueprint; size it in the dashboard (the reranker needs real RAM headroom).
+| Service | Role |
+|---------|------|
+| **Web** (`rag-document-analysis-backend`) | API, Report Writer, RAG, SPA |
+| **Worker** (`rag-ingest-worker`) | Drive ingest + claim photo vision jobs (`python -m app.worker_main`) |
+
+**Small instances (<2GB RAM):**
+
+- Web sets **`RERANK_ENABLED=0`** — skips the ~100MB cross-encoder and avoids `/health/ready` 503s during reranker warm-up. `/ask` uses RRF fusion only until you upgrade and re-enable reranker.
+- Web sets **`INGEST_WORKER_ENABLED=0`** — background jobs run on the worker service so OOM during photo analysis does not restart the API.
+- Size both services in the Render dashboard (Starter minimum for production).
+
+**Health check** → `/health/ready` (Postgres only when reranker disabled).
+
+Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
+
+#### Stuck photo analysis (ops)
+
+If the UI shows “Analyzing photos…” for hours after a server restart/OOM:
+
+1. Click **Retry stuck photos** in Report Writer (calls `POST /report-writer/claims/{id}/photos/retry-stuck`).
+2. Or run the SQL in [setup.md](setup.md#stuck-photo-analysis) in Supabase SQL Editor, then **Confirm & start analysis** once.
+
+The ingest worker reclaims ingest jobs stuck in `running` for **`STALE_JOB_MINUTES`** (default 15) on startup and every 10 minutes.
 
 ---
 
@@ -185,7 +204,7 @@ Interactive docs: **http://localhost:8000/docs** when the server is running.
 | Route | Notes |
 |-------|--------|
 | `GET /health` | Liveness (process up) |
-| `GET /health/ready` | Readiness (Postgres + reranker warm-up) — wired to Render's health check; returns 503 until the cross-encoder is loaded so traffic isn't routed mid-warm-up |
+| `GET /health/ready` | Readiness (Postgres; reranker warm-up when `RERANK_ENABLED=1`) — Render health check |
 | `GET /documents` | Shared library listing |
 | `POST /documents/{doc_id}/reindex` | Re-chunk/re-embed from stored `full_text` |
 | `GET /drive/files` | Drive folder list + `index_status` / `summary` |
