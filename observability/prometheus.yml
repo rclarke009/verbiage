@@ -1,5 +1,6 @@
 # Scrape Verbiage GET /metrics (requires METRICS_ENABLED=true on the app).
-# Target: API on the host at :8000 (uvicorn or root docker-compose app service).
+# - verbiage-local: API on the host at :8000 (uvicorn or root docker-compose app service)
+# - verbiage-prod: Render production (secrets/metrics_token must match Render METRICS_TOKEN)
 
 global:
   scrape_interval: 15s
@@ -11,6 +12,15 @@ scrape_configs:
     static_configs:
       - targets: ["host.docker.internal:8000"]
     # Bearer token must match METRICS_TOKEN in the app .env (see secrets/metrics_token).
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token
+
+  - job_name: verbiage-prod
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rag-document-analysis-backend.onrender.com"]
     authorization:
       type: Bearer
       credentials_file: /etc/prometheus/secrets/metrics_token
