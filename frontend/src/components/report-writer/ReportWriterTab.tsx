@@ -41,7 +41,15 @@ export function ReportWriterTab() {
   const [localDraft, setLocalDraft] = useState<Claim | null>(null)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const { state: genState, generating, generate, reset: resetStream } = useReportWriterStream()
+  const pdfAbortRef = useRef<AbortController | null>(null)
+  const {
+    state: genState,
+    generating,
+    cancelling,
+    generate,
+    cancel: cancelGeneration,
+    reset: resetStream,
+  } = useReportWriterStream()
   const photoSync = useClaimPhotoSync(activeId)
 
   const reportTypesQuery = useQuery({
@@ -148,10 +156,33 @@ export function ReportWriterTab() {
     }
     await saveMutation.mutateAsync()
     resetStream()
-    await generate(activeId, `/report-writer/claims/${activeId}/generate`, undefined, sectionKeys)
+    const wasCancelled = await generate(
+      activeId,
+      `/report-writer/claims/${activeId}/generate`,
+      undefined,
+      sectionKeys,
+    )
+    if (wasCancelled) {
+      setLocalDraft(null)
+      queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
+      return
+    }
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
     queryClient.invalidateQueries({ queryKey: ['report-writer-runs', activeId] })
+  }
+
+  const handleCancelGeneration = async () => {
+    await cancelGeneration()
+    if (!activeId) return
+    setLocalDraft(null)
+    queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
+  }
+
+  const handleCancelPdfPreview = () => {
+    pdfAbortRef.current?.abort()
+    pdfAbortRef.current = null
+    setPdfLoading(false)
   }
 
   const handleConfirmPhotoSync = async () => {
@@ -162,13 +193,18 @@ export function ReportWriterTab() {
   }
 
   const handleRegenerateSection = async (sectionKey: string) => {
-    if (!activeId) return
-    await generate(
+    if (!activeId || generating) return
+    const wasCancelled = await generate(
       activeId,
       `/report-writer/claims/${activeId}/sections/${sectionKey}/regenerate`,
       { section_key: sectionKey },
       sectionKeys,
     )
+    if (wasCancelled) {
+      setLocalDraft(null)
+      queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
+      return
+    }
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
   }
@@ -236,18 +272,25 @@ export function ReportWriterTab() {
                 disabled={pdfLoading}
                 onClick={async () => {
                   if (!activeId) return
+                  pdfAbortRef.current?.abort()
+                  const controller = new AbortController()
+                  pdfAbortRef.current = controller
                   setPdfLoading(true)
                   try {
-                    const blob = await fetchClaimPdfBlob(activeId)
+                    const blob = await fetchClaimPdfBlob(activeId, controller.signal)
                     const url = URL.createObjectURL(blob)
                     setPdfPreviewUrl(prev => {
                       if (prev) URL.revokeObjectURL(prev)
                       return url
                     })
                   } catch (err) {
+                    if (controller.signal.aborted) return
                     console.log('MYDEBUG →', err)
                     window.alert(err instanceof Error ? err.message : 'PDF preview failed')
                   } finally {
+                    if (pdfAbortRef.current === controller) {
+                      pdfAbortRef.current = null
+                    }
                     setPdfLoading(false)
                   }
                 }}
@@ -255,6 +298,15 @@ export function ReportWriterTab() {
               >
                 {pdfLoading ? 'Loading PDF…' : 'Preview PDF'}
               </button>
+              {pdfLoading ? (
+                <button
+                  type="button"
+                  onClick={handleCancelPdfPreview}
+                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+                >
+                  Cancel PDF
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => exportClaimDocx(activeId, draft.title)}
@@ -285,12 +337,22 @@ export function ReportWriterTab() {
               batchStatus={photoSync.batchStatus}
               syncing={photoSync.syncing}
               retrying={photoSync.retrying}
+              cancelling={photoSync.cancelling}
               pollReconnecting={photoSync.pollReconnecting}
               pollError={photoSync.pollError}
               onRetryStuck={() => void photoSync.retryStuck()}
+              onCancel={
+                photoSync.batchId && photoSync.analysisActive
+                  ? () => void photoSync.cancelAnalysis()
+                  : undefined
+              }
             />
 
-            <GenerationProgress state={genState} />
+            <GenerationProgress
+              state={genState}
+              onCancel={generating ? () => void handleCancelGeneration() : undefined}
+              cancelling={cancelling}
+            />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 20 }}>
               <div style={{ minWidth: 0 }}>
@@ -315,6 +377,7 @@ export function ReportWriterTab() {
                   streamSections={genState.status !== 'idle' ? genState.sections : undefined}
                   onSectionChange={handleSectionChange}
                   onRegenerateSection={handleRegenerateSection}
+                  regenerateDisabled={generating}
                 />
               </div>
               <aside>

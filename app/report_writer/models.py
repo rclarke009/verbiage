@@ -74,6 +74,15 @@ class ResumeRequest(BaseModel):
     action: str = Field(default="continue", description="continue | cancel")
 
 
+class CancelGenerationRequest(BaseModel):
+    run_id: str
+
+
+class BatchCancelResponse(BaseModel):
+    status: str = "cancelled"
+    cancelled_jobs: int = 0
+
+
 class ReportTypeSectionModel(BaseModel):
     key: str
     label: str

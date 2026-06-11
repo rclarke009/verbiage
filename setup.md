@@ -197,6 +197,8 @@ Then click **Confirm & start analysis** once, or wait for the ingest worker to d
 
 Ensure **`INGEST_WORKER_ENABLED=1`** on the web service (default in `render.yaml`). A separate worker is optional — see [docs/render-worker-setup.md](docs/render-worker-setup.md).
 
+**Cancel long-running work:** Report generation, photo analysis, PDF preview, and Drive ingest show a **Cancel** control while running. Cancel stops queued background jobs server-side (pending ingest/vision jobs are marked cancelled so OpenAI credits are not spent on the remainder).
+
 ---
 
 ## Troubleshooting

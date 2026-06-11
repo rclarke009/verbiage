@@ -382,6 +382,7 @@ def test_ingest_batch_status_returns_counts():
         "succeeded": 1,
         "failed": 0,
         "skipped": 0,
+        "cancelled": 0,
         "created_at": now,
         "updated_at": now,
     }
@@ -400,6 +401,40 @@ def test_ingest_batch_status_returns_counts():
     assert data["status"] == "running"
     assert data["succeeded"] == 1
     assert data["pending"] == 1
+
+
+def test_ingest_batch_cancel_route():
+    client = api_client()
+
+    def do_cancel(conn, batch_id):
+        assert batch_id == "batch-1"
+        return 3
+
+    try:
+        with patch.object(main, "with_db_conn_retry", new=AsyncMock(side_effect=run_async_db_fn)):
+            with patch.object(main, "get_ingest_batch", return_value={
+                "id": "batch-1",
+                "kind": "google_drive",
+                "status": "running",
+                "total": 5,
+                "pending": 3,
+                "running": 0,
+                "succeeded": 2,
+                "failed": 0,
+                "skipped": 0,
+                "cancelled": 0,
+                "created_at": None,
+                "updated_at": None,
+            }):
+                with patch.object(main, "cancel_ingest_batch", side_effect=do_cancel):
+                    resp = client.post("/ingest/batches/batch-1/cancel")
+    finally:
+        clear_api_overrides()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "cancelled"
+    assert data["cancelled_jobs"] == 3
 
 
 def test_drive_files_lists_with_index_status():

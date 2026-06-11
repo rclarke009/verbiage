@@ -5,6 +5,22 @@ function damageClause(examined: number, withDamage: number): string {
   return ` (${withDamage} with damage so far)`
 }
 
+function analysisInFlight(
+  syncing: boolean,
+  pollReconnecting: boolean | undefined,
+  batchStatus: IngestBatchStatusResponse | null,
+  counts: PhotoAnalysisCounts | null,
+): boolean {
+  return (
+    syncing ||
+    !!pollReconnecting ||
+    batchStatus?.status === 'pending' ||
+    batchStatus?.status === 'running' ||
+    (counts?.pending ?? 0) > 0 ||
+    (counts?.running ?? 0) > 0
+  )
+}
+
 export function PhotoAnalysisBanner({
   hasFolder,
   hasAddress,
@@ -12,9 +28,11 @@ export function PhotoAnalysisBanner({
   batchStatus,
   syncing,
   retrying,
+  cancelling,
   pollReconnecting,
   pollError,
   onRetryStuck,
+  onCancel,
 }: {
   hasFolder: boolean
   hasAddress: boolean
@@ -22,9 +40,11 @@ export function PhotoAnalysisBanner({
   batchStatus: IngestBatchStatusResponse | null
   syncing: boolean
   retrying?: boolean
+  cancelling?: boolean
   pollReconnecting?: boolean
   pollError?: string | null
   onRetryStuck?: () => void
+  onCancel?: () => void
 }) {
   if (!hasAddress && !hasFolder && !counts?.total) {
     return (
@@ -52,7 +72,28 @@ export function PhotoAnalysisBanner({
     !!onRetryStuck &&
     !syncing &&
     !retrying &&
+    !cancelling &&
     (failed > 0 || running > 0 || !!pollReconnecting || !!pollError)
+
+  const cancelButton =
+    onCancel && analysisInFlight(syncing, pollReconnecting, batchStatus, counts) ? (
+      <button
+        type="button"
+        disabled={cancelling}
+        onClick={onCancel}
+        style={{
+          marginLeft: 8,
+          padding: '4px 10px',
+          borderRadius: 6,
+          border: '1px solid var(--app-border)',
+          background: 'var(--app-surface)',
+          cursor: cancelling ? 'wait' : 'pointer',
+          fontSize: 12,
+        }}
+      >
+        {cancelling ? 'Cancelling…' : 'Cancel'}
+      </button>
+    ) : null
 
   const retryButton = showRetryStuck ? (
     <button
@@ -92,13 +133,29 @@ export function PhotoAnalysisBanner({
     )
   }
 
-  const inFlight =
-    syncing ||
-    pollReconnecting ||
-    batchStatus?.status === 'pending' ||
-    batchStatus?.status === 'running' ||
-    (counts?.pending ?? 0) > 0 ||
-    (counts?.running ?? 0) > 0
+  if (batchStatus?.status === 'cancelled') {
+    const examinedAfterCancel = counts?.succeeded ?? 0
+    const cancelledCount = batchStatus.cancelled ?? 0
+    return (
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 6,
+          background: 'var(--app-warning-bg)',
+          borderLeft: '4px solid var(--app-warning)',
+          fontSize: 13,
+          marginBottom: 12,
+        }}
+      >
+        Photo analysis cancelled. {examinedAfterCancel} photo{examinedAfterCancel === 1 ? '' : 's'}{' '}
+        examined before stop
+        {cancelledCount > 0 ? `; ${cancelledCount} queued job${cancelledCount === 1 ? '' : 's'} skipped` : ''}.
+        {retryButton}
+      </div>
+    )
+  }
+
+  const inFlight = analysisInFlight(syncing, pollReconnecting, batchStatus, counts)
 
   if (inFlight) {
     const batchDone = (batchStatus?.succeeded ?? 0) + (batchStatus?.skipped ?? 0)
@@ -120,7 +177,8 @@ export function PhotoAnalysisBanner({
       >
         Analyzing photos… {progress}.
         {pollReconnecting ? ' Server reconnecting — progress will resume shortly.' : ''} You can keep
-        editing field notes.
+        editing field notes. Cancel stops queued photos; the current one may finish.
+        {cancelButton}
         {retryButton}
       </div>
     )

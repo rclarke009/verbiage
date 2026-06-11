@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-IngestBatchStatus = Literal["pending", "running", "completed", "failed"]
+IngestBatchStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 
 class IngestBatchEnqueueResponse(BaseModel):
@@ -24,6 +24,12 @@ class IngestBatchStatusResponse(BaseModel):
     succeeded: int
     failed: int
     skipped: int
+    cancelled: int = 0
     errors: list[str] = Field(default_factory=list, description="Recent failed job messages")
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class BatchCancelResponse(BaseModel):
+    status: str = "cancelled"
+    cancelled_jobs: int = 0

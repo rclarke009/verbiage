@@ -15,7 +15,9 @@ from app.db import (
     doc_exist,
     finish_ingest_job,
     get_document_index_by_doc_ids,
+    get_ingest_job_status,
     get_valid_conn,
+    is_ingest_batch_cancelled,
     reclaim_stale_ingest_jobs,
     refresh_batch_counts,
 )
@@ -47,6 +49,18 @@ def _ingest_response_to_result(response: IngestResponse) -> dict[str, Any]:
     return response.model_dump()
 
 
+def _should_skip_cancelled_job(pool, job: dict[str, Any]) -> bool:
+    """True when the job or batch was cancelled before expensive work."""
+    conn = get_valid_conn(pool)
+    try:
+        status = get_ingest_job_status(conn, job["id"])
+        if status != "running":
+            return True
+        return is_ingest_batch_cancelled(conn, job["batch_id"])
+    finally:
+        pool.putconn(conn)
+
+
 async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict | None, str | None]:
     """
     Process one google_drive job. Returns (terminal_status, result_dict, error_message).
@@ -56,6 +70,9 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
     payload = job["payload"] or {}
     drive_file_id = payload.get("drive_file_id") or doc_id
 
+    if _should_skip_cancelled_job(pool, job):
+        return "skipped", {"doc_id": doc_id, "reason": "batch_cancelled"}, None
+
     try:
         doc = await fetch_drive_file_async(drive_file_id)
     except DriveClientError as e:
@@ -63,6 +80,9 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
 
     source_url = drive_source_url_for_mime(doc.doc_id, doc.mime_type)
     drive_modified = doc.source_modified_at
+
+    if _should_skip_cancelled_job(pool, job):
+        return "skipped", {"doc_id": doc_id, "reason": "batch_cancelled"}, None
 
     conn = get_valid_conn(pool)
     try:
@@ -131,8 +151,25 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
     finally:
         pool.putconn(conn)
 
+    if _should_skip_cancelled_job(pool, job):
+        conn_skip = get_valid_conn(pool)
+        try:
+            update_image_analysis_status(conn_skip, image_id, "pending")
+            conn_skip.commit()
+        finally:
+            pool.putconn(conn_skip)
+        return "skipped", {"image_id": image_id, "reason": "batch_cancelled"}, None
+
     try:
         data, mime = await download_drive_file_bytes_async(drive_file_id, img.get("filename") or drive_file_id)
+        if _should_skip_cancelled_job(pool, job):
+            conn_skip = get_valid_conn(pool)
+            try:
+                update_image_analysis_status(conn_skip, image_id, "pending")
+                conn_skip.commit()
+            finally:
+                pool.putconn(conn_skip)
+            return "skipped", {"image_id": image_id, "reason": "batch_cancelled"}, None
         result = await analyze_image_bytes(data, mime)
         result["image_id"] = image_id
 

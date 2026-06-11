@@ -52,6 +52,15 @@ export async function getIngestBatchStatus(batchId: string): Promise<IngestBatch
   return res.json() as Promise<IngestBatchStatusResponse>
 }
 
+export async function cancelIngestBatch(batchId: string) {
+  const res = await apiFetch(`/ingest/batches/${encodeURIComponent(batchId)}/cancel`, {
+    method: 'POST',
+    body: '{}',
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{ status: string; cancelled_jobs: number }>
+}
+
 export function pollIngestBatch(
   batchId: string,
   onUpdate: (status: IngestBatchStatusResponse) => void,
@@ -66,7 +75,11 @@ export function pollIngestBatch(
       try {
         const status = await getIngestBatchStatus(batchId)
         onUpdate(status)
-        if (status.status === 'completed' || status.status === 'failed') {
+        if (
+          status.status === 'completed' ||
+          status.status === 'failed' ||
+          status.status === 'cancelled'
+        ) {
           stopped = true
           if (timer) clearInterval(timer)
           resolve(status)

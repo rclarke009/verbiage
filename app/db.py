@@ -235,6 +235,7 @@ def create_db(conn: PgConnection) -> None:
                 succeeded INT NOT NULL DEFAULT 0,
                 failed INT NOT NULL DEFAULT 0,
                 skipped INT NOT NULL DEFAULT 0,
+                cancelled INT NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
@@ -257,6 +258,17 @@ def create_db(conn: PgConnection) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status_created ON ingest_jobs(status, created_at);"
         )
+        cur.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'ingest_batches'
+                      AND column_name = 'cancelled'
+                ) THEN
+                    ALTER TABLE ingest_batches ADD COLUMN cancelled INT NOT NULL DEFAULT 0;
+                END IF;
+            END $$;
+        """)
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_ingest_jobs_batch ON ingest_jobs(batch_id);"
         )
@@ -836,8 +848,8 @@ def create_ingest_batch(conn: PgConnection, kind: str, total: int) -> str:
         cur.execute(
             """
             INSERT INTO ingest_batches (
-                kind, status, total, pending, running, succeeded, failed, skipped
-            ) VALUES (%s, 'pending', %s, %s, 0, 0, 0, 0)
+                kind, status, total, pending, running, succeeded, failed, skipped, cancelled
+            ) VALUES (%s, 'pending', %s, %s, 0, 0, 0, 0, 0)
             RETURNING id::text
             """,
             (kind, total, total),
@@ -1002,9 +1014,13 @@ def refresh_batch_counts(conn: PgConnection, batch_id: str) -> None:
                 succeeded = sub.succeeded,
                 failed = sub.failed,
                 skipped = sub.skipped,
+                cancelled = sub.cancelled,
                 status = CASE
                     WHEN sub.running > 0 OR sub.pending > 0 THEN
-                        CASE WHEN sub.running > 0 THEN 'running' ELSE 'pending' END
+                        CASE WHEN b.status = 'cancelled' THEN 'cancelled'
+                             WHEN sub.running > 0 THEN 'running'
+                             ELSE 'pending' END
+                    WHEN sub.cancelled > 0 THEN 'cancelled'
                     WHEN sub.failed > 0 AND sub.succeeded = 0 AND sub.skipped = 0 THEN 'failed'
                     ELSE 'completed'
                 END,
@@ -1015,7 +1031,8 @@ def refresh_batch_counts(conn: PgConnection, batch_id: str) -> None:
                     COUNT(*) FILTER (WHERE status = 'running') AS running,
                     COUNT(*) FILTER (WHERE status = 'succeeded') AS succeeded,
                     COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-                    COUNT(*) FILTER (WHERE status = 'skipped') AS skipped
+                    COUNT(*) FILTER (WHERE status = 'skipped') AS skipped,
+                    COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
                 FROM ingest_jobs
                 WHERE batch_id = %s::uuid
             ) sub
@@ -1027,13 +1044,58 @@ def refresh_batch_counts(conn: PgConnection, batch_id: str) -> None:
         cur.close()
 
 
+def get_ingest_job_status(conn: PgConnection, job_id: str) -> str | None:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT status FROM ingest_jobs WHERE id = %s::uuid", (job_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        cur.close()
+
+
+def is_ingest_batch_cancelled(conn: PgConnection, batch_id: str) -> bool:
+    """True when user cancelled this batch (pending jobs cleared; may still be winding down)."""
+    batch = get_ingest_batch(conn, batch_id)
+    if not batch:
+        return False
+    return batch["status"] == "cancelled" or batch.get("cancelled", 0) > 0
+
+
+def cancel_ingest_batch(conn: PgConnection, batch_id: str) -> int:
+    """Cancel all pending jobs in a batch. Returns number of jobs cancelled."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE ingest_jobs
+            SET status = 'cancelled', updated_at = now()
+            WHERE batch_id = %s::uuid AND status = 'pending'
+            """,
+            (batch_id,),
+        )
+        cancelled_count = cur.rowcount
+        cur.execute(
+            """
+            UPDATE ingest_batches
+            SET status = 'cancelled', updated_at = now()
+            WHERE id = %s::uuid
+            """,
+            (batch_id,),
+        )
+    finally:
+        cur.close()
+    refresh_batch_counts(conn, batch_id)
+    return cancelled_count
+
+
 def get_ingest_batch(conn: PgConnection, batch_id: str) -> dict[str, Any] | None:
     cur = conn.cursor()
     try:
         cur.execute(
             """
             SELECT id::text, kind, status, total, pending, running, succeeded, failed, skipped,
-                   created_at, updated_at
+                   cancelled, created_at, updated_at
             FROM ingest_batches WHERE id = %s::uuid
             """,
             (batch_id,),
@@ -1051,8 +1113,9 @@ def get_ingest_batch(conn: PgConnection, batch_id: str) -> dict[str, Any] | None
             "succeeded": row[6],
             "failed": row[7],
             "skipped": row[8],
-            "created_at": row[9],
-            "updated_at": row[10],
+            "cancelled": row[9],
+            "created_at": row[10],
+            "updated_at": row[11],
         }
     finally:
         cur.close()

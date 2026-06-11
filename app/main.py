@@ -25,6 +25,7 @@ from app.reranker import Reranker
 
 from app.db import (
     INGEST_JOB_KIND_GOOGLE_DRIVE,
+    cancel_ingest_batch,
     create_db,
     create_db_pool,
     create_ingest_batch,
@@ -65,7 +66,7 @@ from app.indexing import index_document, reindex_document
 from app.embeddings import HttpEmbedder
 from app.http_client import aclose_async_client, get_async_client
 from app.ingest_core import ingest_new_document
-from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusResponse
+from app.ingest_jobs import BatchCancelResponse, IngestBatchEnqueueResponse, IngestBatchStatusResponse
 from app.ingest_worker import ingest_worker_loop
 from app.retrieval import (
     FusedHit,
@@ -821,12 +822,42 @@ async def get_ingest_batch_status(
             succeeded=batch["succeeded"],
             failed=batch["failed"],
             skipped=batch["skipped"],
+            cancelled=batch.get("cancelled", 0),
             errors=errors,
             created_at=batch["created_at"],
             updated_at=batch["updated_at"],
         )
 
     return await with_db_conn_retry(request, do_get)
+
+
+@app.post("/ingest/batches/{batch_id}/cancel", response_model=BatchCancelResponse)
+async def cancel_ingest_batch_route(
+    request: Request,
+    batch_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Cancel pending jobs in an ingest batch."""
+
+    async def do_cancel(conn):
+        batch = get_ingest_batch(conn, batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        if batch["kind"] == "claim_photo_sync":
+            from app.db import get_ingest_batch_claim_context
+            from app.report_writer.queries import get_claim
+
+            ctx = get_ingest_batch_claim_context(conn, batch_id)
+            if not ctx or not get_claim(conn, ctx["claim_id"], user_id):
+                raise HTTPException(status_code=404, detail="Batch not found")
+        if batch["status"] in ("completed", "failed", "cancelled"):
+            return batch.get("cancelled", 0)
+        cancelled_jobs = cancel_ingest_batch(conn, batch_id)
+        conn.commit()
+        return cancelled_jobs
+
+    cancelled_jobs = await with_db_conn_retry(request, do_cancel)
+    return BatchCancelResponse(cancelled_jobs=cancelled_jobs)
 
 
 def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> str | None:

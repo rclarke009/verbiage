@@ -114,7 +114,7 @@ export interface IngestBatchEnqueueResponse {
   job_ids: string[]
 }
 
-export type IngestBatchStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type IngestBatchStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface IngestBatchStatusResponse {
   batch_id: string
@@ -126,6 +126,7 @@ export interface IngestBatchStatusResponse {
   succeeded: number
   failed: number
   skipped: number
+  cancelled?: number
   errors: string[]
   created_at?: string | null
   updated_at?: string | null
@@ -278,7 +279,7 @@ export interface GenerationState {
   runId: string | null
   claimId: string | null
   activeNode: string | null
-  status: 'idle' | 'running' | 'complete' | 'refused' | 'error'
+  status: 'idle' | 'running' | 'complete' | 'refused' | 'error' | 'cancelled'
   refusalReason: string | null
   retrievedSources: ReportWriterSource[]
   sections: Record<string, GenerationSectionState>
