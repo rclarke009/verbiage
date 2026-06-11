@@ -10,7 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.auth import get_current_user
 from app.config import GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID, GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL
-from app.db import get_ingest_batch, get_ingest_batch_errors, get_valid_conn
+from app.db import cancel_ingest_batch, get_ingest_batch, get_ingest_batch_errors, get_valid_conn
 from app.drive_client import (
     DriveClientError,
     build_drive_folder_context,
@@ -27,6 +27,8 @@ from app.report_writer.models import (
     ClaimResponse,
     ClaimUpdateRequest,
     ClaimsListResponse,
+    BatchCancelResponse,
+    CancelGenerationRequest,
     DriveFolderMatchResponse,
     GenerateRequest,
     GenerationRunResponse,
@@ -46,6 +48,7 @@ from app.report_writer.models import (
 )
 from app.report_writer.queries import (
     claim_has_generated_sections,
+    cancel_generation_run_if_running,
     create_claim,
     create_generation_run,
     create_section_revision,
@@ -119,6 +122,36 @@ async def _with_conn(request: Request, fn):
         return await asyncio.to_thread(fn, conn)
     finally:
         pool.putconn(conn)
+
+
+async def _mark_run_cancelled(request: Request, claim_id: str, run_id: str, user_id: str) -> None:
+    def _cancel(conn):
+        cancel_generation_run_if_running(
+            conn,
+            claim_id=claim_id,
+            run_id=run_id,
+            user_id=user_id,
+        )
+
+    await _with_conn(request, _cancel)
+
+
+def _batch_status_response(batch: dict, errors: list[str]) -> IngestBatchStatusResponse:
+    return IngestBatchStatusResponse(
+        batch_id=batch["id"],
+        kind=batch["kind"],
+        status=batch["status"],
+        total=batch["total"],
+        pending=batch["pending"],
+        running=batch["running"],
+        succeeded=batch["succeeded"],
+        failed=batch["failed"],
+        skipped=batch["skipped"],
+        cancelled=batch.get("cancelled", 0),
+        errors=errors,
+        created_at=batch["created_at"],
+        updated_at=batch["updated_at"],
+    )
 
 
 @router.get("/drive/match-folder", response_model=DriveFolderMatchResponse)
@@ -290,20 +323,38 @@ async def get_photo_batch_status(
     if not result:
         raise HTTPException(status_code=404, detail="Batch not found")
     batch, errors = result
-    return IngestBatchStatusResponse(
-        batch_id=batch["id"],
-        kind=batch["kind"],
-        status=batch["status"],
-        total=batch["total"],
-        pending=batch["pending"],
-        running=batch["running"],
-        succeeded=batch["succeeded"],
-        failed=batch["failed"],
-        skipped=batch["skipped"],
-        errors=errors,
-        created_at=batch["created_at"],
-        updated_at=batch["updated_at"],
-    )
+    return _batch_status_response(batch, errors)
+
+
+@router.post("/claims/{claim_id}/photos/batch/{batch_id}/cancel", response_model=BatchCancelResponse)
+async def cancel_photo_batch(
+    request: Request,
+    claim_id: str,
+    batch_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    def _cancel(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        batch = get_ingest_batch(conn, batch_id)
+        if not batch or batch["kind"] != "claim_photo_sync":
+            return None
+        from app.db import get_ingest_batch_claim_context
+
+        ctx = get_ingest_batch_claim_context(conn, batch_id)
+        if not ctx or ctx.get("claim_id") != claim_id:
+            return None
+        if batch["status"] in ("completed", "failed", "cancelled"):
+            return batch.get("cancelled", 0)
+        cancelled_jobs = cancel_ingest_batch(conn, batch_id)
+        conn.commit()
+        return cancelled_jobs
+
+    result = await _with_conn(request, _cancel)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return BatchCancelResponse(cancelled_jobs=result)
 
 
 @router.post("/claims", response_model=ClaimResponse)
@@ -516,6 +567,9 @@ async def generate_draft(
                 claim_id=claim_id,
             ):
                 yield frame
+        except asyncio.CancelledError:
+            await _mark_run_cancelled(request, claim_id, run_id, user_id)
+            raise
         finally:
             reset_report_writer_deps(token)
 
@@ -528,6 +582,25 @@ async def generate_draft(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/claims/{claim_id}/generate/cancel")
+async def cancel_generation(
+    request: Request,
+    claim_id: str,
+    body: CancelGenerationRequest,
+    user_id: str = Depends(get_current_user),
+):
+    def _cancel(conn):
+        return cancel_generation_run_if_running(
+            conn,
+            claim_id=claim_id,
+            run_id=body.run_id,
+            user_id=user_id,
+        )
+
+    cancelled = await _with_conn(request, _cancel)
+    return {"status": "cancelled" if cancelled else "not_running"}
 
 
 @router.post("/claims/{claim_id}/sections/{section_key}/regenerate")
@@ -597,6 +670,9 @@ async def regenerate_section(
                 claim_id=claim_id,
             ):
                 yield frame
+        except asyncio.CancelledError:
+            await _mark_run_cancelled(request, claim_id, run_id, user_id)
+            raise
         finally:
             reset_report_writer_deps(token)
 

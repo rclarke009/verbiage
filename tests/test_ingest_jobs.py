@@ -1,5 +1,7 @@
 """Tests for async ingest batch/job helpers and stale re-index logic."""
 
+from unittest.mock import MagicMock, patch
+
 from app.drive_client import compute_index_status
 from app.ingest_jobs import IngestBatchEnqueueResponse, IngestBatchStatusResponse
 
@@ -34,7 +36,28 @@ def test_batch_status_response_model():
         succeeded=1,
         failed=1,
         skipped=0,
+        cancelled=1,
         errors=["doc1: export failed"],
     )
     assert r.status == "running"
     assert r.failed == 1
+    assert r.cancelled == 1
+
+
+def test_cancel_ingest_batch_marks_pending_and_refreshes():
+    from app.db import cancel_ingest_batch
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.rowcount = 4
+
+    with patch("app.db.refresh_batch_counts") as refresh:
+        count = cancel_ingest_batch(conn, "batch-1")
+
+    assert count == 4
+    assert cur.execute.call_count == 2
+    cancel_sql = cur.execute.call_args_list[0][0][0]
+    assert "status = 'cancelled'" in cancel_sql
+    assert "status = 'pending'" in cancel_sql
+    refresh.assert_called_once_with(conn, "batch-1")

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import {
+  cancelPhotoBatch,
   getClaimPhotoBatchStatus,
   getPhotoAnalysisCounts,
   retryStuckClaimPhotos,
@@ -15,7 +16,6 @@ const POLL_MS_MAX = 30000
 
 function isTransientPollError(err: unknown): boolean {
   if (err instanceof TypeError) {
-    // fetch network failure (offline, CORS blip, connection reset)
     return true
   }
   if (!(err instanceof Error)) return false
@@ -43,6 +43,7 @@ export function useClaimPhotoSync(claimId: string | null) {
   const [counts, setCounts] = useState<PhotoAnalysisCounts | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [pollReconnecting, setPollReconnecting] = useState(false)
   const [pollError, setPollError] = useState<string | null>(null)
@@ -90,7 +91,11 @@ export function useClaimPhotoSync(claimId: string | null) {
           setPollError(null)
           pollDelayRef.current = POLL_MS
           await refreshCounts()
-          if (status.status === 'completed' || status.status === 'failed') {
+          if (
+            status.status === 'completed' ||
+            status.status === 'failed' ||
+            status.status === 'cancelled'
+          ) {
             queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
             stopPoll()
             return
@@ -167,17 +172,47 @@ export function useClaimPhotoSync(claimId: string | null) {
     }
   }, [claimId, queryClient, refreshCounts, startPoll])
 
+  const cancelAnalysis = useCallback(async () => {
+    if (!claimId || !batchId) return
+    setCancelling(true)
+    try {
+      await cancelPhotoBatch(claimId, batchId)
+      stopPoll()
+      const status = await getClaimPhotoBatchStatus(claimId, batchId)
+      setBatchStatus(status)
+      await refreshCounts()
+      queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
+    } catch (err) {
+      setPollError(err instanceof Error ? err.message : 'Cancel failed')
+    } finally {
+      setCancelling(false)
+    }
+  }, [batchId, claimId, queryClient, refreshCounts, stopPoll])
+
+  const analysisActive =
+    syncing ||
+    retrying ||
+    cancelling ||
+    pollReconnecting ||
+    (batchStatus != null &&
+      batchStatus.status !== 'completed' &&
+      batchStatus.status !== 'failed' &&
+      batchStatus.status !== 'cancelled')
+
   return {
     batchId,
     batchStatus,
     counts,
     syncing,
     retrying,
+    cancelling,
+    analysisActive,
     syncError,
     pollReconnecting,
     pollError,
     startSync,
     retryStuck,
+    cancelAnalysis,
     refreshCounts,
   }
 }

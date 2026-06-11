@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { driveGetFolder, driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
+import { cancelIngestBatch, driveGetFolder, driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
 import { useAuth } from '../../context/AuthContext'
 import { apiOrigin } from '../../lib/api'
 import {
@@ -167,11 +167,15 @@ export function DriveTab() {
   })
 
   const [batchStatus, setBatchStatus] = useState<IngestBatchStatusResponse | null>(null)
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
+  const [cancellingIngest, setCancellingIngest] = useState(false)
+  const pollStopRef = useRef<(() => void) | null>(null)
 
   const formatBatchProgress = (s: IngestBatchStatusResponse) =>
     `Ingesting ${s.total} doc(s): ${s.succeeded} done, ${s.pending + s.running} in progress` +
     (s.failed ? `, ${s.failed} failed` : '') +
-    (s.skipped ? `, ${s.skipped} skipped` : '')
+    (s.skipped ? `, ${s.skipped} skipped` : '') +
+    (s.cancelled ? `, ${s.cancelled} cancelled` : '')
 
   const ingestMutation = useMutation({
     mutationFn: async () => {
@@ -182,14 +186,39 @@ export function DriveTab() {
       setBatchStatus(null)
       setErr('')
       setMsg(`Queued ${enqueued.total} document(s)…`)
-      const { promise } = pollIngestBatch(enqueued.batch_id, status => {
+      setActiveBatchId(enqueued.batch_id)
+      const { promise, stop } = pollIngestBatch(enqueued.batch_id, status => {
         setBatchStatus(status)
         setMsg(formatBatchProgress(status))
       })
+      pollStopRef.current = stop
       return promise
     },
     onSuccess: finalStatus => {
+      pollStopRef.current = null
+      setActiveBatchId(null)
       setErr('')
+      if (finalStatus.status === 'cancelled') {
+        const cancelMsg =
+          `Ingest cancelled. ${finalStatus.succeeded} indexed before stop` +
+          (finalStatus.cancelled ? `; ${finalStatus.cancelled} queued job(s) skipped` : '') +
+          '.'
+        queryClient.invalidateQueries({ queryKey: ['documents'] })
+        listMutation.mutate(undefined, {
+          onSuccess: data => {
+            setMsg(
+              data.summary
+                ? `${cancelMsg} ${formatListSummary(data.summary)}`
+                : `${cancelMsg} Found ${data.files?.length ?? 0} ingestable file(s).`,
+            )
+          },
+          onError: () => {
+            setMsg(cancelMsg)
+          },
+        })
+        setBatchStatus(null)
+        return
+      }
       const ingestMsg =
         `Ingest finished: ${finalStatus.succeeded} indexed, ${finalStatus.skipped} skipped.` +
         (finalStatus.failed
@@ -212,11 +241,26 @@ export function DriveTab() {
       setBatchStatus(null)
     },
     onError: (e: Error) => {
+      pollStopRef.current = null
+      setActiveBatchId(null)
       setBatchStatus(null)
       setMsg('')
       setErr(e.message)
     },
   })
+
+  const handleCancelIngest = async () => {
+    if (!activeBatchId) return
+    setCancellingIngest(true)
+    try {
+      await cancelIngestBatch(activeBatchId)
+      pollStopRef.current?.()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Cancel failed')
+    } finally {
+      setCancellingIngest(false)
+    }
+  }
 
   useEffect(() => {
     if (!publicConfig || initDoneRef.current) return
@@ -436,6 +480,16 @@ export function DriveTab() {
               : 'Queuing…'
             : 'Ingest'}
         </button>
+        {ingestMutation.isPending && activeBatchId ? (
+          <button
+            type="button"
+            onClick={() => void handleCancelIngest()}
+            disabled={cancellingIngest}
+            style={btnPrimary}
+          >
+            {cancellingIngest ? 'Cancelling…' : 'Cancel ingest'}
+          </button>
+        ) : null}
       </div>
 
       {!canIngestQuick && (

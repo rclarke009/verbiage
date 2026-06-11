@@ -159,6 +159,24 @@ export async function getClaimPhotoBatchStatus(claimId: string, batchId: string)
   return res.json() as Promise<import('../types').IngestBatchStatusResponse>
 }
 
+export async function cancelPhotoBatch(claimId: string, batchId: string) {
+  const res = await apiFetch(`${BASE}/claims/${claimId}/photos/batch/${batchId}/cancel`, {
+    method: 'POST',
+    body: '{}',
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{ status: string; cancelled_jobs: number }>
+}
+
+export async function cancelGenerationRun(claimId: string, runId: string) {
+  const res = await apiFetch(`${BASE}/claims/${claimId}/generate/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ run_id: runId }),
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<{ status: string }>
+}
+
 export async function getPhotoAnalysisCounts(claimId: string) {
   const res = await apiFetchRetry(`${BASE}/claims/${claimId}/photos/analysis-counts`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
@@ -192,12 +210,9 @@ export async function exportClaimDocx(claimId: string, title: string): Promise<v
   URL.revokeObjectURL(url)
 }
 
-export async function fetchClaimPdfBlob(claimId: string): Promise<Blob> {
-  const res = await apiFetchRetry(
-    `${BASE}/claims/${claimId}/export/pdf`,
-    { method: 'GET' },
-    EXPORT_FETCH_OPTS,
-  )
+export async function fetchClaimPdfBlob(claimId: string, signal?: AbortSignal): Promise<Blob> {
+  const init = await getAuthFetchInit({ method: 'GET', signal })
+  const res = await fetch(`${apiOrigin()}${BASE}/claims/${claimId}/export/pdf`, init)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.blob()
 }

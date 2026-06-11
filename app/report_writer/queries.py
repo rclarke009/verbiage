@@ -286,6 +286,34 @@ def finish_generation_run(
         cur.close()
 
 
+def cancel_generation_run_if_running(
+    conn,
+    *,
+    claim_id: str,
+    run_id: str,
+    user_id: str,
+) -> bool:
+    """Mark a running generation run cancelled and reset claim to draft. Returns True if cancelled."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT r.status FROM report_generation_runs r
+            JOIN report_claims c ON c.claim_id = r.claim_id
+            WHERE r.run_id = %s::uuid AND r.claim_id = %s::uuid AND c.user_id = %s
+            """,
+            (run_id, claim_id, user_id),
+        )
+        row = cur.fetchone()
+        if not row or row[0] != "running":
+            return False
+        finish_generation_run(conn, run_id, status="cancelled")
+        set_claim_status_after_run(conn, claim_id, "draft")
+        return True
+    finally:
+        cur.close()
+
+
 def set_claim_status_after_run(conn, claim_id: str, status: str) -> None:
     cur = conn.cursor()
     try:

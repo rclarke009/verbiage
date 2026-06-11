@@ -6,12 +6,14 @@ export function DraftEditor({
   streamSections,
   onSectionChange,
   onRegenerateSection,
+  regenerateDisabled,
 }: {
   claim: Claim
   sections: ReportTypeSection[]
   streamSections?: Record<string, GenerationSectionState>
   onSectionChange: (key: string, content: string) => void
   onRegenerateSection?: (key: string) => void
+  regenerateDisabled?: boolean
 }) {
   if (!sections.length) {
     return (
@@ -42,6 +44,7 @@ export function DraftEditor({
               {onRegenerateSection && content.trim() ? (
                 <button
                   type="button"
+                  disabled={regenerateDisabled}
                   onClick={() => onRegenerateSection(key)}
                   style={{
                     fontSize: 11,
@@ -49,7 +52,8 @@ export function DraftEditor({
                     border: '1px solid var(--app-border)',
                     borderRadius: 4,
                     padding: '2px 8px',
-                    cursor: 'pointer',
+                    cursor: regenerateDisabled ? 'not-allowed' : 'pointer',
+                    opacity: regenerateDisabled ? 0.6 : 1,
                   }}
                 >
                   Regenerate

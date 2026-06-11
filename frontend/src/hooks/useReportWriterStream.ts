@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { GenerationSectionState, GenerationState, ReportWriterSource } from '../types'
 import { apiOrigin, getAuthFetchInit } from '../lib/api'
+import { cancelGenerationRun } from '../api/reportWriter'
 
 const STREAM_STALL_TIMEOUT_MS = 60000
 
@@ -35,10 +36,33 @@ function mapChunkSources(chunks: Record<string, unknown>[]): ReportWriterSource[
 export function useReportWriterStream() {
   const [state, setState] = useState<GenerationState>(initialState)
   const [generating, setGenerating] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const controllerRef = useRef<AbortController | null>(null)
+  const userCancelledRef = useRef(false)
+  const runIdRef = useRef<string | null>(null)
+  const claimIdRef = useRef<string | null>(null)
 
   const reset = useCallback(() => {
     setState(initialState)
+    runIdRef.current = null
+    claimIdRef.current = null
   }, [])
+
+  const cancel = useCallback(async () => {
+    if (!generating) return
+    userCancelledRef.current = true
+    setCancelling(true)
+    const claimId = claimIdRef.current
+    const runId = runIdRef.current
+    if (claimId && runId) {
+      try {
+        await cancelGenerationRun(claimId, runId)
+      } catch (err) {
+        console.log('MYDEBUG →', err)
+      }
+    }
+    controllerRef.current?.abort()
+  }, [generating])
 
   const generate = useCallback(async (
     claimId: string,
@@ -46,8 +70,12 @@ export function useReportWriterStream() {
     body?: object,
     sectionKeys: string[] = [],
   ) => {
-    if (generating) return
+    if (generating) return false
+    userCancelledRef.current = false
+    setCancelling(false)
     setGenerating(true)
+    claimIdRef.current = claimId
+    runIdRef.current = null
     setState({
       ...initialState,
       claimId,
@@ -56,6 +84,7 @@ export function useReportWriterStream() {
     })
 
     const controller = new AbortController()
+    controllerRef.current = controller
     let stalled = false
     let stallTimer: ReturnType<typeof setTimeout> | undefined
     const armStallTimer = () => {
@@ -112,7 +141,9 @@ export function useReportWriterStream() {
             try {
               const data = JSON.parse(dataStr) as Record<string, unknown>
               if (currentEvent === 'run_started') {
-                patch(s => ({ ...s, runId: String(data.run_id ?? '') }))
+                const nextRunId = String(data.run_id ?? '')
+                runIdRef.current = nextRunId
+                patch(s => ({ ...s, runId: nextRunId }))
               } else if (currentEvent === 'sources') {
                 const chunks = Array.isArray(data.chunks) ? data.chunks : []
                 patch(s => ({ ...s, retrievedSources: mapChunkSources(chunks as Record<string, unknown>[]) }))
@@ -181,7 +212,9 @@ export function useReportWriterStream() {
         }
       }
     } catch (err) {
-      if (stalled) {
+      if (userCancelledRef.current && !stalled) {
+        patch(s => ({ ...s, status: 'cancelled', error: null }))
+      } else if (stalled) {
         patch(s => ({ ...s, status: 'error', error: 'Server stopped responding mid-generation.' }))
       } else {
         const msg = err instanceof Error ? err.message : 'Generation failed'
@@ -189,9 +222,12 @@ export function useReportWriterStream() {
       }
     } finally {
       clearStallTimer()
+      controllerRef.current = null
+      setCancelling(false)
       setGenerating(false)
     }
+    return userCancelledRef.current
   }, [generating])
 
-  return { state, generating, generate, reset }
+  return { state, generating, cancelling, generate, cancel, reset }
 }
