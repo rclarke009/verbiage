@@ -470,6 +470,24 @@ def get_document_full_text(conn: PgConnection, doc_id: str) -> str | None:
         cur.close()
 
 
+def get_document_breadcrumb_fields(
+    conn: PgConnection, doc_id: str
+) -> tuple[str | None, str | None, str | None]:
+    """Return (title, source, source_filename) for document breadcrumb prefixes."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT title, source, source_filename FROM documents WHERE doc_id = %s",
+            (doc_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None, None, None
+        return row[0], row[1], row[2]
+    finally:
+        cur.close()
+
+
 def insert_chunk(
     conn: PgConnection,
     chunk_id: str,

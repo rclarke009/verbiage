@@ -22,6 +22,7 @@ def test_index_document_chunks_embeds_and_updates_metadata():
 
     with (
         patch("app.indexing.delete_chunks_for_doc") as del_chunks,
+        patch("app.indexing.get_document_breadcrumb_fields", return_value=(None, None, None)),
         patch("app.indexing.insert_chunk") as ins_chunk,
         patch("app.indexing.insert_embedding") as ins_emb,
         patch("app.indexing.update_document_indexing_metadata") as upd_meta,
@@ -53,6 +54,7 @@ def test_index_document_rolls_back_chunks_on_embed_failure():
 
     with (
         patch("app.indexing.delete_chunks_for_doc") as del_chunks,
+        patch("app.indexing.get_document_breadcrumb_fields", return_value=(None, None, None)),
         patch("app.indexing.insert_chunk"),
     ):
         try:
@@ -65,6 +67,30 @@ def test_index_document_rolls_back_chunks_on_embed_failure():
 
     assert raised
     assert del_chunks.call_count >= 2
+
+
+def test_index_document_applies_document_breadcrumb_to_stored_chunks():
+    conn = MagicMock()
+    text = "2. Roof Damage\n\nShingles were missing on the north slope."
+    opts = ChunkingOptions(chunk_size=500, chunk_overlap=50)
+
+    with (
+        patch("app.indexing.delete_chunks_for_doc"),
+        patch(
+            "app.indexing.get_document_breadcrumb_fields",
+            return_value=("Ian - Smith Roof", "google_drive", "Smith_Roof.pdf"),
+        ),
+        patch("app.indexing.insert_chunk") as ins_chunk,
+        patch("app.indexing.insert_embedding"),
+        patch("app.indexing.update_document_indexing_metadata"),
+    ):
+        asyncio.run(index_document(conn, "doc-1", text, opts, embedder=FakeEmbedder()))
+
+    assert ins_chunk.call_count >= 1
+    stored_content = ins_chunk.call_args.args[4]
+    assert stored_content.startswith("[Document: Ian - Smith Roof]\n[Source: google_drive]\n")
+    assert "[File: Smith_Roof.pdf]" in stored_content
+    assert "[Section: 2. Roof Damage]" in stored_content
 
 
 def test_reindex_document_delegates_to_index_document():

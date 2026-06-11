@@ -44,6 +44,7 @@ Implementation decisions and prompts for building the app. Use this when impleme
 - **Section headers** detected via numbered lines (`1. Overview`), ALL CAPS short lines, and title-case headings; label attached to following chunks as `[Section: …]` prefix and `chunks.section_label`.
 - **Merge** paragraphs up to **1200** characters with **150** overlap (defaults on `ChunkingOptions`).
 - **Oversized paragraphs** split at sentence boundaries; legacy `chars` strategy remains for tests.
+- **Breadcrumb v2 (index time):** After chunking, each chunk gets a document-level prefix before embed/store: `[Document: …]`, optional `[Source: …]`, optional `[File: …]` (filename only when it differs from the display title). Section labels remain as `[Section: …]` inside chunk body. Offsets still refer to original `full_text`. Re-run **`POST /documents/{doc_id}/reindex`** (or bulk reindex) after deploying to refresh existing chunks.
 
 **Canonical text:** `documents.full_text` in Supabase Postgres stores extracted text for re-chunk/re-embed via `POST /documents/{doc_id}/reindex` without re-uploading PDFs or re-exporting Drive.
 
