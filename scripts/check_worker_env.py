@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Print whether env vars required by rag-ingest-worker are set (values not shown)."""
+"""Print whether env vars required by rag-ingest-worker are set (values not shown).
+
+Usage (repo root):
+  PYTHONPATH=. .venv/bin/python scripts/check_worker_env.py
+"""
 
 from __future__ import annotations
 
