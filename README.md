@@ -159,6 +159,8 @@ Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml)
 
 Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
 
+**Worker setup checklist:** [docs/render-worker-setup.md](docs/render-worker-setup.md)
+
 #### Stuck photo analysis (ops)
 
 If the UI shows “Analyzing photos…” for hours after a server restart/OOM:
