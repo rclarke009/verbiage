@@ -108,6 +108,17 @@ class PhotoSyncResponse(BaseModel):
     total: int = 0
     image_count: int = 0
     job_ids: list[str] = Field(default_factory=list)
+    enqueued: int = 0
+
+
+class PhotoRetryStuckResponse(BaseModel):
+    reset_images: int = 0
+    reclaimed_jobs: int = 0
+    batch_id: str | None = None
+    enqueued: int = 0
+    total: int = 0
+    image_count: int = 0
+    job_ids: list[str] = Field(default_factory=list)
 
 
 class PhotoAnalysisCountsResponse(BaseModel):

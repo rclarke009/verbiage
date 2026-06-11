@@ -106,8 +106,19 @@ class DocxReportRenderer:
                     self._used_rel_ids.add(id_match.group(1))
         return preserved
 
-    def _add_image(self, data: bytes, prefix: str, *, cx: int | None = None, cy: int | None = None) -> _ImageRef:
-        compressed, ext = compress_image_bytes(data)
+    def _add_image(
+        self,
+        data: bytes,
+        prefix: str,
+        *,
+        cx: int | None = None,
+        cy: int | None = None,
+        compress: bool = True,
+    ) -> _ImageRef:
+        if compress:
+            compressed, ext = compress_image_bytes(data)
+        else:
+            compressed, ext = data, "jpeg"
         if cx is None or cy is None:
             cx, cy = image_emu_size(compressed)
         rel_id = f"rIdImage{self._image_index}"
@@ -189,7 +200,7 @@ class DocxReportRenderer:
                 group = doc.photos[idx : idx + 4]
                 entries = []
                 for photo in group:
-                    ref = self._add_image(photo.data, "photo", cx=photo.cx, cy=photo.cy)
+                    ref = self._add_image(photo.data, "photo", cx=photo.cx, cy=photo.cy, compress=False)
                     entries.append((ref.rel_id, ref.doc_pr_id, photo.caption, ref.cx, ref.cy))
                 cols = 2 if len(group) > 1 else 1
                 body += xml_photo_table(entries, columns=cols)

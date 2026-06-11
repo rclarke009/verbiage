@@ -17,7 +17,7 @@ from reportlab.platypus import (
     Spacer,
 )
 
-from app.report_writer.image_utils import compress_image_bytes, load_asset_bytes
+from app.report_writer.image_utils import load_asset_bytes
 from app.report_writer.report_document import ReportDocument
 
 BRAND = colors.HexColor("#276091")
@@ -177,8 +177,7 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
         for i in range(0, len(doc.photos), 4):
             group = doc.photos[i : i + 4]
             for photo in group:
-                data, _ = compress_image_bytes(photo.data)
-                img = Image(io.BytesIO(data), width=3.2 * inch, height=2.4 * inch)
+                img = Image(io.BytesIO(photo.data), width=3.2 * inch, height=2.4 * inch)
                 story.append(img)
                 story.append(Paragraph(photo.caption, styles["body"]))
                 story.append(Spacer(1, 0.08 * inch))

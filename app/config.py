@@ -98,6 +98,8 @@ LLM_RATE_LIMIT_SECONDS = int(os.getenv("LLM_RATE_LIMIT_SECONDS", 60))
 HEALTH_DEEP_TIMEOUT = int(os.getenv("HEALTH_DEEP_TIMEOUT", "5"))
 # Ingest background worker (Postgres job queue)
 INGEST_WORKER_ENABLED = os.getenv("INGEST_WORKER_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+# Reclaim ingest_jobs stuck in running after a crash/OOM (worker startup + periodic reclaim).
+STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "15"))
 
 HEALTH_DEEP_CHECK_LLM = os.getenv("HEALTH_DEEP_CHECK_LLM", "").lower() in ("1", "true", "yes")
 

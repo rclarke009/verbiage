@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   getClaimPhotoBatchStatus,
   getPhotoAnalysisCounts,
+  retryStuckClaimPhotos,
   syncClaimPhotosFromDrive,
 } from '../api/reportWriter'
 import { isTransientHttpStatus } from '../lib/api'
@@ -40,6 +41,7 @@ export function useClaimPhotoSync(claimId: string | null) {
   const [batchStatus, setBatchStatus] = useState<IngestBatchStatusResponse | null>(null)
   const [counts, setCounts] = useState<PhotoAnalysisCounts | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [pollReconnecting, setPollReconnecting] = useState(false)
   const [pollError, setPollError] = useState<string | null>(null)
@@ -130,15 +132,37 @@ export function useClaimPhotoSync(claimId: string | null) {
     [claimId, queryClient, refreshCounts, startPoll],
   )
 
+  const retryStuck = useCallback(async () => {
+    if (!claimId) return
+    setRetrying(true)
+    setSyncError(null)
+    setPollError(null)
+    try {
+      const res = await retryStuckClaimPhotos(claimId)
+      await refreshCounts()
+      queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
+      if (res.batch_id) {
+        setBatchId(res.batch_id)
+        startPoll(res.batch_id)
+      }
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Retry failed')
+    } finally {
+      setRetrying(false)
+    }
+  }, [claimId, queryClient, refreshCounts, startPoll])
+
   return {
     batchId,
     batchStatus,
     counts,
     syncing,
+    retrying,
     syncError,
     pollReconnecting,
     pollError,
     startSync,
+    retryStuck,
     refreshCounts,
   }
 }

@@ -171,6 +171,34 @@ Full steps: [setup_and_testing.md](setup_and_testing.md#google-drive-ingest-read
 
 ---
 
+## Stuck photo analysis
+
+If Report Writer shows **Analyzing photos…** for a long time after a deploy or crash (common on small Render instances when the process OOMs mid-job), orphaned rows may be stuck in `running`.
+
+**In the app:** open the claim → **Retry stuck photos** (resets stuck image rows and re-enqueues vision jobs).
+
+**Manual SQL** (Supabase SQL Editor — replace `CLAIM_ID`):
+
+```sql
+UPDATE ingest_jobs
+SET status = 'pending', updated_at = now()
+WHERE kind = 'claim_photo_vision'
+  AND status = 'running'
+  AND updated_at < now() - interval '15 minutes';
+
+UPDATE report_claim_images
+SET analysis_status = 'pending'
+WHERE claim_id = 'CLAIM_ID'::uuid
+  AND vision_analysis IS NULL
+  AND analysis_status IN ('running', 'failed');
+```
+
+Then click **Confirm & start analysis** once, or wait for the ingest worker to drain pending jobs.
+
+Ensure the **rag-ingest-worker** Render service is running with `INGEST_WORKER_ENABLED=1`. The web service should have `INGEST_WORKER_ENABLED=0`.
+
+---
+
 ## Troubleshooting
 
 | Issue | Action |
@@ -179,7 +207,7 @@ Full steps: [setup_and_testing.md](setup_and_testing.md#google-drive-ingest-read
 | `DATABASE_URL must be set` | Set `DATABASE_URL` in `.env` to your Postgres URI. |
 | pgvector / `vector` type errors | Ensure the `vector` extension is enabled and schema (tables + HNSW index) is applied. |
 | Ollama connection refused | Start Ollama; confirm `EMBED_BASE_URL` and `LLM_BASE_URL` match (e.g. `http://localhost:11434`). |
-| 503 on ingest or ask | Check embedding/LLM URLs and that models are pulled (`ollama list`). |
+| 503 on ingest or ask | Check embedding/LLM URLs and that models are pulled (`ollama list`). On Render with `RERANK_ENABLED=0`, `/health/ready` should return 200 once Postgres is up — persistent 503 usually means DB unreachable or the web service is restarting (check logs for OOM). |
 | Supabase: "server closed the connection unexpectedly" on port 5432 | (1) Use **port 6543** (transaction mode) in `DATABASE_URL`; the app supports it. (2) **Unpause** the project in Supabase dashboard (free tier pauses when idle). (3) Or use the **Direct** connection URI from Project Settings → Database (host `db.PROJECT_REF.supabase.co`, user `postgres`) instead of the pooler. |
 
 ### Connecting with psql (Supabase)

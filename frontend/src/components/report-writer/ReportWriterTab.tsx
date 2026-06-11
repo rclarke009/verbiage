@@ -284,8 +284,10 @@ export function ReportWriterTab() {
               counts={photoSync.counts}
               batchStatus={photoSync.batchStatus}
               syncing={photoSync.syncing}
+              retrying={photoSync.retrying}
               pollReconnecting={photoSync.pollReconnecting}
               pollError={photoSync.pollError}
+              onRetryStuck={() => void photoSync.retryStuck()}
             />
 
             <GenerationProgress state={genState} />

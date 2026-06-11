@@ -12,9 +12,12 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import psycopg2
+from psycopg2 import pool as psycopg2_pool
 from psycopg2.extras import Json
 from psycopg2 import extensions
 from pgvector.psycopg2 import register_vector
+
+from app.config import DATABASE_CONNECTION_KWARGS, DATABASE_URL
 
 if TYPE_CHECKING:
     from psycopg2.extensions import connection as PgConnection
@@ -57,6 +60,19 @@ def get_valid_conn(pool: Any) -> "PgConnection":
                 raise
             conn = pool.getconn()
     return conn  # unreachable
+
+
+def create_db_pool():
+    """Postgres pool (1–10 connections). Matches app.main pool settings."""
+    if DATABASE_CONNECTION_KWARGS:
+        conn_kwargs = dict(DATABASE_CONNECTION_KWARGS)
+        if "pooler.supabase.com" in conn_kwargs.get("host", "") and conn_kwargs.get("port") == 6543:
+            conn_kwargs["connection_factory"] = NoPrepareConnection
+        return psycopg2_pool.ThreadedConnectionPool(1, 10, **conn_kwargs)
+    kwargs: dict[str, Any] = {"minconn": 1, "maxconn": 10, "dsn": DATABASE_URL}
+    if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
+        kwargs["connection_factory"] = NoPrepareConnection
+    return psycopg2_pool.ThreadedConnectionPool(**kwargs)
 
 
 def _ensure_pgvector(conn: PgConnection) -> None:
@@ -914,6 +930,62 @@ def finish_ingest_job(
             """,
             (status, Json(result) if result is not None else None, error, job_id),
         )
+    finally:
+        cur.close()
+
+
+def reclaim_stale_ingest_jobs(
+    conn: PgConnection,
+    *,
+    max_age_minutes: int | None = 15,
+    claim_id: str | None = None,
+) -> int:
+    """Reset orphaned running ingest jobs to pending. Returns number of jobs reclaimed."""
+    conditions = ["status = 'running'"]
+    params: list[Any] = []
+    if max_age_minutes is not None:
+        conditions.append("updated_at < now() - (%s * interval '1 minute')")
+        params.append(max_age_minutes)
+    if claim_id is not None:
+        conditions.append("payload->>'claim_id' = %s")
+        params.append(claim_id)
+    where = " AND ".join(conditions)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"""
+            UPDATE ingest_jobs
+            SET status = 'pending', updated_at = now()
+            WHERE {where}
+            RETURNING batch_id::text
+            """,
+            params,
+        )
+        batch_ids = {row[0] for row in cur.fetchall()}
+        for batch_id in batch_ids:
+            refresh_batch_counts(conn, batch_id)
+        return cur.rowcount
+    finally:
+        cur.close()
+
+
+def has_active_vision_job(conn: PgConnection, image_id: str) -> bool:
+    """True when a pending or running claim_photo_vision job exists for image_id."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM ingest_jobs
+                WHERE kind = %s
+                  AND status IN ('pending', 'running')
+                  AND payload->>'image_id' = %s
+            )
+            """,
+            (INGEST_JOB_KIND_CLAIM_PHOTO_VISION, image_id),
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
     finally:
         cur.close()
 

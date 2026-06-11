@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
-from app.config import INGEST_WORKER_ENABLED
+from app.config import INGEST_WORKER_ENABLED, STALE_JOB_MINUTES
 from app.db import (
     INGEST_JOB_KIND_CLAIM_PHOTO_VISION,
     INGEST_JOB_KIND_GOOGLE_DRIVE,
@@ -15,6 +16,7 @@ from app.db import (
     finish_ingest_job,
     get_document_index_by_doc_ids,
     get_valid_conn,
+    reclaim_stale_ingest_jobs,
     refresh_batch_counts,
 )
 from app.drive_client import (
@@ -26,7 +28,14 @@ from app.drive_client import (
 )
 from app.ingest_core import ingest_new_document, reingest_existing_document
 from app.models import ChunkingOptions, IngestResponse
-from app.report_writer.queries import get_claim, get_claim_image, update_image_analysis_status, update_image_vision_analysis
+from app.report_writer.queries import (
+    get_claim,
+    get_claim_image,
+    update_image_analysis_status,
+    update_image_storage_path,
+    update_image_vision_analysis,
+)
+from app.report_writer.storage import storage_path_for, write_claim_image
 from app.report_writer.vision import analyze_image_bytes
 
 logger = logging.getLogger(__name__)
@@ -129,6 +138,15 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
 
         conn2 = get_valid_conn(pool)
         try:
+            if not img.get("storage_path"):
+                path = storage_path_for(
+                    user_id,
+                    claim_id,
+                    image_id,
+                    img.get("filename") or f"{image_id}.jpg",
+                )
+                write_claim_image(path, data)
+                update_image_storage_path(conn2, image_id, path, len(data))
             update_image_vision_analysis(conn2, image_id, result)
             conn2.commit()
         finally:
@@ -172,9 +190,30 @@ async def ingest_worker_loop(pool) -> None:
         logger.info("Ingest worker disabled (INGEST_WORKER_ENABLED=0)")
         return
 
+    conn = get_valid_conn(pool)
+    try:
+        reclaimed = reclaim_stale_ingest_jobs(conn, max_age_minutes=STALE_JOB_MINUTES)
+        conn.commit()
+        if reclaimed:
+            logger.info("Reclaimed %s stale ingest job(s) on worker startup", reclaimed)
+    finally:
+        pool.putconn(conn)
+
     logger.info("Ingest worker started")
+    last_reclaim = time.monotonic()
     while True:
         try:
+            if time.monotonic() - last_reclaim >= 600:
+                conn_reclaim = get_valid_conn(pool)
+                try:
+                    reclaimed = reclaim_stale_ingest_jobs(conn_reclaim, max_age_minutes=STALE_JOB_MINUTES)
+                    conn_reclaim.commit()
+                    if reclaimed:
+                        logger.info("Reclaimed %s stale ingest job(s)", reclaimed)
+                finally:
+                    pool.putconn(conn_reclaim)
+                last_reclaim = time.monotonic()
+
             conn = get_valid_conn(pool)
             try:
                 job = claim_next_ingest_job(conn)
