@@ -1,26 +1,26 @@
-# Render: `rag-ingest-worker` setup
+# Render: optional `rag-ingest-worker` (separate Background Worker)
 
-After deploying the updated [`render.yaml`](../render.yaml), photo vision and Drive ingest jobs run on a **Background Worker**, not the web service.
+**Default:** photo vision runs **in-process** on the web service (`INGEST_WORKER_ENABLED=1` in [`render.yaml`](../render.yaml)). No extra Render service or ~$7/mo charge.
 
-## Architecture
+Use a **separate worker** only if the web service OOM-restarts during large photo batches (98+ images) and you want the API to stay up while vision runs elsewhere.
+
+## When to add a worker
 
 | Service | Command | `INGEST_WORKER_ENABLED` | Processes jobs? |
 |---------|---------|-------------------------|-----------------|
 | `rag-document-analysis-backend` (web) | uvicorn | `0` | No — enqueues only |
 | `rag-ingest-worker` (worker) | `python -m app.worker_main` | `1` | Yes |
 
-Web also sets `RERANK_ENABLED=0` on small instances (saves ~100MB RAM; no reranker warm-up 503s).
+If using a separate worker: set web to `INGEST_WORKER_ENABLED=0` and create the worker below. Keep `RERANK_ENABLED=0` on small instances.
 
 ---
 
-## Step 1 — Deploy code
+## Step 1 — Split ingest off the web service
 
-Push the branch that includes `render.yaml`, `app/worker_main.py`, and the stuck-photo retry changes. Redeploy the **web** service.
-
-Confirm on the web service **Environment** tab:
+On **`rag-document-analysis-backend`**:
 
 - `RERANK_ENABLED` = `0`
-- `INGEST_WORKER_ENABLED` = `0`
+- `INGEST_WORKER_ENABLED` = **`0`** (worker handles jobs)
 
 ---
 

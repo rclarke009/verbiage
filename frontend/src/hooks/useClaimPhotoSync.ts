@@ -11,6 +11,7 @@ import { isTransientHttpStatus } from '../lib/api'
 import type { IngestBatchStatusResponse, PhotoAnalysisCounts } from '../types'
 
 const POLL_MS = 2500
+const POLL_MS_MAX = 30000
 
 function isTransientPollError(err: unknown): boolean {
   if (err instanceof TypeError) {
@@ -45,7 +46,9 @@ export function useClaimPhotoSync(claimId: string | null) {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [pollReconnecting, setPollReconnecting] = useState(false)
   const [pollError, setPollError] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollDelayRef = useRef(POLL_MS)
+  const pollActiveRef = useRef(false)
 
   const refreshCounts = useCallback(async () => {
     if (!claimId) return
@@ -62,10 +65,12 @@ export function useClaimPhotoSync(claimId: string | null) {
   }, [claimId, refreshCounts])
 
   const stopPoll = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
+    pollActiveRef.current = false
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current)
+      pollTimeoutRef.current = null
     }
+    pollDelayRef.current = POLL_MS
   }, [])
 
   const startPoll = useCallback(
@@ -73,36 +78,46 @@ export function useClaimPhotoSync(claimId: string | null) {
       stopPoll()
       setPollError(null)
       setPollReconnecting(false)
+      pollDelayRef.current = POLL_MS
+      pollActiveRef.current = true
 
       const tick = async () => {
-        if (!claimId) return
+        if (!pollActiveRef.current || !claimId) return
         try {
           const status = await getClaimPhotoBatchStatus(claimId, id)
           setBatchStatus(status)
           setPollReconnecting(false)
           setPollError(null)
+          pollDelayRef.current = POLL_MS
           await refreshCounts()
-          queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
           if (status.status === 'completed' || status.status === 'failed') {
+            queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
             stopPoll()
+            return
           }
         } catch (err) {
-          if (isTransientPollError(err)) {
+          const httpStatus = (err as { status?: number }).status
+          const transient =
+            isTransientPollError(err) ||
+            (typeof httpStatus === 'number' && isTransientStatusResponse(httpStatus))
+          if (transient) {
             setPollReconnecting(true)
+            pollDelayRef.current = Math.min(pollDelayRef.current * 2, POLL_MS_MAX)
+          } else {
+            stopPoll()
+            setPollReconnecting(false)
+            setPollError(err instanceof Error ? err.message : 'Photo status check failed')
             return
           }
-          const status = (err as { status?: number }).status
-          if (typeof status === 'number' && isTransientStatusResponse(status)) {
-            setPollReconnecting(true)
-            return
-          }
-          stopPoll()
-          setPollReconnecting(false)
-          setPollError(err instanceof Error ? err.message : 'Photo status check failed')
+        }
+        if (pollActiveRef.current) {
+          pollTimeoutRef.current = setTimeout(() => {
+            void tick()
+          }, pollDelayRef.current)
         }
       }
+
       void tick()
-      pollRef.current = setInterval(tick, POLL_MS)
     },
     [claimId, queryClient, refreshCounts, stopPoll],
   )
