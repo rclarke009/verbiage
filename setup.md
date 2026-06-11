@@ -195,7 +195,7 @@ WHERE claim_id = 'CLAIM_ID'::uuid
 
 Then click **Confirm & start analysis** once, or wait for the ingest worker to drain pending jobs.
 
-Ensure the **rag-ingest-worker** Render service is running with `INGEST_WORKER_ENABLED=1`. The web service should have `INGEST_WORKER_ENABLED=0`.
+Ensure the **rag-ingest-worker** Render service is running with `INGEST_WORKER_ENABLED=1`. The web service should have `INGEST_WORKER_ENABLED=0`. Full setup: [docs/render-worker-setup.md](docs/render-worker-setup.md).
 
 ---
 
