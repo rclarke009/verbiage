@@ -212,9 +212,17 @@ export async function exportClaimDocx(claimId: string, title: string): Promise<v
 
 export async function fetchClaimPdfBlob(claimId: string, signal?: AbortSignal): Promise<Blob> {
   const init = await getAuthFetchInit({ method: 'GET', signal })
-  const res = await fetch(`${apiOrigin()}${BASE}/claims/${claimId}/export/pdf`, init)
+  const res = await apiFetchRetry(
+    `${BASE}/claims/${claimId}/export/pdf`,
+    init,
+    EXPORT_FETCH_OPTS,
+  )
   if (!res.ok) throw new Error(await readErrorDetail(res))
-  return res.blob()
+  const blob = await res.blob()
+  if (!(await blob.slice(0, 5).text()).startsWith('%PDF')) {
+    throw new Error('Export did not return a valid PDF (server may be overloaded — try again)')
+  }
+  return blob
 }
 
 export { getAuthFetchInit }

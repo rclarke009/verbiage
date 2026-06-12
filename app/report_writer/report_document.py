@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from app.config import REPORT_EXPORT_DAMAGE_PHOTOS_ONLY, REPORT_EXPORT_MAX_PHOTOS
 from app.report_writer.boilerplate import (
     default_client_name,
     default_inspection_date,
@@ -16,7 +17,7 @@ from app.report_writer.boilerplate import (
     weather_text,
 )
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
-from app.report_writer.damage_detection import count_photo_stats, photo_review_summary
+from app.report_writer.damage_detection import count_photo_stats, photo_review_summary, select_export_images
 from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
@@ -130,9 +131,13 @@ def build_report_document(
             doc_sections.append(ReportSection(key=key, label=label.upper(), content=content))
 
     photos: list[ReportPhoto] = []
-    img_list = images or []
+    img_list = select_export_images(
+        images or [],
+        max_photos=REPORT_EXPORT_MAX_PHOTOS,
+        damage_only=REPORT_EXPORT_DAMAGE_PHOTOS_ONLY,
+    )
     if img_list:
-        workers = min(8, len(img_list))
+        workers = min(4, len(img_list))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             raw_bytes_list = list(pool.map(_read_image_bytes, img_list))
     else:
