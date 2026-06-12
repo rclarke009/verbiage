@@ -18,6 +18,8 @@ services:
         value: "0"
       - key: INGEST_WORKER_ENABLED
         value: "1"
+      - key: REPORT_EXPORT_MAX_PHOTOS
+        value: "12"
       - key: HF_HOME
         value: /app/hf-cache
       - key: HF_HUB_OFFLINE

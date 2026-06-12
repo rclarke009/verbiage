@@ -101,6 +101,14 @@ INGEST_WORKER_ENABLED = os.getenv("INGEST_WORKER_ENABLED", "1").strip().lower() 
 # Reclaim ingest_jobs stuck in running after a crash/OOM (worker startup + periodic reclaim).
 STALE_JOB_MINUTES = int(os.getenv("STALE_JOB_MINUTES", "15"))
 
+# Report export (PDF/DOCX): cap embedded photos to avoid OOM/timeouts on small Render instances.
+REPORT_EXPORT_MAX_PHOTOS = max(0, int(os.getenv("REPORT_EXPORT_MAX_PHOTOS", "12")))
+REPORT_EXPORT_DAMAGE_PHOTOS_ONLY = os.getenv("REPORT_EXPORT_DAMAGE_PHOTOS_ONLY", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 HEALTH_DEEP_CHECK_LLM = os.getenv("HEALTH_DEEP_CHECK_LLM", "").lower() in ("1", "true", "yes")
 
 

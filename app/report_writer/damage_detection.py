@@ -71,6 +71,39 @@ def count_photo_stats(images: list[dict]) -> dict[str, int]:
     return {"examined": examined, "with_damage": with_damage}
 
 
+def _has_succeeded_analysis(img: dict) -> bool:
+    return (img.get("analysis_status") or "pending") == "succeeded" or bool(img.get("vision_analysis"))
+
+
+def select_export_images(
+    images: list[dict],
+    *,
+    max_photos: int,
+    damage_only: bool = True,
+) -> list[dict]:
+    """Pick photos to embed in PDF/DOCX export.
+
+    When ``damage_only`` is true and any photo shows damage, only those are included (up to
+    ``max_photos``). If vision has run but none show damage, no photos are embedded. When
+    vision has not run yet, falls back to the first ``max_photos`` images so export still works.
+    When ``damage_only`` is false, damage photos are listed first, then others, up to the cap.
+    """
+    if not images or max_photos <= 0:
+        return []
+
+    damage = [img for img in images if analysis_shows_damage(img.get("vision_analysis"))]
+
+    if damage_only:
+        if damage:
+            return damage[:max_photos]
+        if any(_has_succeeded_analysis(img) for img in images):
+            return []
+        return images[:max_photos]
+
+    others = [img for img in images if img not in damage]
+    return (damage + others)[:max_photos]
+
+
 def photo_review_summary(examined: int, with_damage: int) -> str:
     """Sentence for report OBSERVATIONS when photos were reviewed."""
     if examined <= 0:
