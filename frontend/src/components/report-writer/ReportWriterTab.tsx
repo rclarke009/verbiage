@@ -15,7 +15,7 @@ import {
 } from '../../api/reportWriter'
 import type { Claim } from '../../types'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
-import { useClaimWeather } from '../../hooks/useClaimWeather'
+import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
@@ -95,9 +95,18 @@ export function ReportWriterTab() {
     stormDateIso: draft.property_metadata?.storm_date_iso ?? '',
     metadata: draft.property_metadata ?? {},
     onMetadataPatch: patch =>
+      updateDraft(prev => {
+        const nextMeta = { ...prev.property_metadata }
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === '') delete nextMeta[k]
+          else if (v !== undefined) nextMeta[k] = v
+        }
+        return { ...prev, property_metadata: nextMeta }
+      }),
+    onWeatherClear: () =>
       updateDraft(prev => ({
         ...prev,
-        property_metadata: { ...prev.property_metadata, ...patch },
+        property_metadata: clearWeatherMetadata(prev.property_metadata ?? {}) as Record<string, string>,
       })),
   })
 
@@ -368,7 +377,9 @@ export function ReportWriterTab() {
                   photoCounts={photoSync.counts}
                   weatherLoading={weather.loading}
                   weatherError={weather.error}
+                  weatherOptions={weather.options}
                   onRefreshWeather={weather.refresh}
+                  onWeatherSelectionChange={weather.applySelectionPatch}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
                 <DraftEditor

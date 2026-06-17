@@ -7,7 +7,7 @@ import type {
   ReportTypeDefinition,
   ReportWriterImage,
   SectionContent,
-  WeatherSnapshot,
+  WeatherOptionsResponse,
 } from '../types'
 
 const BASE = '/report-writer'
@@ -99,11 +99,11 @@ export async function listClaimImages(claimId: string): Promise<ReportWriterImag
   return data.images
 }
 
-export async function fetchClaimWeather(address: string, date: string): Promise<WeatherSnapshot> {
+export async function fetchClaimWeather(address: string, date: string): Promise<WeatherOptionsResponse> {
   const q = new URLSearchParams({ address, date })
   const res = await apiFetch(`${BASE}/weather?${q}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
-  return res.json() as Promise<WeatherSnapshot>
+  return res.json() as Promise<WeatherOptionsResponse>
 }
 
 export async function matchDrivePhotoFolder(address: string) {

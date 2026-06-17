@@ -48,8 +48,9 @@ def weather_text(meta: dict) -> str:
     storm_date = (meta.get("storm_date") or meta.get("landfall_display") or "").strip()
     category = (meta.get("storm_category") or "").strip()
     region = (meta.get("landfall_region") or "").strip()
-    wind_speed = (meta.get("wind_speed_mph") or "").strip()
-    wind_gust = (meta.get("wind_gust_mph") or "").strip()
+    wind_speed = (meta.get("wind_speed_mph") or meta.get("weather_custom_wind_speed") or "").strip()
+    wind_gust = (meta.get("wind_gust_mph") or meta.get("weather_custom_wind_gust") or "").strip()
+    hail_size = (meta.get("hail_size_in") or meta.get("weather_custom_hail") or "").strip()
     stations = (meta.get("weather_stations") or "").strip()
 
     parts = [f"The home was directly in the path of {storm}."]
@@ -84,6 +85,16 @@ def weather_text(meta: dict) -> str:
             "It is reasonable to assume that wind and gust speeds in the immediate area "
             "met or exceeded regional weather station readings for this event."
         )
+
+    if hail_size:
+        date_for_hail = storm_date or (meta.get("weather_date_iso") or "").strip()
+        if date_for_hail:
+            parts.append(
+                f"On {date_for_hail}, hail up to {hail_size} inches was reported near the property."
+            )
+        else:
+            parts.append(f"Hail up to {hail_size} inches was reported near the property.")
+
     return " ".join(parts)
 
 
