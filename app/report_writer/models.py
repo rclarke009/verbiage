@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -143,14 +145,37 @@ class PhotoSyncRequest(BaseModel):
     folder_id: str | None = Field(default=None, description="Override drive_photo_folder_id on claim")
 
 
-class WeatherResponse(BaseModel):
+class WeatherCandidateModel(BaseModel):
+    id: str
+    metric: Literal["wind_speed", "wind_gust", "hail_size", "precip"]
+    value: float
+    unit: str
+    source: str
+    label: str
+    station: str | None = None
+    distance_mi: float | None = None
+    tier: int
+    recommended: bool = False
+    recommendation_reason: str | None = None
+
+
+class WeatherOptionsResponse(BaseModel):
     wind_speed_mph: float | None = None
     wind_gust_mph: float | None = None
+    hail_size_in: float | None = None
+    precip_in: float | None = None
     stations: list[str] = Field(default_factory=list)
     resolved_address: str = ""
     latitude: float | None = None
     longitude: float | None = None
     date_iso: str
     date_display: str
-    source: str = "visual_crossing"
+    source: str = "multi"
     fetch_key: str = ""
+    candidates: list[WeatherCandidateModel] = Field(default_factory=list)
+    selected: dict[str, str] = Field(default_factory=dict)
+    attribution: list[str] = Field(default_factory=list)
+
+
+# Backward-compatible alias
+WeatherResponse = WeatherOptionsResponse

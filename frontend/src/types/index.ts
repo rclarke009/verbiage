@@ -170,18 +170,44 @@ export interface ClaimPropertyMetadata {
   landfall_region?: string
   wind_speed_mph?: string
   wind_gust_mph?: string
+  hail_size_in?: string
   weather_stations?: string
   weather_resolved_address?: string
   weather_date_iso?: string
   weather_source?: string
   weather_fetched_at?: string
   weather_fetch_key?: string
+  weather_wind_speed_source?: string
+  weather_wind_gust_source?: string
+  weather_hail_source?: string
+  weather_custom_wind_speed?: string
+  weather_custom_wind_gust?: string
+  weather_custom_hail?: string
+  weather_candidates_json?: string
   [key: string]: string | undefined
 }
 
-export interface WeatherSnapshot {
+export type WeatherMetric = 'wind_speed' | 'wind_gust' | 'hail_size' | 'precip'
+
+export interface WeatherCandidate {
+  id: string
+  metric: WeatherMetric
+  value: number
+  unit: string
+  source: string
+  label: string
+  station?: string | null
+  distance_mi?: number | null
+  tier: number
+  recommended?: boolean
+  recommendation_reason?: string | null
+}
+
+export interface WeatherOptionsResponse {
   wind_speed_mph: number | null
   wind_gust_mph: number | null
+  hail_size_in: number | null
+  precip_in?: number | null
   stations: string[]
   resolved_address: string
   latitude: number | null
@@ -190,7 +216,13 @@ export interface WeatherSnapshot {
   date_display: string
   source: string
   fetch_key: string
+  candidates: WeatherCandidate[]
+  selected: Record<string, string>
+  attribution: string[]
 }
+
+/** @deprecated Use WeatherOptionsResponse */
+export type WeatherSnapshot = WeatherOptionsResponse
 
 export interface ReportTypeSection {
   key: string

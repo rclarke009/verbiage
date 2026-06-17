@@ -44,7 +44,8 @@ from app.report_writer.models import (
     ResumeRequest,
     SectionResponse,
     SectionUpdateRequest,
-    WeatherResponse,
+    WeatherCandidateModel,
+    WeatherOptionsResponse,
 )
 from app.report_writer.queries import (
     claim_has_generated_sections,
@@ -72,7 +73,7 @@ from app.report_writer.photo_sync import (
 from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
 from app.report_writer.storage import storage_path_for, write_claim_image
-from app.report_writer.weather import fetch_weather_for_location, parse_storm_date, weather_fetch_key
+from app.report_writer.weather import fetch_weather_options, parse_storm_date, weather_fetch_key
 
 router = APIRouter(prefix="/report-writer", tags=["report-writer"])
 
@@ -179,7 +180,7 @@ async def match_photo_folder(
     )
 
 
-@router.get("/weather", response_model=WeatherResponse)
+@router.get("/weather", response_model=WeatherOptionsResponse)
 async def get_claim_weather(
     address: str = Query(..., min_length=3),
     date: str = Query(..., min_length=4, description="Storm date (ISO or display format)"),
@@ -190,18 +191,38 @@ async def get_claim_weather(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    snapshot = await fetch_weather_for_location(address.strip(), storm_date)
-    return WeatherResponse(
-        wind_speed_mph=snapshot.wind_speed_mph,
-        wind_gust_mph=snapshot.wind_gust_mph,
-        stations=snapshot.stations,
-        resolved_address=snapshot.resolved_address,
-        latitude=snapshot.latitude,
-        longitude=snapshot.longitude,
-        date_iso=snapshot.date_iso,
-        date_display=snapshot.date_display,
-        source=snapshot.source,
-        fetch_key=weather_fetch_key(address.strip(), snapshot.date_iso),
+    options = await fetch_weather_options(address.strip(), storm_date)
+    return WeatherOptionsResponse(
+        wind_speed_mph=options.wind_speed_mph,
+        wind_gust_mph=options.wind_gust_mph,
+        hail_size_in=options.hail_size_in,
+        precip_in=options.precip_in,
+        stations=options.stations,
+        resolved_address=options.resolved_address,
+        latitude=options.latitude,
+        longitude=options.longitude,
+        date_iso=options.date_iso,
+        date_display=options.date_display,
+        source=options.source,
+        fetch_key=options.fetch_key or weather_fetch_key(address.strip(), options.date_iso),
+        candidates=[
+            WeatherCandidateModel(
+                id=c.id,
+                metric=c.metric,
+                value=c.value,
+                unit=c.unit,
+                source=c.source,
+                label=c.label,
+                station=c.station,
+                distance_mi=c.distance_mi,
+                tier=c.tier,
+                recommended=c.recommended,
+                recommendation_reason=c.recommendation_reason,
+            )
+            for c in options.candidates
+        ],
+        selected=options.selected,
+        attribution=options.attribution,
     )
 
 

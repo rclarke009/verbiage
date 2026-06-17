@@ -174,6 +174,18 @@ RAG_SIMILARITY_ALERT_THRESHOLD: float | None = (
 # Visual Crossing Timeline API — historical wind for Report Writer weather section.
 VISUAL_CROSSING_API_KEY = os.getenv("VISUAL_CROSSING_API_KEY", "").strip()
 
+# Multi-source weather aggregation
+WEATHER_MAX_DISTANCE_MI = float(os.getenv("WEATHER_MAX_DISTANCE_MI", "50"))
+WEATHER_ENABLE_OPEN_METEO = os.getenv("WEATHER_ENABLE_OPEN_METEO", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+OPEN_METEO_ATTRIBUTION = os.getenv(
+    "OPEN_METEO_ATTRIBUTION",
+    "Open-Meteo (CC BY 4.0)",
+).strip()
+
 # Cross-encoder reranking of the retrieved candidate pool before prompt assembly.
 # Off by default: loading the ~100MB CrossEncoder is undesirable in tests/CI. Enable
 # in deployment with RERANK_ENABLED=1.
