@@ -170,6 +170,10 @@ export interface SectionContent {
 export interface ClaimPropertyMetadata {
   report_type?: string
   address?: string
+  address2?: string
+  city?: string
+  state?: string
+  zip?: string
   property_type?: string
   storm_id?: string
   storm_name?: string
@@ -331,6 +335,10 @@ export interface AddressSuggestion {
   id: string
   label: string
   address: string
+  address2?: string
+  city?: string
+  state?: string
+  zip?: string
 }
 
 export interface PhotoAnalysisCounts {

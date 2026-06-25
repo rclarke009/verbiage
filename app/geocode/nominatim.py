@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from app.geocode.address_format import compose_full_address
 from app.config import NOMINATIM_BASE_URL, NOMINATIM_USER_AGENT
 from app.http_client import get_async_client
 
@@ -78,6 +79,10 @@ class AddressSuggestion:
     id: str
     label: str
     address: str
+    address2: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,14 @@ def _street_line(address: dict[str, Any]) -> str:
     return road or house
 
 
+def _pick_address2(address: dict[str, Any]) -> str:
+    for key in ("unit", "apartment", "suite", "level"):
+        value = (address.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def format_nominatim_result(item: dict[str, Any]) -> AddressSuggestion | None:
     """Convert a Nominatim jsonv2 result into a suggestion, or None if unusable."""
     place_id = item.get("place_id")
@@ -120,16 +133,25 @@ def format_nominatim_result(item: dict[str, Any]) -> AddressSuggestion | None:
 
     addr = item.get("address") or {}
     street = _street_line(addr)
+    address2 = _pick_address2(addr)
     city = _pick_city(addr)
     state_abbr = _state_abbrev(addr.get("state") or "")
+    postcode = (addr.get("postcode") or "").strip()
 
     if not street or not city or not state_abbr:
         return None
 
     formatted = f"{street}, {city}, {state_abbr}"
-    postcode = (addr.get("postcode") or "").strip()
     label = f"{formatted}{f' {postcode}' if postcode else ''}"
-    return AddressSuggestion(id=str(place_id), label=label, address=formatted)
+    return AddressSuggestion(
+        id=str(place_id),
+        label=label,
+        address=street,
+        address2=address2,
+        city=city,
+        state=state_abbr,
+        zip=postcode,
+    )
 
 
 async def _throttled_get(url: str, *, params: dict[str, str | int]) -> Any:
@@ -185,9 +207,12 @@ async def search_addresses(query: str, *, limit: int = 5) -> list[AddressSuggest
         if not isinstance(item, dict):
             continue
         suggestion = format_nominatim_result(item)
-        if not suggestion or suggestion.address in seen:
+        if not suggestion:
             continue
-        seen.add(suggestion.address)
+        dedupe_key = f"{suggestion.address}|{suggestion.city}|{suggestion.state}|{suggestion.zip}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         suggestions.append(suggestion)
     return suggestions
 
@@ -226,7 +251,18 @@ async def geocode_address(address: str) -> GeocodeResult | None:
         return None
 
     suggestion = format_nominatim_result(item)
-    resolved = suggestion.address if suggestion else q
+    if suggestion:
+        resolved = compose_full_address(
+            {
+                "address": suggestion.address,
+                "address2": suggestion.address2,
+                "city": suggestion.city,
+                "state": suggestion.state,
+                "zip": suggestion.zip,
+            }
+        )
+    else:
+        resolved = q
     try:
         return GeocodeResult(
             latitude=float(lat),

@@ -16,6 +16,7 @@ from app.report_writer.boilerplate import (
     purpose_text,
     weather_text,
 )
+from app.geocode.address_format import report_address_lines
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
 from app.report_writer.damage_detection import count_photo_stats, photo_review_summary, select_export_images
 from app.report_writer.image_utils import compress_image_bytes, image_emu_size
@@ -85,18 +86,6 @@ class ReportDocument:
     property_map_attribution: str = "Map data © Google"
 
 
-def _split_address(raw: str) -> tuple[str, str]:
-    raw = (raw or "").strip()
-    if not raw:
-        return "", ""
-    parts = [p.strip() for p in raw.split(",")]
-    if len(parts) >= 3:
-        return parts[0], ", ".join(parts[1:])
-    if len(parts) == 2:
-        return parts[0], parts[1]
-    return raw, ""
-
-
 def _photo_caption(vision: dict | None) -> str:
     if not vision:
         return "Inspection photograph."
@@ -128,9 +117,7 @@ def build_report_document(
     claim_id = str(claim.get("claim_id") or "")
     report_number = claim_id[:8].upper() if claim_id else "DRAFT"
     client = default_client_name(meta, title)
-    address_raw = (meta.get("address") or "").strip()
-    line1, line2 = _split_address(address_raw)
-    full_address = address_raw or "Unknown"
+    line1, line2, full_address = report_address_lines(meta)
     conclusion = (
         (sections.get("recommendations_conclusion") or {}).get("content")
         or (sections.get("conclusion") or {}).get("content")
@@ -187,7 +174,7 @@ def build_report_document(
         claim_id=claim_id,
         report_number=report_number,
         client_name=client,
-        address_line1=line1 or address_raw,
+        address_line1=line1,
         address_line2=line2,
         full_address=full_address,
         inspection_date=default_inspection_date(meta),

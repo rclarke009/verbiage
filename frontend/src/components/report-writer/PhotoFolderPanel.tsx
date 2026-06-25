@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import { listClaimImages, uploadClaimImage } from '../../api/reportWriter'
 import { useAddressFolderMatch } from '../../hooks/useAddressFolderMatch'
+import { composeFullAddress } from '../../lib/address'
 import { driveFolderUrl, parseDriveFolderInput } from '../../lib/driveFolder'
 import type { Claim, PhotoAnalysisCounts } from '../../types'
 
@@ -35,7 +36,7 @@ export function PhotoFolderPanel({
   onUploadBatchStarted?: (batchId: string) => void
 }) {
   const meta = claim.property_metadata || {}
-  const address = meta.address ?? ''
+  const address = composeFullAddress(meta)
   const folderId = meta.drive_photo_folder_id ?? ''
   const folderLabel = meta.drive_photo_folder_label ?? ''
   const { matches, suggestedId, status: matchStatus, error: matchError } = useAddressFolderMatch(address)

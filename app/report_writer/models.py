@@ -118,6 +118,10 @@ class AddressSuggestionModel(BaseModel):
     id: str
     label: str
     address: str
+    address2: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
 
 
 class AddressSuggestResponse(BaseModel):

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Claim, PhotoAnalysisCounts, ReportTypeDefinition } from '../../types'
-import { AddressAutocomplete } from './AddressAutocomplete'
+import { AddressFields } from './AddressFields'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { PropertyMapPreview } from './PropertyMapPreview'
 import { StormPicker } from './StormPicker'
@@ -80,6 +80,10 @@ export function ClaimForm({
     const next: Record<string, string> = {}
     if (base.report_type) next.report_type = base.report_type
     if (base.address) next.address = base.address
+    if (base.address2) next.address2 = base.address2
+    if (base.city) next.city = base.city
+    if (base.state) next.state = base.state
+    if (base.zip) next.zip = base.zip
     if (base.property_type) next.property_type = base.property_type
     if (base.drive_photo_folder_id) next.drive_photo_folder_id = base.drive_photo_folder_id
     if (base.drive_photo_folder_label) next.drive_photo_folder_label = base.drive_photo_folder_label
@@ -105,14 +109,17 @@ export function ClaimForm({
         <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--app-text-muted)' }}>
           Start here. We use the address to find the job&apos;s photo folder in Google Drive.
         </p>
-        <label style={{ fontSize: 13, display: 'block' }}>
-          <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Address</span>
-          <AddressAutocomplete
-            value={meta.address ?? ''}
-            onChange={addr => updateMetadata({ address: addr })}
-            disabled={typeLocked}
-          />
-        </label>
+        <AddressFields
+          value={{
+            address: meta.address,
+            address2: meta.address2,
+            city: meta.city,
+            state: meta.state,
+            zip: meta.zip,
+          }}
+          onChange={patch => updateMetadata(patch as Record<string, string>)}
+          disabled={typeLocked}
+        />
         <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
           <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title</span>
           <input

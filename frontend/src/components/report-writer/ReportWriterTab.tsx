@@ -14,6 +14,7 @@ import {
   updateSection,
 } from '../../api/reportWriter'
 import type { Claim } from '../../types'
+import { composeFullAddress } from '../../lib/address'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
 import { usePropertyMap, clearPropertyMapMetadata } from '../../hooks/usePropertyMap'
@@ -76,6 +77,7 @@ export function ReportWriterTab() {
   })
 
   const draft = localDraft ?? claimQuery.data ?? emptyClaim()
+  const fullAddress = composeFullAddress(draft.property_metadata ?? {})
   const reportTypes = reportTypesQuery.data ?? []
   const activeReportType = reportTypes.find(t => t.id === draft.property_metadata?.report_type)
   const sectionKeys = activeReportType?.sections.map(s => s.key) ?? []
@@ -91,7 +93,7 @@ export function ReportWriterTab() {
 
   const weather = useClaimWeather({
     claimId: activeId,
-    address: draft.property_metadata?.address ?? '',
+    address: fullAddress,
     stormDate: draft.property_metadata?.storm_date ?? '',
     stormDateIso: draft.property_metadata?.storm_date_iso ?? '',
     metadata: draft.property_metadata ?? {},
@@ -113,7 +115,7 @@ export function ReportWriterTab() {
 
   const propertyMap = usePropertyMap({
     claimId: activeId,
-    address: draft.property_metadata?.address ?? '',
+    address: fullAddress,
     metadata: draft.property_metadata ?? {},
     onMetadataPatch: patch =>
       updateDraft(prev => {
@@ -380,7 +382,7 @@ export function ReportWriterTab() {
             </div>
 
             <PhotoAnalysisBanner
-              hasAddress={!!draft.property_metadata?.address?.trim()}
+              hasAddress={!!fullAddress.trim()}
               hasFolder={!!draft.property_metadata?.drive_photo_folder_id}
               counts={photoSync.counts}
               batchStatus={photoSync.batchStatus}
