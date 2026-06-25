@@ -8,7 +8,8 @@ defaults (paragraph strategy, breadcrumb v2), re-embed, replace chunks.
 Run from project root:
   PYTHONPATH=. python scripts/reindex_all_documents.py
   PYTHONPATH=. python scripts/reindex_all_documents.py --dry-run
-  PYTHONPATH=. python scripts/reindex_all_documents.py --limit 10
+  PYTHONPATH=. python scripts/reindex_all_documents.py --limit 10 --offset 0
+  PYTHONPATH=. python scripts/reindex_all_documents.py --limit 10 --offset 10
   PYTHONPATH=. python scripts/reindex_all_documents.py --use-stored-config
 
 Requires DATABASE_URL (and embedding API / Ollama per app config). Can take a
@@ -98,6 +99,24 @@ def list_reindexable_documents(conn) -> list[ReindexTarget]:
     return targets
 
 
+def select_targets(
+    targets: list[ReindexTarget],
+    *,
+    offset: int,
+    limit: int,
+) -> tuple[list[ReindexTarget], int]:
+    """Return (slice, total_count). offset/limit paginate in stable created_at order."""
+    total = len(targets)
+    if offset < 0:
+        raise SystemExit("--offset must be >= 0")
+    if limit < 0:
+        raise SystemExit("--limit must be >= 0")
+    if offset >= total:
+        return [], total
+    end = total if limit <= 0 else min(offset + limit, total)
+    return targets[offset:end], total
+
+
 def chunking_options_for(target: ReindexTarget, use_stored_config: bool):
     from app.models import ChunkingOptions
 
@@ -185,7 +204,13 @@ def parse_args() -> argparse.Namespace:
         "--limit",
         type=int,
         default=0,
-        help="Max documents to process (0 = all).",
+        help="Max documents to process (0 = all remaining after --offset).",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Skip this many reindexable documents (stable created_at order).",
     )
     parser.add_argument(
         "--doc-id",
@@ -224,19 +249,34 @@ def main() -> int:
         for doc_id in sorted(missing):
             print(f"MYDEBUG → skipping unknown or empty doc_id: {doc_id}", file=sys.stderr)
 
-    if args.limit > 0:
-        targets = targets[: args.limit]
+    total_reindexable = len(targets)
+    targets, _ = select_targets(targets, offset=args.offset, limit=args.limit)
 
     if not targets:
-        print("No documents with stored full_text to reindex.")
+        if total_reindexable == 0:
+            print("No documents with stored full_text to reindex.")
+        else:
+            print(
+                f"No documents in this batch (offset {args.offset}, "
+                f"{total_reindexable} reindexable total)."
+            )
         return 0
 
-    print(f"Found {len(targets)} document(s) to reindex.")
+    batch_end = args.offset + len(targets)
+    print(
+        f"Found {len(targets)} document(s) to reindex "
+        f"(positions {args.offset + 1}–{batch_end} of {total_reindexable})."
+    )
     if args.dry_run:
-        for target in targets:
+        for index, target in enumerate(targets, start=args.offset + 1):
             label = target.title or target.doc_id
-            print(f"  - {target.doc_id} ({label!r})")
+            print(f"  [{index}/{total_reindexable}] {target.doc_id} ({label!r})")
         print("Dry run only — no changes made.")
+        if args.limit > 0 and batch_end < total_reindexable:
+            print(
+                f"Next batch: PYTHONPATH=. python scripts/reindex_all_documents.py "
+                f"--limit {args.limit} --offset {batch_end}"
+            )
         return 0
 
     conn = connect_db()
@@ -261,6 +301,12 @@ def main() -> int:
         f"Done: {ok_count} succeeded, {fail_count} failed, "
         f"{chunk_total} total chunk(s) written."
     )
+    next_offset = args.offset + len(outcomes)
+    if args.limit > 0 and next_offset < total_reindexable:
+        print(
+            f"Next batch: PYTHONPATH=. python scripts/reindex_all_documents.py "
+            f"--limit {args.limit} --offset {next_offset}"
+        )
     if fail_count:
         print("Failures:", file=sys.stderr)
         for outcome in outcomes:
