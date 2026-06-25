@@ -116,7 +116,12 @@ export function AddressFields({
               activeHighlight >= 0 ? `${listId}-option-${activeHighlight}` : undefined
             }
             onChange={e => {
-              updateField('address', e.target.value)
+              onChange({
+                address: e.target.value,
+                city: '',
+                state: '',
+                zip: '',
+              })
               setOpen(true)
               setHighlight(-1)
             }}

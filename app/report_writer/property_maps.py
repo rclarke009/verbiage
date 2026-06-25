@@ -22,7 +22,9 @@ _GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 _STATIC_MAP_URL = "https://maps.googleapis.com/maps/api/staticmap"
 _MAP_VARIANTS = ("satellite", "roadmap")
 _MAP_ATTRIBUTION = "Map data © Google"
-_DEFAULT_MAP_ZOOM = 19
+_PROPERTY_DETAIL_ZOOM = 20
+# NW panhandle to SE Keys — frames both Florida coasts for state context map.
+_FL_CONTEXT_VISIBLE = "31.0,-87.6|24.4,-79.8"
 
 
 @dataclass
@@ -150,7 +152,8 @@ async def fetch_static_map(
     longitude: float,
     *,
     maptype: str,
-    zoom: int = _DEFAULT_MAP_ZOOM,
+    zoom: int = _PROPERTY_DETAIL_ZOOM,
+    visible: str | None = None,
     size: str = "640x480",
 ) -> bytes:
     if maptype not in _MAP_VARIANTS:
@@ -163,15 +166,18 @@ async def fetch_static_map(
         )
 
     marker = quote(f"color:red|{latitude},{longitude}", safe="|,")
-    params = {
-        "center": f"{latitude},{longitude}",
-        "zoom": str(zoom),
+    params: dict[str, str] = {
         "size": size,
         "scale": "2",
         "maptype": maptype,
         "markers": marker,
         "key": GOOGLE_MAPS_API_KEY,
     }
+    if visible:
+        params["visible"] = visible
+    else:
+        params["center"] = f"{latitude},{longitude}"
+        params["zoom"] = str(zoom)
 
     client = get_async_client()
     try:
@@ -193,6 +199,15 @@ async def fetch_static_map(
     return compressed
 
 
+async def fetch_florida_context_map(latitude: float, longitude: float) -> bytes:
+    return await fetch_static_map(
+        latitude,
+        longitude,
+        maptype="roadmap",
+        visible=_FL_CONTEXT_VISIBLE,
+    )
+
+
 async def fetch_property_map_images(latitude: float, longitude: float) -> PropertyMapImages:
     satellite, roadmap = await asyncio_gather_maps(latitude, longitude)
     return PropertyMapImages(satellite=satellite, roadmap=roadmap)
@@ -202,7 +217,7 @@ async def asyncio_gather_maps(latitude: float, longitude: float) -> tuple[bytes,
     import asyncio
 
     satellite_task = fetch_static_map(latitude, longitude, maptype="satellite")
-    roadmap_task = fetch_static_map(latitude, longitude, maptype="roadmap")
+    roadmap_task = fetch_florida_context_map(latitude, longitude)
     satellite, roadmap = await asyncio.gather(satellite_task, roadmap_task)
     return satellite, roadmap
 
