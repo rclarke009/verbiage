@@ -143,7 +143,7 @@ export function PropertyMapPreview({
               urlPath={preview.satellite_url}
             />
             <MapImage
-              label="Road map"
+              label="Florida context"
               previewSrc={preview.roadmap_preview}
               urlPath={preview.roadmap_url}
             />

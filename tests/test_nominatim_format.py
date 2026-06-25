@@ -102,3 +102,21 @@ def test_format_road_only_without_house_number():
     assert suggestion.address == "Gulfview Drive"
     assert suggestion.city == "Tampa"
     assert suggestion.state == "FL"
+
+
+def test_format_usps_city_override_wekiwa_springs():
+    suggestion = format_nominatim_result(
+        _item(
+            house_number="111",
+            road="Cedar Oak Trail",
+            town="Wekiwa Springs",
+            state="Florida",
+            postcode="32750",
+        )
+    )
+    assert suggestion is not None
+    assert suggestion.address == "111 Cedar Oak Trail"
+    assert suggestion.city == "Longwood"
+    assert suggestion.state == "FL"
+    assert suggestion.zip == "32750"
+    assert suggestion.label == "111 Cedar Oak Trail, Longwood, FL 32750"

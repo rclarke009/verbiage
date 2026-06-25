@@ -92,10 +92,22 @@ class GeocodeResult:
     resolved_address: str
 
 
+# OSM place names that differ from the USPS preferred city for the same ZIP.
+# Key: (town/city from Nominatim, zip) → preferred mailing city.
+_USPS_CITY_OVERRIDES: dict[tuple[str, str], str] = {
+    ("Wekiwa Springs", "32750"): "Longwood",
+}
+
+
 def _pick_city(address: dict[str, Any]) -> str:
     for key in ("city", "town", "village", "hamlet", "municipality"):
         value = (address.get(key) or "").strip()
         if value:
+            postcode = (address.get("postcode") or "").strip()
+            zip5 = postcode[:5] if len(postcode) >= 5 else postcode
+            override = _USPS_CITY_OVERRIDES.get((value, zip5))
+            if override:
+                return override
             return value
     return ""
 

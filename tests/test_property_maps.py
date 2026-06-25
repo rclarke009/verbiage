@@ -163,7 +163,14 @@ def test_fetch_property_maps_persists_images(
     )
 
     assert len(map_params) == 2
-    assert all(p.get("zoom") == "19" for p in map_params)
+    satellite_params = next(p for p in map_params if p.get("maptype") == "satellite")
+    context_params = next(p for p in map_params if p.get("maptype") == "roadmap")
+    assert satellite_params.get("zoom") == "20"
+    assert satellite_params.get("center") == "26.33,-81.81"
+    assert "visible" not in satellite_params
+    assert context_params.get("visible") == "31.0,-87.6|24.4,-79.8"
+    assert "zoom" not in context_params
+    assert "26.33,-81.81" in (context_params.get("markers") or "")
 
     assert result.satellite_path is not None
     assert result.roadmap_path is not None

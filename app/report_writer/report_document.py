@@ -167,7 +167,7 @@ def build_report_document(
             obs = f"{obs} {summary}"
 
     property_satellite = _load_property_map_photo(meta, "satellite", "Satellite view of property location.")
-    property_roadmap = _load_property_map_photo(meta, "roadmap", "Road map view of property location.")
+    property_roadmap = _load_property_map_photo(meta, "roadmap", "Property location within Florida.")
 
     return ReportDocument(
         title=title,
