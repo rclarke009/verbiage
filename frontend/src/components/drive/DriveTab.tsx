@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { cancelIngestBatch, driveGetFolder, driveListFiles, driveTest, ingestGoogleDrive, pollIngestBatch } from '../../api/drive'
 import { useAuth } from '../../context/AuthContext'
+import { useSimilarTitlesConfirm } from '../../hooks/useSimilarTitlesConfirm'
 import { apiOrigin } from '../../lib/api'
 import {
   DRIVE_FOLDER_STORAGE_KEY,
@@ -112,6 +113,7 @@ export function DriveTab() {
   const queryClient = useQueryClient()
   const initDoneRef = useRef(false)
   const autoListedRef = useRef(false)
+  const { confirmIngest, dialog: similarTitlesDialog } = useSimilarTitlesConfirm()
 
   const apiFolderId = () => resolveDriveFolderForApi(folderInput, teamInboxId)
   const effectiveFolderId = apiFolderId()
@@ -332,6 +334,31 @@ export function DriveTab() {
   const defaultFolderLinkText =
     teamInboxLabel || 'the team ingest folder in Google Drive'
 
+  const handleIngestClick = async () => {
+    if (!canIngestQuick) {
+      if (
+        !window.confirm(
+          'No folder and nothing selected — ingest may scan all of Drive. Continue?',
+        )
+      ) {
+        return
+      }
+    }
+
+    const targets = (selected.size ? files.filter(f => selected.has(f.id)) : files).filter(
+      f => f.index_status !== 'indexed',
+    )
+    const confirmed = await confirmIngest(
+      targets.map(f => ({
+        proposed: f.name || f.id,
+        label: f.name || f.id,
+        excludeDocIds: [f.id],
+      })),
+    )
+    if (!confirmed) return
+    ingestMutation.mutate()
+  }
+
   return (
     <div>
       <h2 style={{ marginTop: 0, color: 'var(--app-primary)', fontSize: 18 }}>Google Drive</h2>
@@ -460,17 +487,7 @@ export function DriveTab() {
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (!canIngestQuick) {
-              if (
-                !window.confirm(
-                  'No folder and nothing selected — ingest may scan all of Drive. Continue?',
-                )
-              )
-                return
-            }
-            ingestMutation.mutate()
-          }}
+          onClick={() => void handleIngestClick()}
           disabled={ingestMutation.isPending}
           style={btnPrimary}
         >
@@ -641,6 +658,7 @@ export function DriveTab() {
           </button>
         </div>
       </details>
+      {similarTitlesDialog}
     </div>
   )
 }

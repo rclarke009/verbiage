@@ -8,6 +8,8 @@ import type {
   ReportWriterImage,
   SectionContent,
   WeatherOptionsResponse,
+  AddressSuggestion,
+  PropertyMapResponse,
 } from '../types'
 
 const BASE = '/report-writer'
@@ -106,6 +108,14 @@ export async function fetchClaimWeather(address: string, date: string): Promise<
   return res.json() as Promise<WeatherOptionsResponse>
 }
 
+export async function fetchPropertyMap(address: string, claimId?: string): Promise<PropertyMapResponse> {
+  const q = new URLSearchParams({ address })
+  if (claimId) q.set('claim_id', claimId)
+  const res = await apiFetch(`${BASE}/property-map?${q}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<PropertyMapResponse>
+}
+
 export async function matchDrivePhotoFolder(address: string) {
   const q = new URLSearchParams({ address })
   const res = await apiFetch(`${BASE}/drive/match-folder?${q}`)
@@ -115,6 +125,14 @@ export async function matchDrivePhotoFolder(address: string) {
     suggested_id?: string | null
     jobs_root?: { id: string; display_path?: string } | null
   }>
+}
+
+export async function suggestAddresses(q: string): Promise<AddressSuggestion[]> {
+  const params = new URLSearchParams({ q })
+  const res = await apiFetch(`${BASE}/address/suggest?${params}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  const data = (await res.json()) as { suggestions: AddressSuggestion[] }
+  return data.suggestions
 }
 
 export async function syncClaimPhotosFromDrive(claimId: string, folderId?: string) {

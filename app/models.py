@@ -57,6 +57,21 @@ class IngestResponse(BaseModel):
     )
 
 
+class ClaimContext(BaseModel):
+    """Optional anchor location and storm for structured Ask queries."""
+
+    address: str | None = Field(default=None, description="Property address for geo anchor")
+    storm_id: str | None = Field(default=None, description="Catalog storm id, e.g. ian-2022")
+    storm_name: str | None = Field(default=None, description="Storm name when id is unknown")
+    latitude: float | None = Field(default=None, description="Anchor latitude")
+    longitude: float | None = Field(default=None, description="Anchor longitude")
+
+    def has_anchor(self) -> bool:
+        if self.latitude is not None and self.longitude is not None:
+            return True
+        return bool((self.address or "").strip())
+
+
 class AskRequest(BaseModel):
     question: str = Field(..., description="Question from user")
     top_k: int = Field(default=5, description="Will pull the top __ matches")
@@ -69,6 +84,17 @@ class AskRequest(BaseModel):
             "hybrid otherwise); vector = pgvector cosine; lexical = full-text ts_rank; "
             "hybrid = RRF fusion of both"
         ),
+    )
+    query_mode: Literal["auto", "rag", "nearby_storm"] = Field(
+        default="auto",
+        description=(
+            "auto = route geo/storm catalog questions when claim_context is present; "
+            "rag = force semantic retrieval; nearby_storm = structured same-storm distance lookup"
+        ),
+    )
+    claim_context: ClaimContext | None = Field(
+        default=None,
+        description="Anchor property and storm for nearby_storm queries",
     )
 
 class RetrievedChunk(BaseModel):
@@ -83,6 +109,10 @@ class RetrievedChunk(BaseModel):
         description="Resolved URL to open the full report (stored or derived for Google Drive)",
     )
     section_label: str | None = Field(default=None, description="Detected report section heading")
+    distance_mi: float | None = Field(
+        default=None,
+        description="Distance in miles when returned by structured nearby-storm lookup",
+    )
 
 class AskResponse(BaseModel):
     answer: str = Field(...,description="Answer from system")

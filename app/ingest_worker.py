@@ -37,7 +37,7 @@ from app.report_writer.queries import (
     update_image_storage_path,
     update_image_vision_analysis,
 )
-from app.report_writer.storage import storage_path_for, write_claim_image
+from app.report_writer.storage import read_claim_image_bytes, storage_path_for, write_claim_image
 from app.report_writer.vision import analyze_image_bytes
 
 logger = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
     claim_id = payload.get("claim_id")
     user_id = payload.get("user_id")
     image_id = payload.get("image_id")
-    drive_file_id = payload.get("drive_file_id") or job["doc_id"]
+    drive_file_id = payload.get("drive_file_id")
 
     if not claim_id or not user_id or not image_id:
         return "failed", None, "Missing claim_id, user_id, or image_id in payload"
@@ -161,7 +161,17 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
         return "skipped", {"image_id": image_id, "reason": "batch_cancelled"}, None
 
     try:
-        data, mime = await download_drive_file_bytes_async(drive_file_id, img.get("filename") or drive_file_id)
+        if drive_file_id:
+            data, mime = await download_drive_file_bytes_async(
+                drive_file_id,
+                img.get("filename") or drive_file_id,
+            )
+        else:
+            storage_path = img.get("storage_path")
+            if not storage_path:
+                return "failed", None, "Image has no drive_file_id or storage_path"
+            data = await asyncio.to_thread(read_claim_image_bytes, storage_path)
+            mime = img.get("content_type") or "image/jpeg"
         if _should_skip_cancelled_job(pool, job):
             conn_skip = get_valid_conn(pool)
             try:

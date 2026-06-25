@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import type { Claim, PhotoAnalysisCounts, ReportTypeDefinition } from '../../types'
+import { AddressAutocomplete } from './AddressAutocomplete'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
+import { PropertyMapPreview } from './PropertyMapPreview'
 import { StormPicker } from './StormPicker'
 import { WeatherPicker } from './WeatherPicker'
-import type { WeatherOptionsResponse } from '../../types'
+import type { WeatherOptionsResponse, PropertyMapResponse } from '../../types'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -30,14 +32,23 @@ export function ClaimForm({
   photoSyncing,
   photoSyncError,
   photoCounts,
+  onUploadBatchStarted,
   weatherLoading,
   weatherError,
   weatherOptions,
   onRefreshWeather,
   onWeatherSelectionChange,
+  propertyMapLoading,
+  propertyMapError,
+  propertyMapPreview,
+  onRefreshPropertyMap,
+  canGenerate = false,
+  generating = false,
+  onGenerate,
+  generateTitle,
 }: {
   claim: Claim
-  claimId: string
+  claimId: string | null
   reportTypes: ReportTypeDefinition[]
   typeLocked?: boolean
   onChange: (patch: Partial<Pick<Claim, 'title' | 'field_notes' | 'property_metadata'>>) => void
@@ -45,11 +56,20 @@ export function ClaimForm({
   photoSyncing: boolean
   photoSyncError: string | null
   photoCounts?: PhotoAnalysisCounts | null
+  onUploadBatchStarted?: (batchId: string) => void
   weatherLoading?: boolean
   weatherError?: string | null
   weatherOptions?: WeatherOptionsResponse | null
   onRefreshWeather?: () => void
   onWeatherSelectionChange?: (patch: Record<string, string>) => void
+  propertyMapLoading?: boolean
+  propertyMapError?: string | null
+  propertyMapPreview?: PropertyMapResponse | null
+  onRefreshPropertyMap?: () => void
+  canGenerate?: boolean
+  generating?: boolean
+  onGenerate?: () => void
+  generateTitle?: string
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
@@ -87,11 +107,10 @@ export function ClaimForm({
         </p>
         <label style={{ fontSize: 13, display: 'block' }}>
           <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Address</span>
-          <input
+          <AddressAutocomplete
             value={meta.address ?? ''}
-            onChange={e => updateMetadata({ address: e.target.value })}
-            placeholder="412 Gulfview Drive, Tampa, FL"
-            style={inputStyle}
+            onChange={addr => updateMetadata({ address: addr })}
+            disabled={typeLocked}
           />
         </label>
         <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
@@ -103,16 +122,25 @@ export function ClaimForm({
             style={inputStyle}
           />
         </label>
+        <PropertyMapPreview
+          preview={propertyMapPreview ?? null}
+          loading={!!propertyMapLoading}
+          error={propertyMapError ?? null}
+          resolvedAddress={meta.property_map_resolved_address}
+          onRefresh={onRefreshPropertyMap ?? (() => {})}
+          disabled={typeLocked}
+        />
       </fieldset>
 
       <PhotoFolderPanel
-        claimId={claimId}
+        claimId={claimId ?? ''}
         claim={claim}
         onMetadataChange={updateMetadata}
         onConfirmSync={onConfirmPhotoSync}
         syncing={photoSyncing}
         syncError={photoSyncError}
         photoCounts={photoCounts}
+        onUploadBatchStarted={onUploadBatchStarted}
       />
 
       <fieldset
@@ -181,38 +209,6 @@ export function ClaimForm({
         disabled={typeLocked}
       >
         <legend style={{ ...stepLegend, color: 'var(--app-text)' }}>Step 4 — Storm &amp; property</legend>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-          <label style={{ fontSize: 13 }}>
-            <span style={{ display: 'block', marginBottom: 4 }}>Property type</span>
-            <input
-              value={meta.property_type ?? ''}
-              onChange={e => updateMetadata({ property_type: e.target.value })}
-              style={inputStyle}
-            />
-          </label>
-          {showManualDate ? (
-            <label style={{ fontSize: 13 }}>
-              <span style={{ display: 'block', marginBottom: 4 }}>Storm date</span>
-              <input
-                value={meta.storm_date ?? ''}
-                onChange={e => updateMetadata({ storm_date: e.target.value })}
-                placeholder="e.g. September 28, 2022"
-                style={inputStyle}
-              />
-            </label>
-          ) : (
-            <div />
-          )}
-        </div>
-        <WeatherPicker
-          options={weatherOptions ?? null}
-          metadata={meta}
-          loading={!!weatherLoading}
-          error={weatherError ?? null}
-          disabled={typeLocked}
-          onRefresh={onRefreshWeather ?? (() => {})}
-          onSelectionChange={onWeatherSelectionChange ?? (() => {})}
-        />
         <StormPicker
           stormId={meta.storm_id}
           customMode={stormCustom}
@@ -238,6 +234,34 @@ export function ClaimForm({
             onChange({ property_metadata: keepBaseFields(meta) })
           }}
         />
+        {showManualDate ? (
+          <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
+            <span style={{ display: 'block', marginBottom: 4 }}>Storm date</span>
+            <input
+              value={meta.storm_date ?? ''}
+              onChange={e => updateMetadata({ storm_date: e.target.value })}
+              placeholder="e.g. September 28, 2022"
+              style={inputStyle}
+            />
+          </label>
+        ) : null}
+        <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
+          <span style={{ display: 'block', marginBottom: 4 }}>Property type</span>
+          <input
+            value={meta.property_type ?? ''}
+            onChange={e => updateMetadata({ property_type: e.target.value })}
+            style={inputStyle}
+          />
+        </label>
+        <WeatherPicker
+          options={weatherOptions ?? null}
+          metadata={meta}
+          loading={!!weatherLoading}
+          error={weatherError ?? null}
+          disabled={typeLocked}
+          onRefresh={onRefreshWeather ?? (() => {})}
+          onSelectionChange={onWeatherSelectionChange ?? (() => {})}
+        />
       </fieldset>
 
       <label style={{ fontSize: 13 }}>
@@ -256,6 +280,43 @@ export function ClaimForm({
           }}
         />
       </label>
+
+      <div
+        style={{
+          marginTop: 4,
+          padding: '16px 14px',
+          borderTop: '2px solid var(--app-border)',
+          borderRadius: 8,
+          background: 'var(--app-bg-subtle, rgba(0, 0, 0, 0.02))',
+        }}
+      >
+        <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--app-primary)' }}>Report sections</h3>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
+          The sections below are your report draft. Generate them from the steps above, then edit anything you like.
+          Generating or regenerating will not overwrite text you have edited.
+        </p>
+        {onGenerate ? (
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={generating || !canGenerate}
+            title={generateTitle}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 6,
+              border: 'none',
+              background: 'var(--app-primary)',
+              color: 'var(--app-on-primary)',
+              cursor: generating || !canGenerate ? 'not-allowed' : 'pointer',
+              opacity: generating || !canGenerate ? 0.6 : 1,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {generating ? 'Generating…' : 'Generate draft'}
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }

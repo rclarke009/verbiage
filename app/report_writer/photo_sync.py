@@ -33,21 +33,21 @@ def enqueue_vision_jobs_for_claim(
         if img.get("vision_analysis"):
             continue
         drive_file_id = img.get("drive_file_id")
-        if not drive_file_id:
+        storage_path = img.get("storage_path")
+        if not drive_file_id and not storage_path:
             continue
         if skip_active and has_active_vision_job(conn, img["image_id"]):
             continue
+        job_doc_id = drive_file_id or img["image_id"]
+        payload: dict[str, Any] = {
+            "claim_id": claim_id,
+            "user_id": user_id,
+            "image_id": img["image_id"],
+        }
+        if drive_file_id:
+            payload["drive_file_id"] = drive_file_id
         jobs_to_enqueue.append(
-            (
-                drive_file_id,
-                INGEST_JOB_KIND_CLAIM_PHOTO_VISION,
-                {
-                    "claim_id": claim_id,
-                    "user_id": user_id,
-                    "image_id": img["image_id"],
-                    "drive_file_id": drive_file_id,
-                },
-            )
+            (job_doc_id, INGEST_JOB_KIND_CLAIM_PHOTO_VISION, payload),
         )
 
     if not jobs_to_enqueue:

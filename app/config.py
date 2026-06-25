@@ -132,6 +132,7 @@ GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_LAB
 # Jobs root: parent folder of address-named job photo folders (Report Writer Step 1 lookup).
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID")
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL")
+GOOGLE_MAPS_API_KEY = _google_env("GOOGLE_MAPS_API_KEY")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
 # SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used
@@ -185,6 +186,17 @@ OPEN_METEO_ATTRIBUTION = os.getenv(
     "OPEN_METEO_ATTRIBUTION",
     "Open-Meteo (CC BY 4.0)",
 ).strip()
+
+# Nominatim (OpenStreetMap) address autocomplete — Report Writer Step 1.
+# Public API requires a valid User-Agent; see https://operations.osmfoundation.org/policies/nominatim/
+NOMINATIM_USER_AGENT = os.getenv(
+    "NOMINATIM_USER_AGENT",
+    "Verbiage/1.0 (local dev)",
+).strip()
+NOMINATIM_BASE_URL = os.getenv(
+    "NOMINATIM_BASE_URL",
+    "https://nominatim.openstreetmap.org",
+).strip().rstrip("/")
 
 # Cross-encoder reranking of the retrieved candidate pool before prompt assembly.
 # Off by default: loading the ~100MB CrossEncoder is undesirable in tests/CI. Enable

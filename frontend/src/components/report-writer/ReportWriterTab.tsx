@@ -16,6 +16,7 @@ import {
 import type { Claim } from '../../types'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
+import { usePropertyMap, clearPropertyMapMetadata } from '../../hooks/usePropertyMap'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
@@ -110,6 +111,26 @@ export function ReportWriterTab() {
       })),
   })
 
+  const propertyMap = usePropertyMap({
+    claimId: activeId,
+    address: draft.property_metadata?.address ?? '',
+    metadata: draft.property_metadata ?? {},
+    onMetadataPatch: patch =>
+      updateDraft(prev => {
+        const nextMeta = { ...prev.property_metadata }
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === '') delete nextMeta[k]
+          else if (v !== undefined) nextMeta[k] = v
+        }
+        return { ...prev, property_metadata: nextMeta }
+      }),
+    onPropertyMapClear: () =>
+      updateDraft(prev => ({
+        ...prev,
+        property_metadata: clearPropertyMapMetadata(prev.property_metadata ?? {}) as Record<string, string>,
+      })),
+  })
+
   const saveMutation = useMutation({
     mutationFn: () =>
       updateClaim(activeId!, {
@@ -133,6 +154,30 @@ export function ReportWriterTab() {
   })
 
   const sectionSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  const flushPendingSectionSaves = useCallback(async () => {
+    if (!activeId) return
+    const timers = sectionSaveTimers.current
+    const currentDraft = localDraft ?? claimQuery.data
+    const pendingKeys = Object.keys(timers)
+    await Promise.all(
+      pendingKeys.map(async key => {
+        clearTimeout(timers[key])
+        delete timers[key]
+        const content = currentDraft?.sections?.[key]?.content ?? ''
+        await updateSection(activeId, key, content).catch(() => {})
+      }),
+    )
+  }, [activeId, localDraft, claimQuery.data])
+
+  const generateTitle =
+    !draft.property_metadata?.report_type
+      ? 'Select a report type first'
+      : !draft.field_notes.trim()
+        ? 'Add field notes first'
+        : !draft.property_metadata?.drive_photo_folder_id
+          ? 'Link a photo folder in Step 2 for better draft quality'
+          : undefined
 
   const handleSectionChange = useCallback(
     (key: string, content: string) => {
@@ -163,6 +208,7 @@ export function ReportWriterTab() {
       )
       if (!ok) return
     }
+    await flushPendingSectionSaves()
     await saveMutation.mutateAsync()
     resetStream()
     const wasCancelled = await generate(
@@ -258,13 +304,7 @@ export function ReportWriterTab() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={generating || !canGenerate}
-                title={
-                  !draft.property_metadata?.report_type
-                    ? 'Select a report type first'
-                    : !draft.property_metadata?.drive_photo_folder_id
-                      ? 'Link a photo folder in Step 2 for better draft quality'
-                      : undefined
-                }
+                title={generateTitle}
                 style={{
                   padding: '6px 12px',
                   borderRadius: 6,
@@ -375,11 +415,23 @@ export function ReportWriterTab() {
                   photoSyncing={photoSync.syncing}
                   photoSyncError={photoSync.syncError}
                   photoCounts={photoSync.counts}
+                  onUploadBatchStarted={batchId => {
+                    photoSync.watchBatch(batchId)
+                    void photoSync.refreshCounts()
+                  }}
                   weatherLoading={weather.loading}
                   weatherError={weather.error}
                   weatherOptions={weather.options}
                   onRefreshWeather={weather.refresh}
                   onWeatherSelectionChange={weather.applySelectionPatch}
+                  propertyMapLoading={propertyMap.loading}
+                  propertyMapError={propertyMap.error}
+                  propertyMapPreview={propertyMap.preview}
+                  onRefreshPropertyMap={propertyMap.refresh}
+                  canGenerate={canGenerate}
+                  generating={generating}
+                  onGenerate={() => void handleGenerate()}
+                  generateTitle={generateTitle}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
                 <DraftEditor

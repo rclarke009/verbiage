@@ -53,6 +53,18 @@ def test_build_prefix_includes_file_when_different_from_title():
     assert "[File: Smith_Residence_Roof.pdf]" in prefix
 
 
+def test_build_prefix_includes_location_and_storm():
+    prefix = build_document_breadcrumb_prefix(
+        doc_id="abc",
+        title="Engineering Report - 1060 Alton Road",
+        source="eval_fixture",
+        address="1060 Alton Road, Port Charlotte, FL",
+        storm_name="Ian",
+    )
+    assert "[Location: 1060 Alton Road, Port Charlotte, FL]" in prefix
+    assert "[Storm: Ian]" in prefix
+
+
 def test_apply_document_breadcrumb_prepends_to_each_chunk():
     chunks = [
         Chunk(

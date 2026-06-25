@@ -23,6 +23,7 @@ export function PhotoFolderPanel({
   syncing,
   syncError,
   photoCounts,
+  onUploadBatchStarted,
 }: {
   claimId: string
   claim: Claim
@@ -31,6 +32,7 @@ export function PhotoFolderPanel({
   syncing: boolean
   syncError: string | null
   photoCounts?: PhotoAnalysisCounts | null
+  onUploadBatchStarted?: (batchId: string) => void
 }) {
   const meta = claim.property_metadata || {}
   const address = meta.address ?? ''
@@ -42,6 +44,8 @@ export function PhotoFolderPanel({
     !suggestedId && visibleMatches.length === 1 ? visibleMatches[0] : null
   const [manualInput, setManualInput] = useState('')
   const [manualError, setManualError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const imagesQuery = useQuery({
@@ -74,11 +78,25 @@ export function PhotoFolderPanel({
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    await uploadClaimImage(claimId, file)
+    const files = Array.from(e.target.files ?? [])
     e.target.value = ''
-    imagesQuery.refetch()
+    if (!files.length) return
+    setUploading(true)
+    setUploadError(null)
+    let lastBatchId: string | null = null
+    try {
+      for (const file of files) {
+        const result = await uploadClaimImage(claimId, file)
+        if (result.batch_id) lastBatchId = result.batch_id
+      }
+      await imagesQuery.refetch()
+      if (lastBatchId) onUploadBatchStarted?.(lastBatchId)
+    } catch (err) {
+      console.log('MYDEBUG →', err)
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
   }
 
   const folderUrl = folderId ? driveFolderUrl(folderId) : null
@@ -283,13 +301,31 @@ export function PhotoFolderPanel({
         Or{' '}
         <button
           type="button"
+          disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          style={{ background: 'none', border: 'none', color: 'var(--app-primary)', cursor: 'pointer', padding: 0 }}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--app-primary)',
+            cursor: uploading ? 'wait' : 'pointer',
+            padding: 0,
+            opacity: uploading ? 0.7 : 1,
+          }}
         >
-          upload one photo manually
+          {uploading ? 'Uploading…' : 'upload photos manually'}
         </button>
-        <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleUpload} />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={e => void handleUpload(e)}
+        />
       </p>
+      {uploadError ? (
+        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--app-danger)' }}>{uploadError}</p>
+      ) : null}
     </fieldset>
   )
 }

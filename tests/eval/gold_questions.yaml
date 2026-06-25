@@ -38,3 +38,14 @@ questions:
   - id: earthquake_foundation
     question: "Summarize the earthquake and seismic foundation damage reported in the inspections."
     category: unanswerable
+
+  - id: nearby_ian_port_charlotte
+    question: "Which places are closest that had the same storm?"
+    category: answerable_multi
+    query_mode: nearby_storm
+    claim_context:
+      address: "1060 Alton Road, Port Charlotte, FL 33948"
+      storm_id: ian-2022
+      latitude: 26.976
+      longitude: -82.090
+    must_mention: ["Maple", "Willow"]

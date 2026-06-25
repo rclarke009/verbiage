@@ -13,10 +13,14 @@ from app.chunking import chunk_text
 from app.db import (
     delete_chunks_for_doc,
     get_document_breadcrumb_fields,
+    get_document_geo_storm_fields,
     insert_chunk,
     insert_embedding,
+    update_document_geo_storm_metadata,
     update_document_indexing_metadata,
 )
+from app.document_metadata import extract_document_metadata
+from app.geocode.nominatim import geocode_address
 from app.embedding_usage_estimate import embedding_metering
 from app.embeddings import HttpEmbedder
 from app.models import ChunkingOptions, IngestResponse
@@ -24,16 +28,58 @@ from app.models import ChunkingOptions, IngestResponse
 logger = logging.getLogger(__name__)
 
 
+async def _refresh_document_geo_metadata(
+    conn, doc_id: str, text: str, title: str | None
+) -> dict[str, str | float | None]:
+    """Extract and persist geo/storm metadata; geocode when address is known."""
+    existing = get_document_geo_storm_fields(conn, doc_id)
+    meta = extract_document_metadata(text, title=title)
+
+    for key in ("storm_id", "storm_name", "storm_date_iso", "address"):
+        if not meta.get(key) and existing.get(key):
+            meta[key] = existing[key]
+
+    address = meta.get("address")
+    if isinstance(address, str) and address.strip():
+        if meta.get("latitude") is None and existing.get("latitude") is not None:
+            meta["latitude"] = existing["latitude"]
+            meta["longitude"] = existing["longitude"]
+        else:
+            geocoded = await geocode_address(address)
+            if geocoded is not None:
+                meta["latitude"] = geocoded.latitude
+                meta["longitude"] = geocoded.longitude
+                meta["address"] = geocoded.resolved_address
+    elif meta.get("latitude") is None and existing.get("latitude") is not None:
+        meta["latitude"] = existing["latitude"]
+        meta["longitude"] = existing["longitude"]
+
+    update_document_geo_storm_metadata(
+        conn,
+        doc_id,
+        storm_id=meta.get("storm_id") if isinstance(meta.get("storm_id"), str) else None,
+        storm_name=meta.get("storm_name") if isinstance(meta.get("storm_name"), str) else None,
+        storm_date_iso=meta.get("storm_date_iso") if isinstance(meta.get("storm_date_iso"), str) else None,
+        address=meta.get("address") if isinstance(meta.get("address"), str) else None,
+        latitude=meta.get("latitude") if isinstance(meta.get("latitude"), (int, float)) else None,
+        longitude=meta.get("longitude") if isinstance(meta.get("longitude"), (int, float)) else None,
+    )
+    return meta
+
+
 def _chunk_and_insert(conn, doc_id: str, text: str, opts: ChunkingOptions):
     """CPU-bound chunking + sync chunk inserts; run via asyncio.to_thread."""
     delete_chunks_for_doc(conn, doc_id)
     chunks = chunk_text(text, opts)
     title, source, source_filename = get_document_breadcrumb_fields(conn, doc_id)
+    geo = get_document_geo_storm_fields(conn, doc_id)
     prefix = build_document_breadcrumb_prefix(
         doc_id=doc_id,
         title=title,
         source=source,
         source_filename=source_filename,
+        storm_name=geo.get("storm_name") if isinstance(geo.get("storm_name"), str) else None,
+        address=geo.get("address") if isinstance(geo.get("address"), str) else None,
     )
     chunks = apply_document_breadcrumb(chunks, prefix)
     for chunk in chunks:
@@ -64,6 +110,8 @@ async def index_document(
     """
     embedder = embedder or HttpEmbedder()
     opts = chunking_options
+    title, _, _ = get_document_breadcrumb_fields(conn, doc_id)
+    await _refresh_document_geo_metadata(conn, doc_id, text, title)
     chunks = await asyncio.to_thread(_chunk_and_insert, conn, doc_id, text, opts)
 
     try:

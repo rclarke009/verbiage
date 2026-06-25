@@ -113,6 +113,7 @@ from app.config import (
     RERANK_ENABLED
 )
 from app import llm_client
+from app.ask_router import resolve_ask_route, retrieve_nearby_storm_chunks
 from app.similar_titles import find_similar_titles, select_newest_versions
 from app.monitoring.middleware import PrometheusMiddleware
 from app.monitoring.metrics import (
@@ -919,6 +920,24 @@ async def _rerank_chunks(
     ranked = await asyncio.to_thread(reranker.rerank, question, payload, top_k)
     return [d["_chunk"] for d in ranked]
 
+async def _nearby_storm_ask(
+    conn,
+    ask_request: AskRequest,
+) -> AskResponse:
+    """Structured same-storm distance lookup without LLM."""
+    answer, top_chunks = await retrieve_nearby_storm_chunks(conn, ask_request)
+    if answer is None:
+        record_no_context_response("sync")
+        return AskResponse(
+            answer=(
+                "I don't have enough location or storm context to find nearby properties. "
+                "Provide claim_context with storm_id and an address or coordinates."
+            ),
+            top_chunks=[],
+        )
+    return AskResponse(answer=answer, top_chunks=top_chunks)
+
+
 async def _retrieve_for_ask(
     conn,
     ask_request: AskRequest,
@@ -1018,6 +1037,14 @@ async def ask(
 
     async def do_ask(conn):
         rate_limiter = request.app.state.rate_limiter
+        route = resolve_ask_route(
+            ask_request.question,
+            ask_request.query_mode,
+            ask_request.claim_context,
+        )
+        if route == "nearby_storm":
+            return await _nearby_storm_ask(conn, ask_request)
+
         embedder = HttpEmbedder()
         logger.info("ask: embedding query (1 text)")
         t_embed = time.perf_counter()
@@ -1062,6 +1089,21 @@ async def ask_stream(
     rag_endpoint = "stream"
 
     async def do_prepare(conn):
+        route = resolve_ask_route(
+            ask_request.question,
+            ask_request.query_mode,
+            ask_request.claim_context,
+        )
+        if route == "nearby_storm":
+            answer, top_chunks = await retrieve_nearby_storm_chunks(conn, ask_request)
+            if answer is None:
+                answer = (
+                    "I don't have enough location or storm context to find nearby properties. "
+                    "Provide claim_context with storm_id and an address or coordinates."
+                )
+                top_chunks = []
+            return None, answer, top_chunks
+
         rate_limiter = request.app.state.rate_limiter
         embedder = HttpEmbedder()
         logger.info("ask_stream: embedding query (1 text)")
@@ -1080,11 +1122,23 @@ async def ask_stream(
 
     async def event_iter():
         try:
-            rate_limiter, prompt, top_chunks = await with_db_conn_retry(request, do_prepare)
+            prepared = await with_db_conn_retry(request, do_prepare)
         except Exception:
             record_stream_retrieval_failed()
             yield f"event: error\ndata: {json.dumps({'detail': 'retrieval_failed'})}\n\n"
             return
+
+        # Nearby-storm route returns (None, answer, chunks) — no LLM.
+        if prepared[0] is None and prepared[1] is not None:
+            _, answer, top_chunks = prepared
+            if not top_chunks:
+                record_no_context_response(rag_endpoint)
+            payload = {"sources": _sources_payload_for_sse(top_chunks), "chunks_used": len(top_chunks)}
+            yield f"event: sources\ndata: {json.dumps(payload)}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
+            return
+
+        rate_limiter, prompt, top_chunks = prepared
 
         if prompt is None:
             record_no_context_response(rag_endpoint)

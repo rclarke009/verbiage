@@ -110,6 +110,83 @@ def test_enqueue_vision_jobs_skips_active():
     assert jobs[0][2]["image_id"] == "img-2"
 
 
+def test_enqueue_vision_jobs_includes_manual_upload():
+    from app.report_writer.photo_sync import enqueue_vision_jobs_for_claim
+
+    conn = MagicMock()
+    images = [
+        {
+            "image_id": "img-manual",
+            "storage_path": "user/claim/img.jpg",
+            "vision_analysis": None,
+        },
+    ]
+
+    with patch("app.report_writer.photo_sync.create_ingest_batch", return_value="batch-2"):
+        with patch("app.report_writer.photo_sync.insert_ingest_jobs", return_value=["job-2"]) as insert:
+            result = enqueue_vision_jobs_for_claim(
+                conn,
+                claim_id="claim-1",
+                user_id="user-1",
+                images=images,
+            )
+
+    assert result["enqueued"] == 1
+    jobs = insert.call_args[0][2]
+    assert jobs[0][0] == "img-manual"
+    assert jobs[0][2]["image_id"] == "img-manual"
+    assert "drive_file_id" not in jobs[0][2]
+
+
+def test_process_claim_photo_vision_job_reads_storage_path():
+    import asyncio
+
+    from app.ingest_worker import process_claim_photo_vision_job
+
+    pool = MagicMock()
+    job = {
+        "id": "job-1",
+        "batch_id": "batch-1",
+        "doc_id": "img-1",
+        "payload": {
+            "claim_id": "claim-1",
+            "user_id": "user-1",
+            "image_id": "img-1",
+        },
+    }
+    img = {
+        "image_id": "img-1",
+        "storage_path": "user/claim/img-1.jpg",
+        "content_type": "image/png",
+        "filename": "roof.png",
+    }
+
+    conn = MagicMock()
+    pool.getconn.return_value = conn
+
+    async def run():
+        with patch("app.ingest_worker.get_claim", return_value={"claim_id": "claim-1"}):
+            with patch("app.ingest_worker.get_claim_image", return_value=img):
+                with patch("app.ingest_worker.update_image_analysis_status"):
+                    with patch("app.ingest_worker._should_skip_cancelled_job", return_value=False):
+                        with patch(
+                            "app.ingest_worker.read_claim_image_bytes",
+                            return_value=b"png-bytes",
+                        ) as read_bytes:
+                            with patch(
+                                "app.ingest_worker.analyze_image_bytes",
+                                new=AsyncMock(return_value={"caption": "test", "observations": "damage"}),
+                            ):
+                                with patch("app.ingest_worker.update_image_vision_analysis"):
+                                    return await process_claim_photo_vision_job(pool, job), read_bytes
+
+    (terminal, result, error), read_bytes = asyncio.run(run())
+
+    assert terminal == "succeeded"
+    assert error is None
+    read_bytes.assert_called_once_with("user/claim/img-1.jpg")
+
+
 def test_retry_stuck_photos_route():
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
     client = TestClient(main.app)

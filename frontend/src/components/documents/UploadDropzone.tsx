@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { uploadDocumentPdf } from '../../api/documents'
+import { useSimilarTitlesConfirm } from '../../hooks/useSimilarTitlesConfirm'
 import type { IngestResponse } from '../../types'
 
 interface Props {
@@ -11,12 +12,17 @@ export function UploadDropzone({ onSuccess }: Props) {
   const [result, setResult] = useState<IngestResponse | null>(null)
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const { confirmIngest, dialog: similarTitlesDialog } = useSimilarTitlesConfirm()
 
   const upload = async (file: File) => {
-    setUploading(true)
     setError('')
     setResult(null)
     try {
+      const confirmed = await confirmIngest([
+        { proposed: file.name, label: file.name },
+      ])
+      if (!confirmed) return
+      setUploading(true)
       const r = await uploadDocumentPdf(file)
       setResult(r)
       onSuccess()
@@ -90,6 +96,7 @@ export function UploadDropzone({ onSuccess }: Props) {
           ✗ {error}
         </div>
       )}
+      {similarTitlesDialog}
     </div>
   )
 }

@@ -18,7 +18,8 @@ from app.report_writer.boilerplate import (
 )
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
 from app.report_writer.damage_detection import count_photo_stats, photo_review_summary, select_export_images
-from app.report_writer.image_utils import compress_image_bytes
+from app.report_writer.image_utils import compress_image_bytes, image_emu_size
+from app.report_writer.property_maps import read_property_map_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
 
@@ -79,6 +80,9 @@ class ReportDocument:
     engineering_letter_paragraphs: list[str]
     sections: list[ReportSection] = field(default_factory=list)
     photos: list[ReportPhoto] = field(default_factory=list)
+    property_satellite: ReportPhoto | None = None
+    property_roadmap: ReportPhoto | None = None
+    property_map_attribution: str = "Map data © Google"
 
 
 def _split_address(raw: str) -> tuple[str, str]:
@@ -101,6 +105,15 @@ def _photo_caption(vision: dict | None) -> str:
     if cap and obs:
         return f"{cap} {obs}"
     return cap or obs or "Inspection photograph."
+
+
+def _load_property_map_photo(meta: dict, variant: str, caption: str) -> ReportPhoto | None:
+    raw = read_property_map_bytes(meta, variant)
+    if not raw:
+        return None
+    data, ext = compress_image_bytes(raw, max_dimension=1000, quality=80)
+    cx, cy = image_emu_size(data, width_inches=3.2, max_height_inches=3.0)
+    return ReportPhoto(data=data, caption=caption, file_extension=ext, cx=cx, cy=cy)
 
 
 def build_report_document(
@@ -148,8 +161,6 @@ def build_report_document(
             continue
         # Sized for ~3.5" embed in PDF/DOCX; keeps memory and render time down on large claims.
         data, ext = compress_image_bytes(raw, max_dimension=800, quality=75)
-        from app.report_writer.image_utils import image_emu_size
-
         cx, cy = image_emu_size(data)
         photos.append(
             ReportPhoto(
@@ -168,6 +179,9 @@ def build_report_document(
         if summary:
             obs = f"{obs} {summary}"
 
+    property_satellite = _load_property_map_photo(meta, "satellite", "Satellite view of property location.")
+    property_roadmap = _load_property_map_photo(meta, "roadmap", "Road map view of property location.")
+
     return ReportDocument(
         title=title,
         claim_id=claim_id,
@@ -185,4 +199,6 @@ def build_report_document(
         engineering_letter_paragraphs=engineering_letter_paragraphs(meta, line1 or address_raw, conclusion),
         sections=doc_sections,
         photos=photos,
+        property_satellite=property_satellite,
+        property_roadmap=property_roadmap,
     )

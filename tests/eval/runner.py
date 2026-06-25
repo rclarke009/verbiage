@@ -16,8 +16,9 @@ from pathlib import Path
 import yaml
 
 from app import llm_client
+from app.ask_router import resolve_ask_route, retrieve_nearby_storm_chunks
 from app.main import _ask_prompt_from_chunks, _retrieve_for_ask
-from app.models import AskRequest, RetrievedChunk
+from app.models import AskRequest, ClaimContext, RetrievedChunk
 
 try:
     from .embedding_cache import CachedEmbedder
@@ -86,9 +87,46 @@ class QAResult:
 async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) -> QAResult:
     embedder = embedder or CachedEmbedder()
     question = q["question"]
+
+    claim_ctx_raw = q.get("claim_context")
+    claim_context = ClaimContext(**claim_ctx_raw) if claim_ctx_raw else None
+    req = AskRequest(
+        question=question,
+        query_mode=q.get("query_mode", "auto"),
+        claim_context=claim_context,
+    )
+
+    route = resolve_ask_route(question, req.query_mode, req.claim_context)
+    if route == "nearby_storm":
+        answer, top_chunks = await retrieve_nearby_storm_chunks(conn, req)
+        if answer is None:
+            return QAResult(
+                question_id=q["id"],
+                question=question,
+                category=q["category"],
+                must_mention=q.get("must_mention", []),
+                answer=(
+                    "I don't have enough location or storm context to find nearby properties. "
+                    "Provide claim_context with storm_id and an address or coordinates."
+                ),
+                prompt_context="",
+                context_blocks=[],
+                refused=True,
+            )
+        blocks = _included_blocks(top_chunks)
+        return QAResult(
+            question_id=q["id"],
+            question=question,
+            category=q["category"],
+            must_mention=q.get("must_mention", []),
+            answer=answer,
+            prompt_context=answer,
+            context_blocks=blocks,
+            refused=False,
+        )
+
     vec = (await embedder.embed_many([question]))[0]
 
-    req = AskRequest(question=question)  # retrieval_mode defaults to "auto"
     # reranker=None: the faithfulness gate scores the un-reranked pipeline (pool_k == top_k,
     # exactly the current retrieval) so the eval stays reproducible and never loads the
     # ~100MB cross-encoder. Pass a Reranker() here instead to measure rerank impact.

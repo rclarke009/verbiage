@@ -3,6 +3,7 @@ import { apiFetch, readErrorDetail } from '../lib/api'
 import type {
   DocumentsListResponse,
   IngestResponse,
+  SimilarTitlesResponse,
 } from '../types'
 
 export async function listDocuments(): Promise<DocumentsListResponse> {
@@ -14,6 +15,18 @@ export async function listDocuments(): Promise<DocumentsListResponse> {
 export async function deleteDocument(docId: string): Promise<void> {
   const res = await apiFetch(`/documents/${encodeURIComponent(docId)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await readErrorDetail(res))
+}
+
+export async function fetchSimilarTitles(
+  proposed: string,
+  options?: { limit?: number; minRatio?: number },
+): Promise<SimilarTitlesResponse> {
+  const params = new URLSearchParams({ proposed })
+  if (options?.limit != null) params.set('limit', String(options.limit))
+  if (options?.minRatio != null) params.set('min_ratio', String(options.minRatio))
+  const res = await apiFetch(`/documents/similar-titles?${params}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<SimilarTitlesResponse>
 }
 
 export async function uploadDocumentPdf(file: File): Promise<IngestResponse> {

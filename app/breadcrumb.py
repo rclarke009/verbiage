@@ -30,6 +30,8 @@ def build_document_breadcrumb_prefix(
     title: str | None = None,
     source: str | None = None,
     source_filename: str | None = None,
+    storm_name: str | None = None,
+    address: str | None = None,
 ) -> str:
     """
     Build a multi-line prefix in the same [Key: value] style as section labels.
@@ -39,6 +41,10 @@ def build_document_breadcrumb_prefix(
     """
     display = document_display_title(title, source_filename, doc_id)
     lines = [f"[Document: {display}]"]
+    if address and address.strip():
+        lines.append(f"[Location: {address.strip()}]")
+    if storm_name and storm_name.strip():
+        lines.append(f"[Storm: {storm_name.strip()}]")
     if source and source.strip():
         lines.append(f"[Source: {source.strip()}]")
     if source_filename and source_filename.strip():

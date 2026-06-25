@@ -77,6 +77,14 @@ async def generate_sections(state: ReportWriterState) -> dict:
     labels = section_labels_for_type(type_id)
 
     for section_key in keys_to_run:
+        existing = sections.get(section_key) or {}
+        if (
+            not regen_key
+            and existing.get("origin") == "user_edit"
+            and (existing.get("content") or "").strip()
+        ):
+            continue
+
         label = labels.get(section_key, section_key)
         if writer:
             writer({"event": "section_start", "section_key": section_key})
