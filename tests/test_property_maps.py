@@ -140,10 +140,12 @@ def test_fetch_property_maps_persists_images(
     map_resp.content = fake_jpeg
 
     mock_client = MagicMock()
+    map_params: list[dict] = []
 
     async def fake_get(url, **kwargs):
         if "geocode" in url:
             return geocode_resp
+        map_params.append(kwargs.get("params") or {})
         return map_resp
 
     mock_client.get = fake_get
@@ -159,6 +161,9 @@ def test_fetch_property_maps_persists_images(
             claim_id="claim-1",
         )
     )
+
+    assert len(map_params) == 2
+    assert all(p.get("zoom") == "19" for p in map_params)
 
     assert result.satellite_path is not None
     assert result.roadmap_path is not None

@@ -1,4 +1,5 @@
 import type { Claim, ReportTypeDefinition } from '../../types'
+import { composeFullAddress } from '../../lib/address'
 
 export function ClaimList({
   claims,
@@ -40,35 +41,38 @@ export function ClaimList({
         {loading ? (
           <p style={{ color: 'var(--app-text-subtle)', fontSize: 13, margin: 0 }}>Loading reports…</p>
         ) : (
-        claims.map(c => (
-          <button
-            key={c.claim_id}
-            type="button"
-            onClick={() => onSelect(c.claim_id)}
-            style={{
-              textAlign: 'left',
-              padding: '8px 10px',
-              borderRadius: 6,
-              border: activeId === c.claim_id ? '2px solid var(--app-primary)' : '1px solid var(--app-border)',
-              background: activeId === c.claim_id ? 'var(--app-info-bg)' : 'var(--app-bg)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            <div style={{ fontWeight: 600 }}>{c.title || 'Untitled claim'}</div>
-            {typeLabel(c.property_metadata?.report_type) ? (
-              <div style={{ fontSize: 11, color: 'var(--app-primary)', marginTop: 2 }}>
-                {typeLabel(c.property_metadata?.report_type)}
-              </div>
-            ) : null}
-            {c.property_metadata?.address ? (
-              <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>
-                {c.property_metadata.address}
-              </div>
-            ) : null}
-            <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>{c.status}</div>
-          </button>
-        ))
+        claims.map(c => {
+          const displayAddress = composeFullAddress(c.property_metadata ?? {})
+          return (
+            <button
+              key={c.claim_id}
+              type="button"
+              onClick={() => onSelect(c.claim_id)}
+              style={{
+                textAlign: 'left',
+                padding: '8px 10px',
+                borderRadius: 6,
+                border: activeId === c.claim_id ? '2px solid var(--app-primary)' : '1px solid var(--app-border)',
+                background: activeId === c.claim_id ? 'var(--app-info-bg)' : 'var(--app-bg)',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>{c.title || 'Untitled claim'}</div>
+              {typeLabel(c.property_metadata?.report_type) ? (
+                <div style={{ fontSize: 11, color: 'var(--app-primary)', marginTop: 2 }}>
+                  {typeLabel(c.property_metadata?.report_type)}
+                </div>
+              ) : null}
+              {displayAddress ? (
+                <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>
+                  {displayAddress}
+                </div>
+              ) : null}
+              <div style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>{c.status}</div>
+            </button>
+          )
+        })
         )}
       </div>
     </div>

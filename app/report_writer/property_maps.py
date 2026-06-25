@@ -22,6 +22,7 @@ _GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 _STATIC_MAP_URL = "https://maps.googleapis.com/maps/api/staticmap"
 _MAP_VARIANTS = ("satellite", "roadmap")
 _MAP_ATTRIBUTION = "Map data © Google"
+_DEFAULT_MAP_ZOOM = 19
 
 
 @dataclass
@@ -149,7 +150,7 @@ async def fetch_static_map(
     longitude: float,
     *,
     maptype: str,
-    zoom: int = 15,
+    zoom: int = _DEFAULT_MAP_ZOOM,
     size: str = "640x480",
 ) -> bytes:
     if maptype not in _MAP_VARIANTS:

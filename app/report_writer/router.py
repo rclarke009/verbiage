@@ -198,7 +198,15 @@ async def suggest_address(
     results = await search_addresses(q.strip(), limit=limit)
     return AddressSuggestResponse(
         suggestions=[
-            AddressSuggestionModel(id=s.id, label=s.label, address=s.address)
+            AddressSuggestionModel(
+                id=s.id,
+                label=s.label,
+                address=s.address,
+                address2=s.address2,
+                city=s.city,
+                state=s.state,
+                zip=s.zip,
+            )
             for s in results
         ]
     )

@@ -24,8 +24,28 @@ def test_format_full_us_street_address():
     )
     assert suggestion is not None
     assert suggestion.id == "123456"
-    assert suggestion.address == "412 Gulfview Drive, Tampa, FL"
+    assert suggestion.address == "412 Gulfview Drive"
+    assert suggestion.address2 == ""
+    assert suggestion.city == "Tampa"
+    assert suggestion.state == "FL"
+    assert suggestion.zip == "33609"
     assert suggestion.label == "412 Gulfview Drive, Tampa, FL 33609"
+
+
+def test_format_includes_unit_as_address2():
+    suggestion = format_nominatim_result(
+        _item(
+            house_number="412",
+            road="Gulfview Drive",
+            unit="Apt 2",
+            city="Tampa",
+            state="Florida",
+            postcode="33609",
+        )
+    )
+    assert suggestion is not None
+    assert suggestion.address == "412 Gulfview Drive"
+    assert suggestion.address2 == "Apt 2"
 
 
 def test_format_state_already_abbreviated():
@@ -38,7 +58,9 @@ def test_format_state_already_abbreviated():
         )
     )
     assert suggestion is not None
-    assert suggestion.address == "100 Main Street, Springfield, IL"
+    assert suggestion.address == "100 Main Street"
+    assert suggestion.city == "Springfield"
+    assert suggestion.state == "IL"
 
 
 def test_format_uses_town_when_no_city():
@@ -51,7 +73,9 @@ def test_format_uses_town_when_no_city():
         )
     )
     assert suggestion is not None
-    assert suggestion.address == "55 Oak Lane, Smallville, KS"
+    assert suggestion.address == "55 Oak Lane"
+    assert suggestion.city == "Smallville"
+    assert suggestion.state == "KS"
 
 
 def test_format_skips_missing_street():
@@ -75,4 +99,6 @@ def test_format_road_only_without_house_number():
         )
     )
     assert suggestion is not None
-    assert suggestion.address == "Gulfview Drive, Tampa, FL"
+    assert suggestion.address == "Gulfview Drive"
+    assert suggestion.city == "Tampa"
+    assert suggestion.state == "FL"
