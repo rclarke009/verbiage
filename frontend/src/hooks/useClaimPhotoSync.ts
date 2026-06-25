@@ -214,5 +214,6 @@ export function useClaimPhotoSync(claimId: string | null) {
     retryStuck,
     cancelAnalysis,
     refreshCounts,
+    watchBatch: startPoll,
   }
 }

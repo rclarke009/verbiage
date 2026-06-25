@@ -114,6 +114,16 @@ class DriveFolderMatchResponse(BaseModel):
     jobs_root: dict | None = None
 
 
+class AddressSuggestionModel(BaseModel):
+    id: str
+    label: str
+    address: str
+
+
+class AddressSuggestResponse(BaseModel):
+    suggestions: list[AddressSuggestionModel] = Field(default_factory=list)
+
+
 class PhotoSyncResponse(BaseModel):
     batch_id: str | None = None
     total: int = 0
@@ -179,3 +189,17 @@ class WeatherOptionsResponse(BaseModel):
 
 # Backward-compatible alias
 WeatherResponse = WeatherOptionsResponse
+
+
+class PropertyMapResponse(BaseModel):
+    resolved_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    fetch_key: str = ""
+    satellite_url: str | None = None
+    roadmap_url: str | None = None
+    property_map_satellite_path: str | None = None
+    property_map_roadmap_path: str | None = None
+    satellite_preview: str = ""
+    roadmap_preview: str = ""
+    attribution: list[str] = Field(default_factory=lambda: ["Map data © Google"])

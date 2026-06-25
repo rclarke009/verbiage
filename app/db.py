@@ -194,7 +194,55 @@ def create_db(conn: PgConnection) -> None:
                 ) THEN
                     ALTER TABLE documents ADD COLUMN embedding_model TEXT;
                 END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'storm_id'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN storm_id TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'storm_name'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN storm_name TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'storm_date_iso'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN storm_date_iso TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'address'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN address TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'latitude'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN latitude DOUBLE PRECISION;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'documents'
+                      AND column_name = 'longitude'
+                ) THEN
+                    ALTER TABLE documents ADD COLUMN longitude DOUBLE PRECISION;
+                END IF;
             END $$;
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_storm_id ON documents(storm_id);")
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_documents_storm_geo
+            ON documents(storm_id, latitude, longitude)
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
         """)
         cur.execute("""
             DO $$
@@ -514,6 +562,146 @@ def get_document_breadcrumb_fields(
         return row[0], row[1], row[2]
     finally:
         cur.close()
+
+
+def get_document_geo_storm_fields(
+    conn: PgConnection, doc_id: str
+) -> dict[str, str | float | None]:
+    """Return geo/storm metadata columns for a document."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT storm_id, storm_name, storm_date_iso, address, latitude, longitude
+            FROM documents WHERE doc_id = %s
+            """,
+            (doc_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {
+                "storm_id": None,
+                "storm_name": None,
+                "storm_date_iso": None,
+                "address": None,
+                "latitude": None,
+                "longitude": None,
+            }
+        return {
+            "storm_id": row[0],
+            "storm_name": row[1],
+            "storm_date_iso": row[2],
+            "address": row[3],
+            "latitude": row[4],
+            "longitude": row[5],
+        }
+    finally:
+        cur.close()
+
+
+def update_document_geo_storm_metadata(
+    conn: PgConnection,
+    doc_id: str,
+    *,
+    storm_id: str | None = None,
+    storm_name: str | None = None,
+    storm_date_iso: str | None = None,
+    address: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE documents SET
+                storm_id = %s,
+                storm_name = %s,
+                storm_date_iso = %s,
+                address = %s,
+                latitude = %s,
+                longitude = %s
+            WHERE doc_id = %s
+            """,
+            (storm_id, storm_name, storm_date_iso, address, latitude, longitude, doc_id),
+        )
+    finally:
+        cur.close()
+
+
+def retrieve_nearby_storm_docs(
+    conn: PgConnection,
+    *,
+    storm_id: str,
+    latitude: float,
+    longitude: float,
+    limit: int = 10,
+    min_distance_mi: float = 0.1,
+) -> list[tuple[str, str | None, str | None, float]]:
+    """Return (doc_id, title, address, distance_mi) for same-storm docs sorted by distance."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT
+                doc_id,
+                title,
+                address,
+                (
+                    3958.8 * 2 * asin(sqrt(
+                        power(sin(radians(latitude - %s) / 2), 2)
+                        + cos(radians(%s)) * cos(radians(latitude))
+                          * power(sin(radians(longitude - %s) / 2), 2)
+                    ))
+                ) AS distance_mi
+            FROM documents
+            WHERE storm_id = %s
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY distance_mi ASC
+            LIMIT %s
+            """,
+            (latitude, latitude, longitude, storm_id, max(limit * 3, limit)),
+        )
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+
+    out: list[tuple[str, str | None, str | None, float]] = []
+    for doc_id, title, address, distance_mi in rows:
+        dist = float(distance_mi) if distance_mi is not None else 9999.0
+        if dist < min_distance_mi:
+            continue
+        out.append((doc_id, title, address, dist))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def get_first_chunks_for_docs(
+    conn: PgConnection, doc_ids: list[str]
+) -> dict[str, tuple[str, str, str | None, str | None, str | None]]:
+    """Return doc_id -> (chunk_id, content, title, source, source_url) for chunk_index 0."""
+    if not doc_ids:
+        return {}
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT c.doc_id, c.chunk_id, c.content, d.title, d.source, d.source_url
+            FROM chunks c
+            JOIN documents d ON d.doc_id = c.doc_id
+            WHERE c.doc_id = ANY(%s) AND c.chunk_index = 0
+            """,
+            (doc_ids,),
+        )
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+    return {
+        doc_id: (chunk_id, content, title, source, source_url)
+        for doc_id, chunk_id, content, title, source, source_url in rows
+    }
 
 
 def insert_chunk(

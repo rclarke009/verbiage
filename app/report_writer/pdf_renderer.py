@@ -15,6 +15,8 @@ from reportlab.platypus import (
     Paragraph,
     SimpleDocTemplate,
     Spacer,
+    Table,
+    TableStyle,
 )
 
 from app.report_writer.image_utils import load_asset_bytes
@@ -95,6 +97,8 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     if doc.include_engineering_letter:
         page_count += 1
     page_count += 1  # purpose/weather
+    if doc.property_satellite or doc.property_roadmap:
+        page_count += 1
     page_count += max(1, len(doc.sections))
     if doc.photos:
         page_count += max(1, (len(doc.photos) + 3) // 4)
@@ -162,6 +166,7 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     story.append(Paragraph(doc.observations_text, styles["body"]))
     story.append(Paragraph("<b>WEATHER HISTORY:</b>", ParagraphStyle("w", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold")))
     story.append(Paragraph(doc.weather_text, styles["body"]))
+    story.extend(_property_location_flow(doc, styles))
     story.append(PageBreak())
 
     for section in doc.sections:
@@ -229,6 +234,38 @@ def _engineering_letter_flow(doc: ReportDocument, styles: dict[str, ParagraphSty
         "Printed copies of this document are not considered signed and sealed."
     )
     flow.append(Paragraph(disclaimer, styles["body"]))
+    return flow
+
+
+def _property_location_flow(doc: ReportDocument, styles: dict[str, ParagraphStyle]) -> list:
+    if not doc.property_satellite and not doc.property_roadmap:
+        return []
+    flow: list = [PageBreak(), Paragraph("PROPERTY LOCATION", styles["section"]), Spacer(1, 0.1 * inch)]
+    row: list = []
+    for photo in (doc.property_satellite, doc.property_roadmap):
+        if not photo:
+            continue
+        cell = [
+            Image(io.BytesIO(photo.data), width=3.1 * inch, height=2.3 * inch),
+            Paragraph(photo.caption, styles["body"]),
+        ]
+        row.append(cell)
+    if len(row) == 2:
+        table = Table([[row[0][0], row[1][0]], [row[0][1], row[1][1]]], colWidths=[3.2 * inch, 3.2 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        flow.append(table)
+    elif row:
+        flow.append(row[0][0])
+        flow.append(row[0][1])
+    flow.append(Paragraph(doc.property_map_attribution, styles["body"]))
     return flow
 
 

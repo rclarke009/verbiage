@@ -27,11 +27,16 @@ export function DraftEditor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
+        Edit any section below. Your changes are saved automatically and kept when you generate again.
+      </p>
       {sections.map(({ key }) => {
         const streamed = streamSections?.[key]
         const saved = claim.sections?.[key]
-        const content = streamed?.content ?? saved?.content ?? ''
         const streaming = streamed?.streaming ?? false
+        const streamedContent = streamed?.content ?? ''
+        const savedContent = saved?.content ?? ''
+        const content = streaming || streamedContent ? streamedContent : savedContent
         return (
           <div key={key}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

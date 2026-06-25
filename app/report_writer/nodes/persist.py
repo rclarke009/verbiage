@@ -30,6 +30,8 @@ async def persist_draft(state: ReportWriterState) -> dict:
             content = (sec.get("content") or "").strip()
             if not content:
                 continue
+            if not state.get("regenerate_section_key") and sec.get("origin") == "user_edit":
+                continue
             create_section_revision(
                 conn,
                 claim_id=claim_id,

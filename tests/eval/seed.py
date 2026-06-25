@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from app.db import create_db, insert_document
+import yaml
+
+from app.db import create_db, insert_document, update_document_geo_storm_metadata
 from app.indexing import index_document
 from app.models import ChunkingOptions
 
@@ -26,6 +28,7 @@ except ImportError:  # pragma: no cover - fallback when imported as a top-level 
     from embedding_cache import CachedEmbedder
 
 CORPUS_DIR = Path(__file__).parent / "corpus"
+METADATA_PATH = Path(__file__).parent / "corpus_metadata.yaml"
 # Fixed timestamp keeps document rows byte-stable across reseeds.
 SEED_CREATED_AT = 1_700_000_000
 # Pin chunking so retrieval behaviour under test is the app default, held constant.
@@ -42,9 +45,17 @@ def corpus_docs() -> list[tuple[str, str, str]]:
     return docs
 
 
+def load_corpus_metadata() -> dict[str, dict]:
+    if not METADATA_PATH.exists():
+        return {}
+    data = yaml.safe_load(METADATA_PATH.read_text()) or {}
+    return data if isinstance(data, dict) else {}
+
+
 async def seed_corpus(conn, embedder: CachedEmbedder | None = None) -> int:
     """Insert + index every corpus document. Returns the number of documents seeded."""
     embedder = embedder or CachedEmbedder()
+    metadata_by_doc = load_corpus_metadata()
     docs = corpus_docs()
     for doc_id, title, full_text in docs:
         insert_document(
@@ -55,6 +66,18 @@ async def seed_corpus(conn, embedder: CachedEmbedder | None = None) -> int:
             source="eval_fixture",
             full_text=full_text,
         )
+        meta = metadata_by_doc.get(doc_id, {})
+        if meta:
+            update_document_geo_storm_metadata(
+                conn,
+                doc_id,
+                storm_id=meta.get("storm_id"),
+                storm_name=meta.get("storm_name"),
+                storm_date_iso=meta.get("storm_date_iso"),
+                address=meta.get("address"),
+                latitude=meta.get("latitude"),
+                longitude=meta.get("longitude"),
+            )
         await index_document(conn, doc_id, full_text, CHUNKING, embedder=embedder)
     conn.commit()
     return len(docs)

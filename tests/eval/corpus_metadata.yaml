@@ -1,0 +1,60 @@
+# Fixed geo/storm metadata for eval corpus documents.
+# Real lat/lng for Florida addresses; fake cities clustered near Port Charlotte for nearby tests.
+
+1060_alton_rd_port_charlotte:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "1060 Alton Road, Port Charlotte, FL 33948"
+  latitude: 26.976
+  longitude: -82.090
+
+6317_wisteria_ln_apollo_beach:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "6317 Wisteria Lane, Apollo Beach, FL 33572"
+  latitude: 27.773
+  longitude: -82.407
+
+107_southern_st_pensacola:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "107 Southern Street, Pensacola, FL 32503"
+  latitude: 30.421
+  longitude: -87.216
+
+100_maple_ct_lakeside:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "100 Maple Court, Lakeside, FL 30001"
+  latitude: 26.955
+  longitude: -82.055
+
+200_birch_ave_riverton:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "200 Birch Avenue, Riverton, FL 30002"
+  latitude: 26.935
+  longitude: -82.035
+
+400_willow_way_hillcrest:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "400 Willow Way, Hillcrest, FL 30004"
+  latitude: 26.968
+  longitude: -82.115
+
+412_gulfview_dr_naples:
+  address: "412 Gulfview Drive, Naples, FL 34102"
+  latitude: 26.142
+  longitude: -81.794
+
+300_cedar_ln_brookfield:
+  address: "300 Cedar Lane, Brookfield, FL 30003"
+  latitude: 26.120
+  longitude: -81.820

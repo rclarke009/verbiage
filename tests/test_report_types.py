@@ -16,6 +16,7 @@ from app.report_writer.constants import (
     sections_for_type,
 )
 from app.report_writer.nodes.generate import generate_sections
+from app.report_writer.nodes.persist import persist_draft
 from app.report_writer.prompts import build_retrieval_query, build_section_prompt
 from app.report_writer.validation import validate_report_type_metadata
 
@@ -138,7 +139,7 @@ def test_generate_requires_report_type():
             "field_notes": "notes",
             "property_metadata": {},
         }
-        with patch("app.report_writer.router._with_conn", new=AsyncMock(return_value=(claim, "run-1"))):
+        with patch("app.report_writer.router._with_conn", new=AsyncMock(return_value=(claim, {}, "run-1"))):
             resp = client.post("/report-writer/claims/c1/generate", json={})
         assert resp.status_code == 400
         assert "report_type" in resp.json()["detail"]
@@ -152,3 +153,141 @@ def test_validate_report_type_metadata_rejects_unknown():
     with pytest.raises(HTTPException) as exc:
         validate_report_type_metadata({"report_type": "siding"})
     assert exc.value.status_code == 400
+
+
+def _generate_sections_mocks():
+    from app.models import RetrievedChunk
+
+    fake_chunks = [
+        RetrievedChunk(
+            chunk_id="c1",
+            doc_id="d1",
+            score=0.8,
+            content_snippet="roof report",
+            document_title="Roof Report",
+        )
+    ]
+    mock_deps = MagicMock()
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.getconn.return_value = mock_conn
+    mock_deps.db_pool = mock_pool
+    return fake_chunks, mock_deps
+
+
+def test_generate_sections_skips_user_edit_on_full_run():
+    import asyncio
+
+    fake_chunks, mock_deps = _generate_sections_mocks()
+    state = {
+        "field_notes": "Roof has debris impacts",
+        "property_metadata": {"report_type": "roof"},
+        "report_type": "roof",
+        "sections": {
+            "summary": {
+                "content": "User edited summary",
+                "origin": "user_edit",
+                "status": "complete",
+            },
+        },
+        "image_analyses": [],
+    }
+
+    with (
+        patch("app.report_writer.nodes.generate.get_stream_writer", return_value=None),
+        patch("app.report_writer.nodes.generate.get_report_writer_deps", return_value=mock_deps),
+        patch("app.report_writer.nodes.generate.HttpEmbedder") as mock_embedder_cls,
+        patch(
+            "app.report_writer.nodes.generate.retrieve_similar_chunks",
+            new=AsyncMock(return_value=(fake_chunks, 0.8)),
+        ),
+        patch("app.report_writer.nodes.generate.llm_client.answer_with_context_stream") as mock_stream,
+    ):
+        mock_embedder = mock_embedder_cls.return_value
+        mock_embedder.model = "test-model"
+        mock_embedder.embed_many = AsyncMock(return_value=[[0.1, 0.2]])
+
+        async def _stream(_prompt):
+            yield "Generated content."
+
+        mock_stream.side_effect = _stream
+        out = asyncio.run(generate_sections(state))
+
+    assert out["sections"]["summary"]["content"] == "User edited summary"
+    assert out["sections"]["summary"]["origin"] == "user_edit"
+    assert out["sections"]["areas_of_concern"]["content"] == "Generated content."
+
+
+def test_generate_sections_regenerates_target_even_when_user_edit():
+    import asyncio
+
+    fake_chunks, mock_deps = _generate_sections_mocks()
+    state = {
+        "field_notes": "Roof has debris impacts",
+        "property_metadata": {"report_type": "roof"},
+        "report_type": "roof",
+        "regenerate_section_key": "summary",
+        "sections": {
+            "summary": {
+                "content": "User edited summary",
+                "origin": "user_edit",
+                "status": "complete",
+            },
+        },
+        "image_analyses": [],
+    }
+
+    with (
+        patch("app.report_writer.nodes.generate.get_stream_writer", return_value=None),
+        patch("app.report_writer.nodes.generate.get_report_writer_deps", return_value=mock_deps),
+        patch("app.report_writer.nodes.generate.HttpEmbedder") as mock_embedder_cls,
+        patch(
+            "app.report_writer.nodes.generate.retrieve_similar_chunks",
+            new=AsyncMock(return_value=(fake_chunks, 0.8)),
+        ),
+        patch("app.report_writer.nodes.generate.llm_client.answer_with_context_stream") as mock_stream,
+    ):
+        mock_embedder = mock_embedder_cls.return_value
+        mock_embedder.model = "test-model"
+        mock_embedder.embed_many = AsyncMock(return_value=[[0.1, 0.2]])
+
+        async def _stream(_prompt):
+            yield "Regenerated content."
+
+        mock_stream.side_effect = _stream
+        out = asyncio.run(generate_sections(state))
+
+    assert out["sections"]["summary"]["content"] == "Regenerated content."
+    assert mock_stream.call_count == 1
+
+
+def test_persist_draft_skips_user_edit_on_full_run():
+    import asyncio
+
+    state = {
+        "claim_id": "c1",
+        "run_id": "r1",
+        "run_status": "completed",
+        "sections": {
+            "summary": {"content": "User edited summary", "origin": "user_edit"},
+            "conclusion": {"content": "Generated conclusion"},
+        },
+    }
+    mock_deps = MagicMock()
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.getconn.return_value = mock_conn
+    mock_deps.db_pool = mock_pool
+
+    with (
+        patch("app.report_writer.nodes.persist.get_report_writer_deps", return_value=mock_deps),
+        patch("app.report_writer.nodes.persist.create_section_revision") as mock_create,
+        patch("app.report_writer.nodes.persist.finish_generation_run") as mock_finish,
+        patch("app.report_writer.nodes.persist.set_claim_status_after_run") as mock_status,
+    ):
+        asyncio.run(persist_draft(state))
+
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["section_key"] == "conclusion"
+    mock_finish.assert_called_once()
+    mock_status.assert_called_once()

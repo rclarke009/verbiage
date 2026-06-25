@@ -184,6 +184,7 @@ class DocxReportRenderer:
         body += xml_paragraph(doc.observations_text, spacing_after=240)
         body += xml_paragraph("WEATHER HISTORY:", bold=True, color="5BA3D6", spacing_after=0)
         body += xml_paragraph(doc.weather_text, spacing_after=240)
+        body += self._property_location_xml(doc)
         body += page_break()
 
         for section in doc.sections:
@@ -210,6 +211,25 @@ class DocxReportRenderer:
                     body += page_break()
 
         return body
+
+    def _property_location_xml(self, doc: ReportDocument) -> str:
+        if not doc.property_satellite and not doc.property_roadmap:
+            return ""
+        xml = page_break()
+        xml += xml_large_bold("PROPERTY LOCATION")
+        xml += xml_spacer(after=120)
+        entries = []
+        for photo in (doc.property_satellite, doc.property_roadmap):
+            if not photo:
+                continue
+            ref = self._add_image(photo.data, "map", cx=photo.cx, cy=photo.cy, compress=False)
+            entries.append((ref.rel_id, ref.doc_pr_id, photo.caption, ref.cx, ref.cy))
+        if entries:
+            cols = 2 if len(entries) > 1 else 1
+            xml += xml_photo_table(entries, columns=cols)
+            xml += xml_spacer(before=120, after=60)
+            xml += xml_paragraph(doc.property_map_attribution, spacing_after=0)
+        return xml
 
     def _engineering_letter_xml(self, doc: ReportDocument) -> str:
         xml = xml_large_bold("ENGINEERING LETTER") + xml_spacer(after=120)

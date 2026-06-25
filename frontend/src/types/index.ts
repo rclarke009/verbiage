@@ -69,6 +69,16 @@ export interface DocumentsListResponse {
   documents: DocumentSummary[]
 }
 
+export interface SimilarTitleMatch {
+  doc_id: string
+  title?: string | null
+  score: number
+}
+
+export interface SimilarTitlesResponse {
+  matches: SimilarTitleMatch[]
+}
+
 export interface DriveFileMeta {
   id: string
   name?: string | null
@@ -184,6 +194,13 @@ export interface ClaimPropertyMetadata {
   weather_custom_wind_gust?: string
   weather_custom_hail?: string
   weather_candidates_json?: string
+  property_map_fetch_key?: string
+  property_map_resolved_address?: string
+  property_latitude?: string
+  property_longitude?: string
+  property_map_satellite_path?: string
+  property_map_roadmap_path?: string
+  property_map_fetched_at?: string
   [key: string]: string | undefined
 }
 
@@ -223,6 +240,20 @@ export interface WeatherOptionsResponse {
 
 /** @deprecated Use WeatherOptionsResponse */
 export type WeatherSnapshot = WeatherOptionsResponse
+
+export interface PropertyMapResponse {
+  resolved_address: string
+  latitude: number | null
+  longitude: number | null
+  fetch_key: string
+  satellite_url?: string | null
+  roadmap_url?: string | null
+  property_map_satellite_path?: string | null
+  property_map_roadmap_path?: string | null
+  satellite_preview: string
+  roadmap_preview: string
+  attribution: string[]
+}
 
 export interface ReportTypeSection {
   key: string
@@ -283,6 +314,10 @@ export interface ReportWriterImage {
   vision_analysis?: Record<string, unknown> | null
   analysis_status?: string | null
   sort_order?: number
+  /** Present after upload when a background vision job was enqueued */
+  batch_id?: string | null
+  enqueued?: number
+  job_ids?: string[]
 }
 
 export interface DriveFolderMatch {
@@ -290,6 +325,12 @@ export interface DriveFolderMatch {
   name: string
   score: number
   source_url: string
+}
+
+export interface AddressSuggestion {
+  id: string
+  label: string
+  address: string
 }
 
 export interface PhotoAnalysisCounts {

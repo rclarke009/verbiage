@@ -18,6 +18,7 @@ from app.drive_client import (
     parse_drive_folder_id,
     resolve_drive_folder_id,
 )
+from app.geocode.nominatim import search_addresses
 from app.ingest_jobs import IngestBatchStatusResponse
 from app.report_writer.deps import ReportWriterDeps, reset_report_writer_deps, set_report_writer_deps
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
@@ -29,6 +30,8 @@ from app.report_writer.models import (
     ClaimsListResponse,
     BatchCancelResponse,
     CancelGenerationRequest,
+    AddressSuggestResponse,
+    AddressSuggestionModel,
     DriveFolderMatchResponse,
     GenerateRequest,
     GenerationRunResponse,
@@ -37,6 +40,7 @@ from app.report_writer.models import (
     PhotoRetryStuckResponse,
     PhotoSyncRequest,
     PhotoSyncResponse,
+    PropertyMapResponse,
     RegenerateSectionRequest,
     ReportTypeModel,
     ReportTypeSectionModel,
@@ -70,9 +74,14 @@ from app.report_writer.photo_sync import (
     enqueue_vision_jobs_for_claim,
     sync_claim_photos_from_drive,
 )
+from app.report_writer.property_maps import (
+    _MAP_ATTRIBUTION,
+    fetch_property_maps,
+    property_map_metadata_from_result,
+)
 from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
-from app.report_writer.storage import storage_path_for, write_claim_image
+from app.report_writer.storage import read_claim_image_bytes, storage_path_for, write_claim_image
 from app.report_writer.weather import fetch_weather_options, parse_storm_date, weather_fetch_key
 
 router = APIRouter(prefix="/report-writer", tags=["report-writer"])
@@ -180,6 +189,21 @@ async def match_photo_folder(
     )
 
 
+@router.get("/address/suggest", response_model=AddressSuggestResponse)
+async def suggest_address(
+    q: str = Query(..., min_length=3),
+    limit: int = Query(default=5, ge=1, le=10),
+    user_id: str = Depends(get_current_user),
+):
+    results = await search_addresses(q.strip(), limit=limit)
+    return AddressSuggestResponse(
+        suggestions=[
+            AddressSuggestionModel(id=s.id, label=s.label, address=s.address)
+            for s in results
+        ]
+    )
+
+
 @router.get("/weather", response_model=WeatherOptionsResponse)
 async def get_claim_weather(
     address: str = Query(..., min_length=3),
@@ -224,6 +248,108 @@ async def get_claim_weather(
         selected=options.selected,
         attribution=options.attribution,
     )
+
+
+def _property_map_urls(claim_id: str, *, satellite_path: str | None, roadmap_path: str | None) -> tuple[str | None, str | None]:
+    satellite_url = (
+        f"/report-writer/claims/{claim_id}/property-map/image?variant=satellite"
+        if satellite_path
+        else None
+    )
+    roadmap_url = (
+        f"/report-writer/claims/{claim_id}/property-map/image?variant=roadmap"
+        if roadmap_path
+        else None
+    )
+    return satellite_url, roadmap_url
+
+
+@router.get("/property-map", response_model=PropertyMapResponse)
+async def get_property_map(
+    request: Request,
+    address: str = Query(..., min_length=3),
+    claim_id: str | None = Query(default=None),
+    user_id: str = Depends(get_current_user),
+):
+    previous_meta: dict | None = None
+    if claim_id:
+
+        def _load(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return None
+            return claim.get("property_metadata") or {}
+
+        previous_meta = await _with_conn(request, _load)
+        if previous_meta is None:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+    result = await fetch_property_maps(
+        address.strip(),
+        user_id=user_id if claim_id else None,
+        claim_id=claim_id,
+        previous_meta=previous_meta,
+    )
+
+    if claim_id:
+        meta_patch = property_map_metadata_from_result(result)
+        merged = {**(previous_meta or {}), **meta_patch}
+
+        def _save(conn):
+            updated = update_claim(conn, claim_id, user_id, property_metadata=merged)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Claim not found")
+            return updated
+
+        await _with_conn(request, _save)
+
+    satellite_url, roadmap_url = _property_map_urls(
+        claim_id or "",
+        satellite_path=result.satellite_path,
+        roadmap_path=result.roadmap_path,
+    )
+    return PropertyMapResponse(
+        resolved_address=result.resolved_address,
+        latitude=result.latitude,
+        longitude=result.longitude,
+        fetch_key=result.fetch_key,
+        satellite_url=satellite_url if claim_id else None,
+        roadmap_url=roadmap_url if claim_id else None,
+        property_map_satellite_path=result.satellite_path,
+        property_map_roadmap_path=result.roadmap_path,
+        satellite_preview=result.satellite_preview,
+        roadmap_preview=result.roadmap_preview,
+        attribution=[_MAP_ATTRIBUTION],
+    )
+
+
+@router.get("/claims/{claim_id}/property-map/image")
+async def get_property_map_image(
+    request: Request,
+    claim_id: str,
+    variant: str = Query(..., pattern="^(satellite|roadmap)$"),
+    user_id: str = Depends(get_current_user),
+):
+    def _load(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        meta = claim.get("property_metadata") or {}
+        path = (meta.get(f"property_map_{variant}_path") or "").strip()
+        if not path:
+            return None
+        return path
+
+    path = await _with_conn(request, _load)
+    if not path:
+        raise HTTPException(status_code=404, detail="Property map image not found")
+
+    try:
+        data = read_claim_image_bytes(path)
+    except OSError as e:
+        raise HTTPException(status_code=404, detail="Property map image not found") from e
+
+    return Response(content=data, media_type="image/jpeg")
 
 
 @router.get("/claims/{claim_id}/photos/analysis-counts", response_model=PhotoAnalysisCountsResponse)
@@ -550,16 +676,30 @@ async def generate_draft(
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
             return None
+        sections = get_claim_sections(conn, claim_id)
         run_id = create_generation_run(conn, claim_id=claim_id, user_id=user_id, thread_id=claim_id)
-        return claim, run_id
+        return claim, sections, run_id
 
     loaded = await _with_conn(request, _load)
     if not loaded:
         raise HTTPException(status_code=404, detail="Claim not found")
-    claim, run_id = loaded
+    claim, existing_sections, run_id = loaded
 
     validate_report_type_metadata(claim["property_metadata"], required=True)
     report_type = get_report_type(claim["property_metadata"])
+
+    section_state = {
+        k: {
+            "content": v.get("content", ""),
+            "status": "complete",
+            "sources": v.get("sources", []),
+            "origin": v.get("origin"),
+        }
+        for k, v in existing_sections.items()
+    }
+    for key, template in empty_sections_template(report_type=report_type).items():
+        if key not in section_state:
+            section_state[key] = template
 
     input_state = {
         "claim_id": claim_id,
@@ -569,7 +709,7 @@ async def generate_draft(
         "field_notes": claim["field_notes"],
         "property_metadata": claim["property_metadata"],
         "report_type": report_type,
-        "sections": empty_sections_template(report_type=report_type),
+        "sections": section_state,
         "image_analyses": [],
         "errors": [],
     }
@@ -818,7 +958,7 @@ async def upload_image(
         image_id = str(uuid.uuid4())
         path = storage_path_for(user_id, claim_id, image_id, filename)
         write_claim_image(path, data)
-        return insert_claim_image(
+        row = insert_claim_image(
             conn,
             claim_id=claim_id,
             user_id=user_id,
@@ -828,6 +968,14 @@ async def upload_image(
             size_bytes=len(data),
             sort_order=len(list_claim_images(conn, claim_id, user_id)),
         )
+        enqueue = enqueue_vision_jobs_for_claim(
+            conn,
+            claim_id=claim_id,
+            user_id=user_id,
+            images=[row],
+            skip_active=False,
+        )
+        return {**row, **enqueue}
 
     result = await _with_conn(request, _save)
     if not result:
