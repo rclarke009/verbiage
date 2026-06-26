@@ -286,6 +286,11 @@ export function ClaimForm({
             resize: 'vertical',
           }}
         />
+        {!claim.field_notes.trim() ? (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--app-warning)' }}>
+            Add field notes before generating a draft.
+          </p>
+        ) : null}
       </label>
 
       <div
