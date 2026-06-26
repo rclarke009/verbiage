@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { apiOrigin, getAuthFetchInit } from '../../lib/api'
 import type { PropertyMapResponse } from '../../types'
@@ -13,10 +13,12 @@ function MapImage({
   label,
   previewSrc,
   urlPath,
+  onLoadFailed,
 }: {
   label: string
   previewSrc: string
   urlPath: string | null | undefined
+  onLoadFailed?: () => void
 }) {
   const [src, setSrc] = useState(previewSrc)
   const [failed, setFailed] = useState(false)
@@ -33,6 +35,7 @@ function MapImage({
       }
       if (!urlPath) {
         setFailed(true)
+        onLoadFailed?.()
         return
       }
       try {
@@ -45,7 +48,10 @@ function MapImage({
         setSrc(objectUrl)
         setFailed(false)
       } catch {
-        if (!cancelled) setFailed(true)
+        if (!cancelled) {
+          setFailed(true)
+          onLoadFailed?.()
+        }
       }
     }
 
@@ -54,7 +60,7 @@ function MapImage({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [previewSrc, urlPath])
+  }, [previewSrc, urlPath, onLoadFailed])
 
   return (
     <figure style={{ margin: 0, flex: 1, minWidth: 0 }}>
@@ -76,6 +82,10 @@ function MapImage({
         <img
           src={src}
           alt={label}
+          onError={() => {
+            setFailed(true)
+            onLoadFailed?.()
+          }}
           style={{
             width: '100%',
             height: 'auto',
@@ -95,15 +105,25 @@ export function PropertyMapPreview({
   error,
   resolvedAddress,
   onRefresh,
-  disabled,
 }: {
   preview: PropertyMapResponse | null
   loading: boolean
   error: string | null
   resolvedAddress?: string
   onRefresh: () => void
-  disabled?: boolean
 }) {
+  const staleRetryRef = useRef(false)
+
+  useEffect(() => {
+    staleRetryRef.current = false
+  }, [preview?.fetch_key, preview?.satellite_preview, preview?.roadmap_preview])
+
+  const handleStaleCache = useCallback(() => {
+    if (staleRetryRef.current || loading) return
+    staleRetryRef.current = true
+    onRefresh()
+  }, [loading, onRefresh])
+
   const showMaps =
     preview &&
     (preview.satellite_preview || preview.roadmap_preview || preview.satellite_url || preview.roadmap_url)
@@ -115,14 +135,14 @@ export function PropertyMapPreview({
         <button
           type="button"
           onClick={onRefresh}
-          disabled={disabled || loading}
+          disabled={loading}
           style={{
             fontSize: 12,
             padding: '4px 8px',
             borderRadius: 6,
             border: '1px solid var(--app-border)',
             background: 'var(--app-surface)',
-            cursor: disabled || loading ? 'not-allowed' : 'pointer',
+            cursor: loading ? 'not-allowed' : 'pointer',
           }}
         >
           {loading ? 'Loading…' : 'Refresh'}
@@ -141,11 +161,13 @@ export function PropertyMapPreview({
               label="Satellite"
               previewSrc={preview.satellite_preview}
               urlPath={preview.satellite_url}
+              onLoadFailed={handleStaleCache}
             />
             <MapImage
               label="Florida context"
               previewSrc={preview.roadmap_preview}
               urlPath={preview.roadmap_url}
+              onLoadFailed={handleStaleCache}
             />
           </div>
           <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--app-text-muted)' }}>

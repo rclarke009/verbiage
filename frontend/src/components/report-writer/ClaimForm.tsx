@@ -96,48 +96,51 @@ export function ClaimForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <fieldset
+      <div
         style={{
           border: '2px solid var(--app-primary)',
           borderRadius: 8,
           padding: 14,
           margin: 0,
         }}
-        disabled={typeLocked}
       >
-        <legend style={stepLegend}>Step 1 — Property address</legend>
-        <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--app-text-muted)' }}>
-          Start here. We use the address to find the job&apos;s photo folder in Google Drive.
-        </p>
-        <AddressFields
-          value={{
-            address: meta.address,
-            address2: meta.address2,
-            city: meta.city,
-            state: meta.state,
-            zip: meta.zip,
-          }}
-          onChange={patch => updateMetadata(patch as Record<string, string>)}
+        <div style={stepLegend}>Step 1 — Property address</div>
+        <fieldset
+          style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
           disabled={typeLocked}
-        />
-        <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
-          <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title</span>
-          <input
-            value={claim.title}
-            onChange={e => onChange({ title: e.target.value })}
-            placeholder="Claim name or client reference"
-            style={inputStyle}
+        >
+          <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--app-text-muted)' }}>
+            Start here. We use the address to find the job&apos;s photo folder in Google Drive.
+          </p>
+          <AddressFields
+            value={{
+              address: meta.address,
+              address2: meta.address2,
+              city: meta.city,
+              state: meta.state,
+              zip: meta.zip,
+            }}
+            onChange={patch => updateMetadata(patch as Record<string, string>)}
+            disabled={typeLocked}
           />
-        </label>
+          <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
+            <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Title</span>
+            <input
+              value={claim.title}
+              onChange={e => onChange({ title: e.target.value })}
+              placeholder="Claim name or client reference"
+              style={inputStyle}
+            />
+          </label>
+        </fieldset>
         <PropertyMapPreview
           preview={propertyMapPreview ?? null}
           loading={!!propertyMapLoading}
           error={propertyMapError ?? null}
           resolvedAddress={meta.property_map_resolved_address}
           onRefresh={onRefreshPropertyMap ?? (() => {})}
-          disabled={typeLocked}
         />
-      </fieldset>
+      </div>
 
       <PhotoFolderPanel
         claimId={claimId ?? ''}
