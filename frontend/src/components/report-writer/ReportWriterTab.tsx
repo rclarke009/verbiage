@@ -5,7 +5,6 @@ import {
   createClaim,
   deleteClaim,
   exportClaimDocx,
-  fetchClaimPdfBlob,
   getClaim,
   listClaims,
   listReportTypes,
@@ -15,6 +14,12 @@ import {
 } from '../../api/reportWriter'
 import type { Claim } from '../../types'
 import { composeFullAddress } from '../../lib/address'
+import {
+  canGenerateFromDraft,
+  generateTitleFromBlockers,
+  getGenerateBlockers,
+} from '../../lib/reportWriterGenerate'
+import { useClaimPdfPreview } from '../../hooks/useClaimPdfPreview'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
 import { usePropertyMap, clearPropertyMapMetadata } from '../../hooks/usePropertyMap'
@@ -22,6 +27,7 @@ import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
 import { DraftEditor } from './DraftEditor'
+import { GeneratePrerequisitesBanner } from './GeneratePrerequisitesBanner'
 import { GenerationProgress } from './GenerationProgress'
 import { PhotoAnalysisBanner } from './PhotoAnalysisBanner'
 import { RunHistory } from './RunHistory'
@@ -41,9 +47,16 @@ export function ReportWriterTab() {
   const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [localDraft, setLocalDraft] = useState<Claim | null>(null)
-  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
-  const [pdfLoading, setPdfLoading] = useState(false)
-  const pdfAbortRef = useRef<AbortController | null>(null)
+  const {
+    modalOpen: pdfModalOpen,
+    iframeUrl: pdfIframeUrl,
+    loading: pdfLoading,
+    prefetch: prefetchPdf,
+    openPreview: openPdfPreview,
+    invalidate: invalidatePdfPreview,
+    cancel: cancelPdfPreview,
+    closePreview: closePdfPreview,
+  } = useClaimPdfPreview()
   const {
     state: genState,
     generating,
@@ -82,7 +95,8 @@ export function ReportWriterTab() {
   const activeReportType = reportTypes.find(t => t.id === draft.property_metadata?.report_type)
   const sectionKeys = activeReportType?.sections.map(s => s.key) ?? []
   const hasGeneratedContent = Object.values(draft.sections ?? {}).some(s => (s.content ?? '').trim())
-  const canGenerate = !!draft.property_metadata?.report_type && !!draft.field_notes.trim()
+  const generateBlockers = getGenerateBlockers(draft)
+  const canGenerate = canGenerateFromDraft(draft)
 
   const updateDraft = useCallback(
     (updater: (prev: Claim) => Claim) => {
@@ -172,17 +186,15 @@ export function ReportWriterTab() {
     )
   }, [activeId, localDraft, claimQuery.data])
 
-  const generateTitle =
-    !draft.property_metadata?.report_type
-      ? 'Select a report type first'
-      : !draft.field_notes.trim()
-        ? 'Add field notes first'
-        : !draft.property_metadata?.drive_photo_folder_id
-          ? 'Link a photo folder in Step 2 for better draft quality'
-          : undefined
+  const generateTitle = generateTitleFromBlockers(generateBlockers, {
+    photoFolderHint: !draft.property_metadata?.drive_photo_folder_id
+      ? 'Link a photo folder in Step 2 for better draft quality'
+      : undefined,
+  })
 
   const handleSectionChange = useCallback(
     (key: string, content: string) => {
+      invalidatePdfPreview()
       updateDraft(prev => ({
         ...prev,
         sections: {
@@ -197,7 +209,7 @@ export function ReportWriterTab() {
         updateSection(activeId, key, content).catch(() => {})
       }, 800)
     },
-    [activeId, updateDraft],
+    [activeId, invalidatePdfPreview, updateDraft],
   )
 
   const handleGenerate = async () => {
@@ -212,6 +224,7 @@ export function ReportWriterTab() {
     }
     await flushPendingSectionSaves()
     await saveMutation.mutateAsync()
+    invalidatePdfPreview()
     resetStream()
     const wasCancelled = await generate(
       activeId,
@@ -227,6 +240,7 @@ export function ReportWriterTab() {
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
     queryClient.invalidateQueries({ queryKey: ['report-writer-runs', activeId] })
+    prefetchPdf(activeId)
   }
 
   const handleCancelGeneration = async () => {
@@ -234,12 +248,6 @@ export function ReportWriterTab() {
     if (!activeId) return
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
-  }
-
-  const handleCancelPdfPreview = () => {
-    pdfAbortRef.current?.abort()
-    pdfAbortRef.current = null
-    setPdfLoading(false)
   }
 
   const handleConfirmPhotoSync = async () => {
@@ -251,6 +259,7 @@ export function ReportWriterTab() {
 
   const handleRegenerateSection = async (sectionKey: string) => {
     if (!activeId || generating) return
+    invalidatePdfPreview()
     const wasCancelled = await generate(
       activeId,
       `/report-writer/claims/${activeId}/sections/${sectionKey}/regenerate`,
@@ -264,6 +273,7 @@ export function ReportWriterTab() {
     }
     setLocalDraft(null)
     queryClient.invalidateQueries({ queryKey: ['report-writer-claim', activeId] })
+    prefetchPdf(activeId)
   }
 
   const sources =
@@ -279,6 +289,7 @@ export function ReportWriterTab() {
         activeId={activeId}
         reportTypes={reportTypes}
         onSelect={id => {
+          invalidatePdfPreview()
           setActiveId(id)
           setLocalDraft(null)
           resetStream()
@@ -313,7 +324,8 @@ export function ReportWriterTab() {
                   border: 'none',
                   background: 'var(--app-primary)',
                   color: 'var(--app-on-primary)',
-                  cursor: 'pointer',
+                  cursor: generating || !canGenerate ? 'not-allowed' : 'pointer',
+                  opacity: generating || !canGenerate ? 0.6 : 1,
                 }}
               >
                 {generating ? 'Generating…' : 'Generate draft'}
@@ -321,29 +333,9 @@ export function ReportWriterTab() {
               <button
                 type="button"
                 disabled={pdfLoading}
-                onClick={async () => {
+                onClick={() => {
                   if (!activeId) return
-                  pdfAbortRef.current?.abort()
-                  const controller = new AbortController()
-                  pdfAbortRef.current = controller
-                  setPdfLoading(true)
-                  try {
-                    const blob = await fetchClaimPdfBlob(activeId, controller.signal)
-                    const url = URL.createObjectURL(blob)
-                    setPdfPreviewUrl(prev => {
-                      if (prev) URL.revokeObjectURL(prev)
-                      return url
-                    })
-                  } catch (err) {
-                    if (controller.signal.aborted) return
-                    console.log('MYDEBUG →', err)
-                    window.alert(err instanceof Error ? err.message : 'PDF preview failed')
-                  } finally {
-                    if (pdfAbortRef.current === controller) {
-                      pdfAbortRef.current = null
-                    }
-                    setPdfLoading(false)
-                  }
+                  void openPdfPreview(activeId)
                 }}
                 style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
               >
@@ -352,7 +344,7 @@ export function ReportWriterTab() {
               {pdfLoading ? (
                 <button
                   type="button"
-                  onClick={handleCancelPdfPreview}
+                  onClick={() => cancelPdfPreview()}
                   style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
                 >
                   Cancel PDF
@@ -380,6 +372,8 @@ export function ReportWriterTab() {
                 Delete
               </button>
             </div>
+
+            <GeneratePrerequisitesBanner blockers={generateBlockers} generating={generating} />
 
             <PhotoAnalysisBanner
               hasAddress={!!fullAddress.trim()}
@@ -455,7 +449,7 @@ export function ReportWriterTab() {
           </>
         )}
       </div>
-      {pdfPreviewUrl ? (
+      {pdfModalOpen && pdfIframeUrl ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -469,10 +463,7 @@ export function ReportWriterTab() {
             zIndex: 1000,
             padding: 24,
           }}
-          onClick={() => {
-            URL.revokeObjectURL(pdfPreviewUrl)
-            setPdfPreviewUrl(null)
-          }}
+          onClick={() => closePdfPreview()}
         >
           <div
             style={{
@@ -490,16 +481,13 @@ export function ReportWriterTab() {
               <strong style={{ fontSize: 14 }}>Report preview</strong>
               <button
                 type="button"
-                onClick={() => {
-                  URL.revokeObjectURL(pdfPreviewUrl)
-                  setPdfPreviewUrl(null)
-                }}
+                onClick={() => closePdfPreview()}
                 style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18 }}
               >
                 ×
               </button>
             </div>
-            <iframe title="Report PDF preview" src={pdfPreviewUrl} style={{ flex: 1, border: 'none' }} />
+            <iframe title="Report PDF preview" src={pdfIframeUrl} style={{ flex: 1, border: 'none' }} />
           </div>
         </div>
       ) : null}
