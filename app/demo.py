@@ -19,6 +19,7 @@ from app.config import (
     DEMO_GATE_MESSAGE_TEMPLATE,
     DEMO_MODE,
     DEMO_OPEN_SIGNUP,
+    DEMO_ANONYMOUS,
     DEMO_SIGNUP_LIMIT,
     DEMO_SIGNUP_WINDOW_SECONDS,
 )
@@ -27,6 +28,7 @@ from app.errors import LLMRateLimitedError
 logger = logging.getLogger(__name__)
 
 _DEMO_ENABLED_TABS = ("chat", "preferences")
+DEMO_GUEST_USER_ID = "demo-guest"
 
 # Per-user Ask timestamps (demo only; in-memory, single worker).
 _ask_timestamps: dict[str, deque[float]] = defaultdict(deque)
@@ -43,6 +45,11 @@ def is_demo_mode() -> bool:
 
 def demo_open_signup_enabled() -> bool:
     return DEMO_MODE and DEMO_OPEN_SIGNUP
+
+
+def demo_anonymous_enabled() -> bool:
+    """Skip sign-in on demo; Ask uses IP-based rate limits. Requires DEMO_MODE=1."""
+    return DEMO_MODE and DEMO_ANONYMOUS
 
 
 def demo_enabled_tabs() -> list[str]:
@@ -102,17 +109,18 @@ async def check_demo_signup_allowed(request: Request) -> None:
     await _record_event(_signup_timestamps, ip, _signup_lock)
 
 
-async def acquire_demo_ask_quota(user_id: str) -> None:
-    """Consume one Ask slot for this user; raise LLMRateLimitedError when over limit."""
+async def acquire_demo_ask_quota(request: Request, user_id: str) -> None:
+    """Consume one Ask slot; anonymous guests are keyed by client IP."""
+    key = f"ip:{_client_ip(request)}" if user_id == DEMO_GUEST_USER_ID else user_id
     count = await _prune_and_count(
-        _ask_timestamps, user_id, DEMO_ASK_WINDOW_SECONDS, _ask_lock
+        _ask_timestamps, key, DEMO_ASK_WINDOW_SECONDS, _ask_lock
     )
     if count >= DEMO_ASK_LIMIT:
-        logger.info("demo ask quota exceeded user_id=%s", user_id)
+        logger.info("demo ask quota exceeded key=%s", key)
         raise LLMRateLimitedError(
             f"Demo limit reached ({DEMO_ASK_LIMIT} searches per hour). Try again later."
         )
-    await _record_event(_ask_timestamps, user_id, _ask_lock)
+    await _record_event(_ask_timestamps, key, _ask_lock)
 
 
 def demo_forbidden() -> None:

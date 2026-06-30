@@ -25,10 +25,12 @@ const TAB_FEATURE_LABELS: Record<string, string> = {
 }
 
 function AppInner() {
-  const { session, passwordRecovery, publicConfig } = useAuth()
+  const { loading, session, passwordRecovery, publicConfig } = useAuth()
   const [activeTab, setActiveTab] = useState('chat')
 
   const demoMode = !!publicConfig?.demo_mode
+  const demoAnonymous = !!publicConfig?.demo_anonymous
+  const canUseApp = !!session || demoAnonymous
   const enabledTabs = publicConfig?.enabled_tabs
   const demoGateMessage =
     publicConfig?.demo_gate_message ??
@@ -59,7 +61,15 @@ function AppInner() {
     return content
   }
 
-  if (!session) {
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
+        <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 14 }}>Loading…</p>
+      </div>
+    )
+  }
+
+  if (!canUseApp) {
     return (
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
         <header style={{ marginBottom: 24 }}>
@@ -77,7 +87,7 @@ function AppInner() {
     )
   }
 
-  if (passwordRecovery) {
+  if (passwordRecovery && session) {
     return (
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, sans-serif' }}>
         <header style={{ marginBottom: 24 }}>
@@ -109,10 +119,14 @@ function AppInner() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--app-primary)', margin: '0 0 6px 0' }}>TrueAI</h1>
           <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 13 }}>
-            {demoMode ? 'Demo on sample inspection reports' : 'RAG on the shared report library'}
+            {demoMode
+              ? demoAnonymous
+                ? 'Live demo on sample inspection reports'
+                : 'Demo on sample inspection reports'
+              : 'RAG on the shared report library'}
           </p>
         </div>
-        <LoginPanel />
+        {session && <LoginPanel />}
       </header>
 
       {demoMode && (
@@ -127,7 +141,8 @@ function AppInner() {
             border: '1px solid var(--app-border)',
           }}
         >
-          Demo — synthetic report library. Search is limited to 10 queries per hour per account.
+          Demo — synthetic report library. Search is limited to 10 queries per hour
+          {demoAnonymous ? ' per visitor.' : ' per account.'}
         </p>
       )}
 

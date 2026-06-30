@@ -77,7 +77,8 @@ Render → **verbiage-demo** → **Environment**:
 Non-secret defaults (from [`render.yaml`](../render.yaml) or set manually):
 
 - `DEMO_MODE=1`
-- `DEMO_OPEN_SIGNUP=1`
+- `DEMO_ANONYMOUS=1` (skip sign-in; Search uses IP-based rate limits)
+- `DEMO_OPEN_SIGNUP=0` (optional; only if you want account signup instead)
 - `DEMO_ASK_LIMIT=10`
 - `DEMO_ASK_WINDOW_SECONDS=3600`
 - `DEMO_SIGNUP_LIMIT=5`
@@ -106,7 +107,7 @@ Seeds 7 fictional reports from `tests/eval/corpus/` — no real client data.
 
 ## Step E — Verify
 
-1. Open demo URL → **Sign up** with any email (no invite).
+1. Open demo URL → Search tab loads immediately (no sign-in when `DEMO_ANONYMOUS=1`).
 2. **Search**: ask *“What roof damage was found at 1060 Alton Road in Port Charlotte?”* → grounded answer + citations.
 3. **Report Writer** / **Documents** / **Drive** → upsell message, no API data.
 4. Ask 11 times within an hour → rate-limit message on the 11th.
@@ -118,8 +119,8 @@ Seeds 7 fictional reports from `tests/eval/corpus/` — no real client data.
 
 | Feature | Demo |
 |---------|------|
-| Sign up | Open (any email), IP-throttled |
-| Search (`/ask`) | 10 requests per user per hour |
+| Sign in | Skipped when `DEMO_ANONYMOUS=1` |
+| Search (`/ask`) | 10 requests per visitor IP per hour |
 | Other tabs | Visible; show “available in full version” gate |
 | Backend | 403 on ingest, documents, drive, report-writer |
 | Data | Synthetic eval corpus only |
