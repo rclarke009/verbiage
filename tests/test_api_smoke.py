@@ -56,6 +56,7 @@ def test_config_returns_public_keys():
         "public_app_url",
         "google_drive_default_folder_id",
         "google_drive_default_folder_label",
+        "demo_mode",
     ):
         assert key in data
 

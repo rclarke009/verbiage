@@ -15,15 +15,29 @@ WORKDIR /app
 # every boot (which was slow and spiked memory/latency on the request path).
 ENV HF_HOME=/app/hf-cache \
     HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    TRANSFORMERS_OFFLINE=1 \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN pip install --no-cache-dir --upgrade pip
+# Skip ~2GB torch/sentence-transformers bake when RERANK_ENABLED=0 (prod + demo default).
+# Rebuild with --build-arg SKIP_RERANK=0 if you enable reranking in production.
+ARG SKIP_RERANK=1
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install everything except sentence-transformers first (smaller, more reliable on Render).
+RUN grep -v '^sentence-transformers' requirements.txt > /tmp/requirements-base.txt && \
+    pip install --no-cache-dir -r /tmp/requirements-base.txt
 
-# Pre-download the cross-encoder reranker into HF_HOME at build time. Done with the
-# Hub online here; runtime stays offline (env vars above) so it never re-fetches.
-RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+# Optional reranker stack: heavy downloads often flake on free-tier builders (broken pipe).
+RUN if [ "$SKIP_RERANK" != "1" ]; then \
+      for attempt in 1 2 3; do \
+        pip install --no-cache-dir sentence-transformers && break; \
+        echo "MYDEBUG -> sentence-transformers install attempt $attempt failed, retrying..."; \
+        sleep 20; \
+      done && \
+      HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"; \
+    fi
 
 COPY app/ ./app/
 COPY --from=frontend /build/static ./static/

@@ -1,6 +1,9 @@
 # Render Blueprint (https://render.com/docs/blueprint-spec)
 #
-# Single web service: API + in-process ingest worker + Report Writer + RAG.
+# Web services:
+#   rag-document-analysis-backend — prod (API + ingest worker + Report Writer)
+#   verbiage-demo — public Ask-only demo (see docs/demo-deploy.md)
+#
 # Optional separate worker (extra ~$7/mo): see docs/render-worker-setup.md
 #
 # Sub-2GB instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
@@ -53,4 +56,48 @@ services:
       - key: GOOGLE_DRIVE_DEFAULT_FOLDER_ID
         sync: false
       - key: GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL
+        sync: false
+
+  - type: web
+    name: verbiage-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/ready
+    plan: starter
+    envVars:
+      - key: DEMO_MODE
+        value: "1"
+      - key: DEMO_OPEN_SIGNUP
+        value: "1"
+      - key: DEMO_ASK_LIMIT
+        value: "10"
+      - key: DEMO_ASK_WINDOW_SECONDS
+        value: "3600"
+      - key: DEMO_SIGNUP_LIMIT
+        value: "5"
+      - key: RERANK_ENABLED
+        value: "0"
+      - key: INGEST_WORKER_ENABLED
+        value: "0"
+      - key: LLM_TOKEN_LIMIT
+        value: "5"
+      - key: HF_HOME
+        value: /app/hf-cache
+      - key: HF_HUB_OFFLINE
+        value: "1"
+      - key: TRANSFORMERS_OFFLINE
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PUBLIC_APP_URL
         sync: false

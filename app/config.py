@@ -202,3 +202,15 @@ NOMINATIM_BASE_URL = os.getenv(
 # Off by default: loading the ~100MB CrossEncoder is undesirable in tests/CI. Enable
 # in deployment with RERANK_ENABLED=1.
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "").lower() in ("1", "true", "yes")
+
+# Demo deployment (separate Render service + Supabase). All demo-only behavior requires DEMO_MODE=1.
+DEMO_MODE = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
+DEMO_OPEN_SIGNUP = os.getenv("DEMO_OPEN_SIGNUP", "").strip().lower() in ("1", "true", "yes")
+DEMO_ASK_LIMIT = max(1, int(os.getenv("DEMO_ASK_LIMIT", "10")))
+DEMO_ASK_WINDOW_SECONDS = max(60, int(os.getenv("DEMO_ASK_WINDOW_SECONDS", "3600")))
+DEMO_SIGNUP_LIMIT = max(1, int(os.getenv("DEMO_SIGNUP_LIMIT", "5")))
+DEMO_SIGNUP_WINDOW_SECONDS = max(60, int(os.getenv("DEMO_SIGNUP_WINDOW_SECONDS", "3600")))
+DEMO_GATE_MESSAGE_TEMPLATE = os.getenv(
+    "DEMO_GATE_MESSAGE_TEMPLATE",
+    "{feature} is available in the full version. Contact us for details.",
+).strip()
