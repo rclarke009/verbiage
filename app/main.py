@@ -90,9 +90,18 @@ from app.drive_client import (
 )
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_current_user
+from app.demo import (
+    acquire_demo_ask_quota,
+    check_demo_signup_allowed,
+    demo_enabled_tabs,
+    demo_forbidden,
+    demo_open_signup_enabled,
+    is_demo_mode,
+)
 from app.health import build_deep_response, build_ready_response
 from app.config import (
     DATABASE_URL,
+    DEMO_GATE_MESSAGE_TEMPLATE,
     report_writer_database_url,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
@@ -211,7 +220,10 @@ async def lifespan(app):
         logger.info("Reranker disabled")
 
     ingest_task = None
-    if INGEST_WORKER_ENABLED:
+    ingest_worker_enabled = INGEST_WORKER_ENABLED and not is_demo_mode()
+    if is_demo_mode() and INGEST_WORKER_ENABLED:
+        logger.warning("Demo mode: forcing INGEST_WORKER_ENABLED=0")
+    if ingest_worker_enabled:
         ingest_task = asyncio.create_task(ingest_worker_loop(db_pool))
         logger.info("Ingest worker started")
     else:
@@ -220,22 +232,25 @@ async def lifespan(app):
     report_writer_cm = None
     app.state.report_writer_graph = None
     app.state.report_writer_regen_graph = None
-    try:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
+    if not is_demo_mode():
+        try:
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
 
-        rw_db_url = report_writer_database_url()
-        if rw_db_url != DATABASE_URL:
-            logger.info("Report Writer checkpointer using session-mode Postgres URL (6543 pooler is incompatible)")
-        report_writer_cm = AsyncPostgresSaver.from_conn_string(rw_db_url)
-        checkpointer = await report_writer_cm.__aenter__()
-        await checkpointer.setup()
-        app.state.report_writer_graph = build_report_writer_graph(checkpointer)
-        app.state.report_writer_regen_graph = build_regenerate_section_graph(checkpointer)
-        app.state.report_writer_checkpointer_cm = report_writer_cm
-        logger.info("Report Writer LangGraph compiled with Postgres checkpointer")
-    except Exception as e:
-        logger.warning("Report Writer graph init failed (report-writer routes unavailable): %s", e)
+            rw_db_url = report_writer_database_url()
+            if rw_db_url != DATABASE_URL:
+                logger.info("Report Writer checkpointer using session-mode Postgres URL (6543 pooler is incompatible)")
+            report_writer_cm = AsyncPostgresSaver.from_conn_string(rw_db_url)
+            checkpointer = await report_writer_cm.__aenter__()
+            await checkpointer.setup()
+            app.state.report_writer_graph = build_report_writer_graph(checkpointer)
+            app.state.report_writer_regen_graph = build_regenerate_section_graph(checkpointer)
+            app.state.report_writer_checkpointer_cm = report_writer_cm
+            logger.info("Report Writer LangGraph compiled with Postgres checkpointer")
+        except Exception as e:
+            logger.warning("Report Writer graph init failed (report-writer routes unavailable): %s", e)
+    else:
+        logger.info("Report Writer disabled (demo mode)")
 
     yield
 
@@ -279,6 +294,12 @@ if _cors:
     )
 
 app.add_middleware(PrometheusMiddleware)
+
+
+def block_in_demo() -> None:
+    """FastAPI dependency: reject routes unavailable in demo deployments."""
+    if is_demo_mode():
+        demo_forbidden()
 
 
 async def with_db_conn_retry(request: Request, async_fn):
@@ -391,6 +412,16 @@ def _invite_code_matches(provided: str | None, expected: str) -> bool:
 @app.get("/config")
 def get_config():
     """Public: Supabase URL and anon key for frontend auth. No secrets."""
+    if is_demo_mode():
+        return {
+            "supabase_url": SUPABASE_URL or "",
+            "supabase_anon_key": SUPABASE_ANON_KEY or "",
+            "signup_invite_enabled": False,
+            "public_app_url": PUBLIC_APP_URL or "",
+            "demo_mode": True,
+            "enabled_tabs": demo_enabled_tabs(),
+            "demo_gate_message": DEMO_GATE_MESSAGE_TEMPLATE,
+        }
     return {
         "supabase_url": SUPABASE_URL or "",
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
@@ -400,11 +431,12 @@ def get_config():
         "google_drive_default_folder_label": GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL or "",
         "google_drive_jobs_root_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID) or "",
         "google_drive_jobs_root_folder_label": GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL or "",
+        "demo_mode": False,
     }
 
 
 @app.post("/auth/signup", response_model=SignupResponse)
-def auth_signup(request: Request, body: SignupRequest):
+async def auth_signup(request: Request, body: SignupRequest):
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(
             status_code=503,
@@ -414,18 +446,21 @@ def auth_signup(request: Request, body: SignupRequest):
     if "@" not in email or email.startswith("@"):
         raise HTTPException(status_code=400, detail="Invalid email")
 
-    invite_ok = bool(SIGNUP_INVITE_CODE) and _invite_code_matches(
-        body.invite_code,
-        SIGNUP_INVITE_CODE,
-    )
+    if is_demo_mode() and demo_open_signup_enabled():
+        await check_demo_signup_allowed(request)
+    else:
+        invite_ok = bool(SIGNUP_INVITE_CODE) and _invite_code_matches(
+            body.invite_code,
+            SIGNUP_INVITE_CODE,
+        )
 
-    def allowed(conn):
-        if invite_ok:
-            return True
-        return email_in_signup_allowlist(conn, email)
+        def allowed(conn):
+            if invite_ok:
+                return True
+            return email_in_signup_allowlist(conn, email)
 
-    if not with_db_conn_retry_sync(request, allowed):
-        raise HTTPException(status_code=403, detail=_SIGNUP_FORBIDDEN)
+        if not with_db_conn_retry_sync(request, allowed):
+            raise HTTPException(status_code=403, detail=_SIGNUP_FORBIDDEN)
 
     url = f"{SUPABASE_URL}/auth/v1/admin/users"
     headers = {
@@ -488,6 +523,7 @@ async def ingest(
     request: Request,
     ingest_request: IngestRequest,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     async def do_ingest(conn):
         try:
@@ -532,6 +568,7 @@ async def ingest_file(
     source_modified_at: str | None = Form(default=None),
     source_url: str | None = Form(default=None),
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """
     Ingest a PDF file: extract text, then chunk, embed, and store (same as POST /ingest).
@@ -601,7 +638,10 @@ async def ingest_file(
 
 
 @app.get("/drive/test")
-async def drive_test(user_id: str = Depends(get_current_user)):
+async def drive_test(
+    user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
+):
     """
     Test Google Drive credentials. Returns { "ok": true } on success.
     Requires authenticated user.
@@ -663,6 +703,7 @@ def _build_drive_file_list(
 async def drive_folder(
     folder_id: str | None = None,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """
     Resolve folder location for Drive UI (name/path or team inbox label).
@@ -687,6 +728,7 @@ async def drive_files(
     file_ids: str | None = None,
     collapse_versions: bool = True,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """
     List ingestable Drive files (Google Docs, PDF, DOCX). Optional folder_id or file_ids.
@@ -740,6 +782,7 @@ async def ingest_google_drive(
     request: Request,
     body: IngestGoogleDriveRequest,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """
     Enqueue ingestable Drive files for background ingest (metadata list only).
@@ -798,6 +841,7 @@ async def get_ingest_batch_status(
     request: Request,
     batch_id: str,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """Poll ingest batch progress (pending/running/succeeded/failed/skipped counts)."""
 
@@ -837,6 +881,7 @@ async def cancel_ingest_batch_route(
     request: Request,
     batch_id: str,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """Cancel pending jobs in an ingest batch."""
 
@@ -1033,6 +1078,9 @@ async def ask(
     ask_request: AskRequest,
     user_id: str = Depends(get_current_user),
 ):
+    if is_demo_mode():
+        await acquire_demo_ask_quota(user_id)
+
     rag_endpoint = "sync"
 
     async def do_ask(conn):
@@ -1085,6 +1133,8 @@ async def ask_stream(
     user_id: str = Depends(get_current_user),
 ):
     """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk."""
+    if is_demo_mode():
+        await acquire_demo_ask_quota(user_id)
 
     rag_endpoint = "stream"
 
@@ -1175,6 +1225,7 @@ async def ask_stream(
 def get_documents(
     request: Request,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     def do_list(conn):
         rows = list_documents(conn)
@@ -1206,6 +1257,7 @@ async def reindex_document_endpoint(
     request: Request,
     body: ReindexRequest | None = None,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """
     Re-chunk and re-embed a document from stored full_text (no re-upload).
@@ -1241,6 +1293,7 @@ def delete_document_route(
     doc_id: str,
     request: Request,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     def do_delete(conn):
         if not remove_document_from_db(conn, doc_id):
@@ -1257,6 +1310,7 @@ def get_similar_titles(
     limit: int = 5,
     min_ratio: float = 0.82,
     user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
 ):
     """Advisory fuzzy match of proposed name against all document titles in the shared library."""
     if not proposed.strip():
@@ -1337,9 +1391,10 @@ async def service_error_handler(request: Request, exc: LLMServiceError):
 @app.exception_handler(LLMRateLimitedError)
 async def service_error_handler(request: Request, exc: LLMRateLimitedError):
     logger.warning("LLM rate limit (429): %s", exc)
+    detail = str(exc).strip() or "LLM rate limit issue."
     return JSONResponse(
         status_code=429,
-        content={"detail": "LLM rate limit issue."},
+        content={"detail": detail},
     )
 
 
@@ -1367,7 +1422,10 @@ def _google_flow():
 
 
 @app.get("/auth/google")
-async def auth_google(request: Request):
+async def auth_google(
+    request: Request,
+    _demo: None = Depends(block_in_demo),
+):
     """
     Start one-time OAuth: redirect to Google consent (Drive read-only).
     After approval, user is sent to /auth/google/callback.
@@ -1387,7 +1445,10 @@ async def auth_google(request: Request):
 
 
 @app.get("/auth/google/callback", response_class=HTMLResponse)
-async def auth_google_callback(request: Request):
+async def auth_google_callback(
+    request: Request,
+    _demo: None = Depends(block_in_demo),
+):
     """
     OAuth callback: exchange code for tokens, show refresh token to set in .env.
     """
@@ -1436,7 +1497,8 @@ async def auth_google_callback(request: Request):
 
 from app.report_writer.router import router as report_writer_router
 
-app.include_router(report_writer_router)
+if not is_demo_mode():
+    app.include_router(report_writer_router)
 
 
 # Mount static frontend last so API routes take precedence.

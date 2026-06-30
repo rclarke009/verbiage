@@ -23,6 +23,9 @@ export interface PublicAppConfig {
   public_app_url: string
   google_drive_default_folder_id: string
   google_drive_default_folder_label: string
+  demo_mode: boolean
+  enabled_tabs: string[] | null
+  demo_gate_message: string
 }
 
 interface AuthCtx {
@@ -56,6 +59,14 @@ async function fetchPublicConfig(): Promise<PublicAppConfig> {
     public_app_url: String(raw.public_app_url ?? ''),
     google_drive_default_folder_id: String(raw.google_drive_default_folder_id ?? ''),
     google_drive_default_folder_label: String(raw.google_drive_default_folder_label ?? ''),
+    demo_mode: Boolean(raw.demo_mode),
+    enabled_tabs: Array.isArray(raw.enabled_tabs)
+      ? raw.enabled_tabs.map(String)
+      : null,
+    demo_gate_message: String(
+      raw.demo_gate_message ??
+        '{feature} is available in the full version. Contact us for details.',
+    ),
   }
 }
 
