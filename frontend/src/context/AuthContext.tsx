@@ -24,6 +24,7 @@ export interface PublicAppConfig {
   google_drive_default_folder_id: string
   google_drive_default_folder_label: string
   demo_mode: boolean
+  demo_anonymous: boolean
   enabled_tabs: string[] | null
   demo_gate_message: string
 }
@@ -60,6 +61,7 @@ async function fetchPublicConfig(): Promise<PublicAppConfig> {
     google_drive_default_folder_id: String(raw.google_drive_default_folder_id ?? ''),
     google_drive_default_folder_label: String(raw.google_drive_default_folder_label ?? ''),
     demo_mode: Boolean(raw.demo_mode),
+    demo_anonymous: Boolean(raw.demo_anonymous),
     enabled_tabs: Array.isArray(raw.enabled_tabs)
       ? raw.enabled_tabs.map(String)
       : null,
@@ -85,6 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const cfg = await fetchPublicConfig()
         if (cancelled) return
+        setPublicConfig(cfg)
+
+        if (cfg.demo_anonymous) {
+          setLoading(false)
+          return
+        }
+
         if (!cfg.supabase_url || !cfg.supabase_anon_key) {
           setError(
             'Supabase Auth is not configured on the server (/config missing credentials). Set SUPABASE_URL and SUPABASE_ANON_KEY.',
@@ -92,7 +101,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false)
           return
         }
-        setPublicConfig(cfg)
 
         const recoveryUrlHint =
           typeof window !== 'undefined' &&

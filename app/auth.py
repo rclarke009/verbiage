@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from app.config import SUPABASE_JWT_SECRET, SUPABASE_URL
+from app.demo import DEMO_GUEST_USER_ID, demo_anonymous_enabled, is_demo_mode
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
@@ -134,3 +135,25 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return sub
+
+
+def get_ask_user(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+) -> str:
+    """
+    FastAPI dependency for /ask routes. In demo anonymous mode, missing auth yields a guest id.
+    Otherwise requires a valid Supabase JWT (same as get_current_user).
+    """
+    if is_demo_mode() and demo_anonymous_enabled():
+        token = credentials.credentials if credentials else None
+        if token:
+            try:
+                payload = verify_supabase_token(token)
+                sub = payload.get("sub")
+                if sub:
+                    return sub
+            except jwt.InvalidTokenError:
+                pass
+        return DEMO_GUEST_USER_ID
+    return get_current_user(request, credentials)

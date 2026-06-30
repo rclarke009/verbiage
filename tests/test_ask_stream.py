@@ -11,16 +11,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.auth import get_current_user
+from app.auth import get_ask_user, get_current_user
 
 
 def _client() -> TestClient:
-    main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    def _test_user() -> str:
+        return "test-user"
+
+    main.app.dependency_overrides[get_current_user] = _test_user
+    main.app.dependency_overrides[get_ask_user] = _test_user
     return TestClient(main.app)
 
 
 def _clear_overrides() -> None:
     main.app.dependency_overrides.pop(get_current_user, None)
+    main.app.dependency_overrides.pop(get_ask_user, None)
 
 
 def _post_stream(client: TestClient) -> str:

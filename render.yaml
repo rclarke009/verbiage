@@ -67,8 +67,10 @@ services:
     envVars:
       - key: DEMO_MODE
         value: "1"
-      - key: DEMO_OPEN_SIGNUP
+      - key: DEMO_ANONYMOUS
         value: "1"
+      - key: DEMO_OPEN_SIGNUP
+        value: "0"
       - key: DEMO_ASK_LIMIT
         value: "10"
       - key: DEMO_ASK_WINDOW_SECONDS

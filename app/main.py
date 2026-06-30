@@ -89,10 +89,11 @@ from app.drive_client import (
     build_drive_folder_context,
 )
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
-from app.auth import get_current_user
+from app.auth import get_ask_user, get_current_user
 from app.demo import (
     acquire_demo_ask_quota,
     check_demo_signup_allowed,
+    demo_anonymous_enabled,
     demo_enabled_tabs,
     demo_forbidden,
     demo_open_signup_enabled,
@@ -419,6 +420,7 @@ def get_config():
             "signup_invite_enabled": False,
             "public_app_url": PUBLIC_APP_URL or "",
             "demo_mode": True,
+            "demo_anonymous": demo_anonymous_enabled(),
             "enabled_tabs": demo_enabled_tabs(),
             "demo_gate_message": DEMO_GATE_MESSAGE_TEMPLATE,
         }
@@ -1076,10 +1078,10 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
 async def ask(
     request: Request,
     ask_request: AskRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_ask_user),
 ):
     if is_demo_mode():
-        await acquire_demo_ask_quota(user_id)
+        await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "sync"
 
@@ -1130,11 +1132,11 @@ async def ask(
 async def ask_stream(
     request: Request,
     ask_request: AskRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_ask_user),
 ):
     """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk."""
     if is_demo_mode():
-        await acquire_demo_ask_quota(user_id)
+        await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "stream"
 
