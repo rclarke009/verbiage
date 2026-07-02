@@ -50,6 +50,7 @@ Optional polish: add UI screenshots under [`docs/screenshots/`](docs/screenshots
 - **Access control**: Supabase JWT on protected routes, with **closed signup** via invite code or email allowlist and a password-reset flow
 - **Shared library**: All signed-in users see the same document set; list, filter, delete
 - **Drive workflow**: Team inbox via **`GOOGLE_DRIVE_DEFAULT_FOLDER_ID`**, with **Indexed / Not indexed / Stale** status badges; paste another folder URL to override
+- **Report Writer**: LangGraph workflow that drafts structured report sections from field notes, claim photos, and similar past reports — with the same pre-LLM relevance gate as Ask, SSE streaming, and optional human-in-the-loop before generation (`REPORT_WRITER_HITL`)
 
 Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama**. Auth: **Supabase JWT** on protected routes.
 
@@ -67,6 +68,7 @@ Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama*
 | Frontend         | React + Vite SPA (TanStack Query)                      |
 | Auth             | Supabase JWT                                           |
 | Drive            | Google Drive API (read-only OAuth)                     |
+| Report Writer    | LangGraph + Postgres checkpointer (SSE to SPA)         |
 | Deployment       | Docker, Render                                         |
 
 ---
@@ -91,6 +93,40 @@ flowchart TD
 2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded
 3. Vectors stored in pgvector; retrieval filtered by active embedding model
 4. User question → hybrid retrieval (vector + lexical) → RRF fusion → relevance gate (cosine) → optional cross-encoder rerank → top-k chunks → grounded LLM response with citations
+
+### Report Writer (LangGraph)
+
+Structured draft generation for a claim runs as a **LangGraph** state machine (`app/report_writer/`). The graph checkpoints to Postgres (`AsyncPostgresSaver`) so runs can resume; progress streams to the SPA over SSE. Disabled in demo mode.
+
+```mermaid
+flowchart TD
+    START([START]) --> analyze_images[Analyze claim photos]
+    analyze_images --> normalize_inputs[Normalize field notes and metadata]
+    normalize_inputs --> retrieve_similar[Hybrid retrieval and rerank]
+    retrieve_similar --> gate{Relevance gate}
+
+    gate -->|no chunks or cosine below threshold| refuse[Refuse with reason]
+    gate -->|retrieval passed| hitl{REPORT_WRITER_HITL?}
+
+    hitl -->|yes| pause[[Interrupt for human review]]
+    pause --> generate_sections[Generate sections via LLM]
+    hitl -->|no| generate_sections
+
+    generate_sections --> validate_draft[Validate draft faithfulness]
+    validate_draft --> persist_draft[Persist draft or refusal]
+    refuse --> persist_draft
+    persist_draft --> END([END])
+```
+
+1. **Analyze photos** — load cached vision analyses; analyze uncached uploads inline (Drive photos via background worker).
+2. **Normalize** — build retrieval query from field notes, property metadata, and image observations.
+3. **Retrieve** — same hybrid RAG stack as Ask, scoped by report type.
+4. **Gate** — refuse before any section generation if retrieval is empty or `best_cosine < RAG_MIN_RELEVANCE_SCORE` (same threshold as Ask).
+5. **Generate** — stream section drafts with source citations; optional HITL pause before this step.
+6. **Validate** — lightweight LLM faithfulness check on the assembled draft.
+7. **Persist** — save completed draft or refusal to the claim run.
+
+**Section regeneration** uses a shorter subgraph (normalize → retrieve → generate → validate → persist) without the photo-analysis or relevance-gate branches.
 
 ### Concurrency model
 
@@ -190,6 +226,7 @@ After sign-in:
 | Tab | Purpose |
 |-----|---------|
 | **Ask** | Chat over the shared library with source citations |
+| **Report Writer** | Claim workspace — field notes, photos, LangGraph draft generation with SSE progress |
 | **Documents** | Index table, PDF upload, search, delete |
 | **Google Drive** | Team inbox (env default); list Docs/PDF/DOCX; status badges; ingest selected files |
 
@@ -240,6 +277,7 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 ## 📋 Project Structure
 
 - `/app` — Core FastAPI RAG logic (ingestion, chunking, retrieval, reranking, generation)
+- `/app/report_writer` — LangGraph workflow for structured claim drafts (nodes, SSE adapter, Postgres checkpointer)
 - `/frontend` — React + Vite SPA
 - `/tests` — Unit/integration suite + the opt-in faithfulness eval harness (`tests/eval/`)
 - [build-prompts.md](build-prompts.md) — Prompt engineering & grounding strategy

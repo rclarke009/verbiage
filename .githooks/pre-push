@@ -7,8 +7,8 @@
 # `make eval` spins up an ephemeral pgvector container, runs the eval_fast gate
 # (local NLI judge + committed embeddings cache), then tears the container down.
 # It needs Docker. If Docker isn't available we SKIP rather than block the push
-# -- CI is the authoritative eval gate. Set VERBIAGE_REQUIRE_EVAL=1 to instead
-# fail the push when Docker is missing.
+# (faithfulness eval is not in CI -- only pytest/build run there). Set
+# VERBIAGE_REQUIRE_EVAL=1 to instead fail the push when Docker is missing.
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -21,7 +21,7 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     exit 1
   fi
   echo "==> Docker not available; skipping faithfulness eval (make eval)."
-  echo "    Run it manually before release, or let CI handle it."
+  echo "    Run 'make eval' manually before release (CI does not run it)."
   exit 0
 fi
 
