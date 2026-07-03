@@ -4,8 +4,8 @@ from app.document_metadata import detect_storm, extract_address, extract_documen
 
 
 def test_extract_address_from_header():
-    text = "Engineering Report - 1060 Alton Road, Port Charlotte, FL 33948\n\nProperty Overview"
-    assert extract_address(text) == "1060 Alton Road, Port Charlotte, FL 33948"
+    text = "Engineering Report - 100 Harbor Example Road, Sampletown, FL 30010\n\nProperty Overview"
+    assert extract_address(text) == "100 Harbor Example Road, Sampletown, FL 30010"
 
 
 def test_detect_storm_hurricane_ian():
@@ -22,7 +22,7 @@ def test_detect_storm_generic_windstorm_returns_none():
 
 
 def test_extract_document_metadata_address_only():
-    text = "Engineering Report - 412 Gulfview Drive, Naples, FL 34102\n\nConclusion"
+    text = "Engineering Report - 412 Example Drive, Sample City, FL 30040\n\nConclusion"
     meta = extract_document_metadata(text)
-    assert meta["address"] == "412 Gulfview Drive, Naples, FL 34102"
+    assert meta["address"] == "412 Example Drive, Sample City, FL 30040"
     assert meta["storm_id"] is None

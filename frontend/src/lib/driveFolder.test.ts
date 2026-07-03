@@ -11,8 +11,8 @@ describe('parseDriveFolderInput', () => {
   })
 
   it('parses a full Drive folder URL', () => {
-    const url = 'https://drive.google.com/drive/folders/12FGnoHObEnFRQNEUHtHla2Ajx33xauhc'
-    expect(parseDriveFolderInput(url)).toEqual({ id: '12FGnoHObEnFRQNEUHtHla2Ajx33xauhc' })
+    const url = 'https://drive.google.com/drive/folders/test_folder_abc123xyz'
+    expect(parseDriveFolderInput(url)).toEqual({ id: 'test_folder_abc123xyz' })
   })
 
   it('rejects a single-document link', () => {

@@ -221,7 +221,7 @@ def _engineering_letter_flow(doc: ReportDocument, styles: dict[str, ParagraphSty
     for para in doc.engineering_letter_paragraphs:
         flow.append(Paragraph(para, styles["body"]))
     flow.append(Paragraph("Respectfully Submitted,", styles["body"]))
-    flow.append(Paragraph("Stuart Jay Clarke", styles["body"]))
+    flow.append(Paragraph("Licensed Professional Engineer", styles["body"]))
     flow.append(Paragraph("K. Renevier, P.E.", styles["body"]))
     try:
         stamp = load_asset_bytes("engineer_stamp.png")

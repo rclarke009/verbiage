@@ -16,8 +16,8 @@ questions:
     category: answerable_multi
     must_mention: ["storm-created opening", "water"]
 
-  - id: alton_rd_roof
-    question: "What roof damage was found at 1060 Alton Road in Port Charlotte?"
+  - id: sample_road_roof
+    question: "What roof damage was found at 100 Harbor Example Road in Sampletown?"
     category: answerable_single
     must_mention: ["shingles"]
 
@@ -26,8 +26,8 @@ questions:
     category: answerable_multi
     must_mention: ["tile", "adhering"]
 
-  - id: naples_moisture_cause
-    question: "What caused the interior moisture at 412 Gulfview Drive in Naples?"
+  - id: sample_city_moisture_cause
+    question: "What caused the interior moisture at 412 Example Drive in Sample City?"
     category: answerable_single
     must_mention: ["plumbing", "leak"]
 
@@ -39,12 +39,12 @@ questions:
     question: "Summarize the earthquake and seismic foundation damage reported in the inspections."
     category: unanswerable
 
-  - id: nearby_ian_port_charlotte
-    question: "Which places are closest that had the same storm?"
+  - id: nearby_ian_sampletown
+    question: "Which synthetic places are closest that had the same storm?"
     category: answerable_multi
     query_mode: nearby_storm
     claim_context:
-      address: "1060 Alton Road, Port Charlotte, FL 33948"
+      address: "100 Harbor Example Road, Sampletown, FL 30010"
       storm_id: ian-2022
       latitude: 26.976
       longitude: -82.090

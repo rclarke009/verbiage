@@ -143,7 +143,7 @@ def default_client_name(meta: dict, title: str) -> str:
 
 
 def default_prepared_by(meta: dict) -> str:
-    return (meta.get("prepared_by") or "Stuart Jay Clarke, CGC and CCC").strip()
+    return (meta.get("prepared_by") or "Licensed Professional Engineer").strip()
 
 
 def include_engineering_letter(meta: dict) -> bool:

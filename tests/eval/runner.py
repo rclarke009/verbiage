@@ -43,7 +43,7 @@ def _included_blocks(top_chunks: list[RetrievedChunk]) -> list[str]:
     Each block is prefixed with its document title because the model sees that title
     in the block header (see app.main._ask_prompt_from_chunks) and legitimately uses
     it to ground claims. The title typically carries the property address ("412
-    Gulfview Drive"), which the body refers to only as "this residence". Keeping the
+    Example Drive"), which the body refers to only as "this residence". Keeping the
     title as the block's first line lets NliJudge's header-prefix premises bridge that
     coreference gap; otherwise an address-bearing claim is unentailed by any premise.
     """

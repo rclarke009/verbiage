@@ -111,7 +111,7 @@ Seeds 7 fictional reports from `tests/eval/corpus/` — no real client data.
 ## Step E — Verify
 
 1. Open demo URL → Search tab loads immediately (no sign-in when `DEMO_ANONYMOUS=1`).
-2. **Search**: ask *“What roof damage was found at 1060 Alton Road in Port Charlotte?”* → grounded answer + citations.
+2. **Search**: ask *“What roof damage was found at 100 Harbor Example Road in Sampletown?”* → grounded answer + citations.
 3. **Report Writer** / **Documents** / **Drive** → upsell message, no API data.
 4. Ask 11 times within an hour → rate-limit message on the 11th.
 5. Confirm prod URL still works (no `DEMO_MODE` on prod service).

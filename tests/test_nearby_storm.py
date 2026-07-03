@@ -49,7 +49,7 @@ def test_retrieve_nearby_storm_docs_in_memory_sqlite_style():
         for doc_id, lat, lng, addr in (
             ("near_a", 26.955, -82.055, "100 Maple Court"),
             ("near_b", 26.935, -82.035, "200 Birch Avenue"),
-            ("far_c", 27.773, -82.407, "6317 Wisteria Lane"),
+            ("far_c", 27.773, -82.407, "600 Windward Example Lane"),
         ):
             if not _doc_exists(c, doc_id):
                 insert_document(c, doc_id, 1, title=addr, source="test", full_text="x")

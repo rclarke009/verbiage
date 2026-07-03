@@ -6,12 +6,12 @@ from app.drive_client import parse_drive_folder_id, resolve_drive_folder_id
 
 
 def test_parse_raw_folder_id():
-    assert parse_drive_folder_id("12FGnoHObEnFRQNEUHtHla2Ajx33xauhc") == "12FGnoHObEnFRQNEUHtHla2Ajx33xauhc"
+    assert parse_drive_folder_id("test_folder_abc123xyz") == "test_folder_abc123xyz"
 
 
 def test_parse_full_folder_url():
-    url = "https://drive.google.com/drive/folders/12FGnoHObEnFRQNEUHtHla2Ajx33xauhc"
-    assert parse_drive_folder_id(url) == "12FGnoHObEnFRQNEUHtHla2Ajx33xauhc"
+    url = "https://drive.google.com/drive/folders/test_folder_abc123xyz"
+    assert parse_drive_folder_id(url) == "test_folder_abc123xyz"
 
 
 def test_parse_folder_url_with_query():

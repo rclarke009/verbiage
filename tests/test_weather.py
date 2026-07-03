@@ -110,7 +110,7 @@ def test_weather_metadata_from_options() -> None:
         selected={"wind_speed": "vc:daily:wind_speed", "wind_gust": "vc:daily:wind_gust"},
         attribution=[],
     )
-    meta = weather_metadata_from_options(options, "412 Gulfview Dr, Tampa, FL")
+    meta = weather_metadata_from_options(options, "412 Example Dr, Tampa, FL")
     assert meta["wind_speed_mph"] == "60"
     assert meta["wind_gust_mph"] == "86"
     assert meta["hail_size_in"] == "1.25"
@@ -130,12 +130,12 @@ def test_weather_metadata_from_snapshot_legacy() -> None:
         longitude=-82.46,
         date_iso="2024-10-09",
         date_display="October 9, 2024",
-        fetch_key=weather_fetch_key("412 Gulfview Dr, Tampa, FL", "2024-10-09"),
+        fetch_key=weather_fetch_key("412 Example Dr, Tampa, FL", "2024-10-09"),
         candidates=[],
         selected={},
         attribution=[],
     )
-    meta = weather_metadata_from_snapshot(options, "412 Gulfview Dr, Tampa, FL")
+    meta = weather_metadata_from_snapshot(options, "412 Example Dr, Tampa, FL")
     assert meta["wind_speed_mph"] == "60"
     assert meta["wind_gust_mph"] == "86"
 

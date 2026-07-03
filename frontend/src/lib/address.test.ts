@@ -6,26 +6,26 @@ describe('composeFullAddress', () => {
   it('composes structured fields', () => {
     expect(
       composeFullAddress({
-        address: '412 Gulfview Drive',
+        address: '412 Example Drive',
         address2: 'Apt 2',
         city: 'Tampa',
         state: 'FL',
         zip: '33609',
       }),
-    ).toBe('412 Gulfview Drive, Apt 2, Tampa, FL 33609')
+    ).toBe('412 Example Drive, Apt 2, Tampa, FL 33609')
   })
 
   it('parses legacy full address when structured fields are missing', () => {
-    expect(composeFullAddress({ address: '412 Gulfview Drive, Tampa, FL 33609' })).toBe(
-      '412 Gulfview Drive, Tampa, FL 33609',
+    expect(composeFullAddress({ address: '412 Example Drive, Tampa, FL 33609' })).toBe(
+      '412 Example Drive, Tampa, FL 33609',
     )
   })
 })
 
 describe('splitLegacyAddress', () => {
   it('splits city state zip', () => {
-    expect(splitLegacyAddress('412 Gulfview Drive, Tampa, FL 33609')).toEqual({
-      address: '412 Gulfview Drive',
+    expect(splitLegacyAddress('412 Example Drive, Tampa, FL 33609')).toEqual({
+      address: '412 Example Drive',
       address2: '',
       city: 'Tampa',
       state: 'FL',

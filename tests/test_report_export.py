@@ -18,19 +18,19 @@ from app.report_writer.report_document import _read_image_bytes, build_report_do
 def sample_claim() -> dict:
     return {
         "claim_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "title": "Huseman",
+        "title": "Sample Client",
         "property_metadata": {
             "report_type": "engineering",
-            "address": "3795 Riviera Cir, Bonita Springs, FL 34134",
+            "address": "100 Example Lane, Testville, FL 30001",
             "property_type": "single-family",
-            "client_name": "Huseman",
+            "client_name": "Sample Client",
             "inspection_date": "Sep 15, 2023",
-            "prepared_by": "Stuart Jay Clarke, CGC and CCC",
+            "prepared_by": "Licensed Professional Engineer",
             "storm_name": "Ian",
             "storm_date": "September 28, 2022",
             "storm_type": "hurricane",
             "storm_category": "Cat 4",
-            "landfall_region": "Near Fort Myers, FL",
+            "landfall_region": "Near Example Coast, FL",
             "include_engineering_letter": "true",
         },
         "field_notes": "Roof and interior damage observed.",
@@ -100,7 +100,7 @@ def test_read_image_bytes_falls_back_to_drive_when_storage_missing(monkeypatch: 
 
 def test_build_report_document(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
     doc = build_report_document(sample_claim, sample_sections, images=[])
-    assert doc.client_name == "Huseman"
+    assert doc.client_name == "Sample Client"
     assert doc.report_number == "A1B2C3D4"
     assert len(doc.sections) == 4
     assert doc.sections[-1].key == "recommendations_conclusion"

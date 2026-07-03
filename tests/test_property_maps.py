@@ -24,19 +24,19 @@ from app.report_writer.property_maps import PropertyMapResult
 def sample_claim() -> dict:
     return {
         "claim_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "title": "Huseman",
+        "title": "Sample Client",
         "property_metadata": {
             "report_type": "engineering",
-            "address": "3795 Riviera Cir, Bonita Springs, FL 34134",
+            "address": "100 Example Lane, Testville, FL 30001",
             "property_type": "single-family",
-            "client_name": "Huseman",
+            "client_name": "Sample Client",
             "inspection_date": "Sep 15, 2023",
-            "prepared_by": "Stuart Jay Clarke, CGC and CCC",
+            "prepared_by": "Licensed Professional Engineer",
             "storm_name": "Ian",
             "storm_date": "September 28, 2022",
             "storm_type": "hurricane",
             "storm_category": "Cat 4",
-            "landfall_region": "Near Fort Myers, FL",
+            "landfall_region": "Near Example Coast, FL",
             "include_engineering_letter": "true",
         },
         "field_notes": "Roof and interior damage observed.",
@@ -70,7 +70,7 @@ def geocode_payload() -> dict:
         "status": "OK",
         "results": [
             {
-                "formatted_address": "3795 Riviera Cir, Bonita Springs, FL 34134, USA",
+                "formatted_address": "100 Example Lane, Testville, FL 30001, USA",
                 "geometry": {"location": {"lat": 26.33, "lng": -81.81}},
             }
         ],
@@ -78,7 +78,7 @@ def geocode_payload() -> dict:
 
 
 def test_property_map_fetch_key_normalizes_whitespace() -> None:
-    assert property_map_fetch_key("  3795 Riviera Cir ") == "3795 riviera cir"
+    assert property_map_fetch_key("  100 Example Lane ") == "100 example lane"
 
 
 def test_property_map_storage_path() -> None:
@@ -88,15 +88,15 @@ def test_property_map_storage_path() -> None:
 
 def test_property_map_metadata_from_result() -> None:
     result = PropertyMapResult(
-        resolved_address="3795 Riviera Cir, Bonita Springs, FL",
+        resolved_address="100 Example Lane, Testville, FL",
         latitude=26.33,
         longitude=-81.81,
-        fetch_key="3795 riviera cir",
+        fetch_key="100 example lane",
         satellite_path="user/claim/property_map_satellite.jpg",
         roadmap_path="user/claim/property_map_roadmap.jpg",
     )
     meta = property_map_metadata_from_result(result)
-    assert meta["property_map_fetch_key"] == "3795 riviera cir"
+    assert meta["property_map_fetch_key"] == "100 example lane"
     assert meta["property_latitude"] == "26.33"
     assert meta["property_map_satellite_path"].endswith("satellite.jpg")
 
@@ -115,10 +115,10 @@ def test_geocode_address_success(monkeypatch: pytest.MonkeyPatch, geocode_payloa
         lambda: mock_client,
     )
 
-    result = asyncio.run(geocode_address("3795 Riviera Cir, Bonita Springs, FL"))
+    result = asyncio.run(geocode_address("100 Example Lane, Testville, FL"))
     assert result.latitude == 26.33
     assert result.longitude == -81.81
-    assert "Bonita Springs" in result.resolved_address
+    assert "Testville" in result.resolved_address
 
 
 def test_fetch_property_maps_persists_images(
@@ -156,7 +156,7 @@ def test_fetch_property_maps_persists_images(
 
     result = asyncio.run(
         fetch_property_maps(
-            "3795 Riviera Cir, Bonita Springs, FL",
+            "100 Example Lane, Testville, FL",
             user_id="user-1",
             claim_id="claim-1",
         )

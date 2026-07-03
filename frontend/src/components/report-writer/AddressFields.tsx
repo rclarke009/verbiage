@@ -106,7 +106,7 @@ export function AddressFields({
           <input
             value={fields.address}
             disabled={disabled}
-            placeholder="412 Gulfview Drive"
+            placeholder="412 Example Drive"
             style={inputStyle}
             role="combobox"
             aria-expanded={showList}

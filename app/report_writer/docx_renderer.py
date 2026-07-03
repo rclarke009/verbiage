@@ -252,7 +252,7 @@ class DocxReportRenderer:
         for i, para in enumerate(doc.engineering_letter_paragraphs):
             xml += xml_engineering_paragraph(para, spacing_after=60 if i < 2 else 120)
         xml += xml_engineering_paragraph("Respectfully Submitted,", spacing_after=120)
-        xml += xml_engineering_paragraph("Stuart Jay Clarke")
+        xml += xml_engineering_paragraph("Licensed Professional Engineer")
         xml += xml_engineering_paragraph("K. Renevier, P.E.", spacing_after=120)
 
         stamp_data = load_asset_bytes("engineer_stamp.png")

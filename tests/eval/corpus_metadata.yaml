@@ -1,27 +1,27 @@
 # Fixed geo/storm metadata for eval corpus documents.
-# Real lat/lng for Florida addresses; fake cities clustered near Port Charlotte for nearby tests.
+# Synthetic addresses with fixed coordinates for nearby-distance tests.
 
-1060_alton_rd_port_charlotte:
+100_harbor_example_rd_sampletown:
   storm_id: ian-2022
   storm_name: Ian
   storm_date_iso: "2022-09-28"
-  address: "1060 Alton Road, Port Charlotte, FL 33948"
+  address: "100 Harbor Example Road, Sampletown, FL 30010"
   latitude: 26.976
   longitude: -82.090
 
-6317_wisteria_ln_apollo_beach:
+600_windward_example_lane_farpoint:
   storm_id: ian-2022
   storm_name: Ian
   storm_date_iso: "2022-09-28"
-  address: "6317 Wisteria Lane, Apollo Beach, FL 33572"
+  address: "600 Windward Example Lane, Farpoint, FL 30020"
   latitude: 27.773
   longitude: -82.407
 
-107_southern_st_pensacola:
+200_remote_example_st_farville:
   storm_id: ian-2022
   storm_name: Ian
   storm_date_iso: "2022-09-28"
-  address: "107 Southern Street, Pensacola, FL 32503"
+  address: "200 Remote Example Street, Farville, FL 30030"
   latitude: 30.421
   longitude: -87.216
 
@@ -49,8 +49,8 @@
   latitude: 26.968
   longitude: -82.115
 
-412_gulfview_dr_naples:
-  address: "412 Gulfview Drive, Naples, FL 34102"
+412_example_drive_samplecity:
+  address: "412 Example Drive, Sample City, FL 30040"
   latitude: 26.142
   longitude: -81.794
 

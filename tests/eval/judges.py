@@ -158,7 +158,7 @@ class NliJudge:
              long, multi-topic block dilutes below threshold;
           3. each sentence prefixed with its block's header line -- bridges the
              coreference gap where the supporting sentence says "this residence"
-             but the claim names the property ("412 Gulfview Drive in Naples"); the
+             but the claim names the property ("412 Example Drive in Sample City"); the
              address lives only in the section header, so neither the bare sentence
              nor the truncated full block entails the claim on its own.
         """

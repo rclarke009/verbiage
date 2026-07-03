@@ -14,7 +14,7 @@ The production app requires sign-in, so the examples below show typical **Ask** 
 
 **Answerable question** — retrieval finds relevant storm-report language:
 
-> **Q:** What roof damage was found at 1060 Alton Road in Port Charlotte?
+> **Q:** What roof damage was found at 100 Harbor Example Road in Sampletown?
 >
 > **A:** *(Suggested overview / detailed-image verbiage drawn from matching inspection reports, with cited source chunks — e.g. shingle damage, wind-related observations.)*
 
@@ -296,7 +296,7 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 
 ## 📬 Contact
 
-**Rebecca Clarke** — [LinkedIn](https://www.linkedin.com/in/rclarke009/) · [Email](mailto:rivkaclarke@icloud.com)
+For questions, open an issue in this repository.
 
 ## License
 

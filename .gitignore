@@ -30,6 +30,9 @@ htmlcov/
 # Cursor / local agent artifacts (do not publish)
 .cursor/
 
+# Local reference documents and photos may contain client data.
+files_for_reference/
+
 # Supabase CLI local state (linked project ref, pooler URL, etc.)
 supabase/.temp/
 

@@ -15,7 +15,7 @@ def test_format_full_us_street_address():
     suggestion = format_nominatim_result(
         _item(
             house_number="412",
-            road="Gulfview Drive",
+            road="Example Drive",
             city="Tampa",
             state="Florida",
             postcode="33609",
@@ -24,19 +24,19 @@ def test_format_full_us_street_address():
     )
     assert suggestion is not None
     assert suggestion.id == "123456"
-    assert suggestion.address == "412 Gulfview Drive"
+    assert suggestion.address == "412 Example Drive"
     assert suggestion.address2 == ""
     assert suggestion.city == "Tampa"
     assert suggestion.state == "FL"
     assert suggestion.zip == "33609"
-    assert suggestion.label == "412 Gulfview Drive, Tampa, FL 33609"
+    assert suggestion.label == "412 Example Drive, Tampa, FL 33609"
 
 
 def test_format_includes_unit_as_address2():
     suggestion = format_nominatim_result(
         _item(
             house_number="412",
-            road="Gulfview Drive",
+            road="Example Drive",
             unit="Apt 2",
             city="Tampa",
             state="Florida",
@@ -44,7 +44,7 @@ def test_format_includes_unit_as_address2():
         )
     )
     assert suggestion is not None
-    assert suggestion.address == "412 Gulfview Drive"
+    assert suggestion.address == "412 Example Drive"
     assert suggestion.address2 == "Apt 2"
 
 
@@ -93,13 +93,13 @@ def test_format_skips_missing_state():
 def test_format_road_only_without_house_number():
     suggestion = format_nominatim_result(
         _item(
-            road="Gulfview Drive",
+            road="Example Drive",
             city="Tampa",
             state="Florida",
         )
     )
     assert suggestion is not None
-    assert suggestion.address == "Gulfview Drive"
+    assert suggestion.address == "Example Drive"
     assert suggestion.city == "Tampa"
     assert suggestion.state == "FL"
 

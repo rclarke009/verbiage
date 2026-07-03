@@ -56,12 +56,12 @@ def test_build_prefix_includes_file_when_different_from_title():
 def test_build_prefix_includes_location_and_storm():
     prefix = build_document_breadcrumb_prefix(
         doc_id="abc",
-        title="Engineering Report - 1060 Alton Road",
+        title="Engineering Report - 100 Harbor Example Road",
         source="eval_fixture",
-        address="1060 Alton Road, Port Charlotte, FL",
+        address="100 Harbor Example Road, Sampletown, FL",
         storm_name="Ian",
     )
-    assert "[Location: 1060 Alton Road, Port Charlotte, FL]" in prefix
+    assert "[Location: 100 Harbor Example Road, Sampletown, FL]" in prefix
     assert "[Storm: Ian]" in prefix
 
 
