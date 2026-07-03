@@ -202,6 +202,20 @@ async def lifespan(app):
 
     app.state.db_pool = db_pool
 
+    if is_demo_mode():
+        from app.demo_seed import maybe_seed_demo_corpus
+
+        def _seed_demo() -> int | None:
+            conn = db_pool.getconn()
+            try:
+                return maybe_seed_demo_corpus(conn)
+            finally:
+                db_pool.putconn(conn)
+
+        seeded = await asyncio.to_thread(_seed_demo)
+        if seeded:
+            logger.info("Demo startup seeded %s synthetic report(s)", seeded)
+
     # Create the shared keep-alive HTTP client now so it binds to this event loop and the
     # first embedding/LLM call reuses a warm connection pool instead of a fresh handshake.
     get_async_client()

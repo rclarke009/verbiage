@@ -31,6 +31,21 @@ questions:
     category: answerable_single
     must_mention: ["plumbing", "leak"]
 
+  - id: hail_tile_gulfview
+    question: "What hail damage was found on the tile roof at 500 Palm Example Boulevard in Gulfview?"
+    category: answerable_single
+    must_mention: ["hail", "tile"]
+
+  - id: soffit_fascia_surfside
+    question: "Describe the soffit and fascia damage at 150 Ocean Example Terrace in Surfside."
+    category: answerable_single
+    must_mention: ["soffit", "fascia"]
+
+  - id: no_storm_damage_groveport
+    question: "Was any storm-related roof damage found at 250 Mango Example Court in Groveport?"
+    category: answerable_single
+    must_mention: ["no storm-related", "metal"]
+
   - id: wyoming_hail
     question: "What hail damage was found on roofs in Wyoming?"
     category: unanswerable

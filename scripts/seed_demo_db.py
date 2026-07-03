@@ -22,6 +22,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from app.db import create_db  # noqa: E402
+from app.demo_seed import clear_eval_fixture  # noqa: E402
 from tests.eval.seed import seed_corpus_sync  # noqa: E402
 
 
@@ -34,26 +35,12 @@ def _connect() -> psycopg2.extensions.connection:
     return conn
 
 
-def _clear_eval_fixture(conn) -> int:
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT doc_id FROM documents WHERE source = %s", ("eval_fixture",))
-        doc_ids = [row[0] for row in cur.fetchall()]
-        for doc_id in doc_ids:
-            cur.execute("DELETE FROM embeddings WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE doc_id = %s)", (doc_id,))
-            cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
-            cur.execute("DELETE FROM documents WHERE doc_id = %s", (doc_id,))
-        conn.commit()
-        return len(doc_ids)
-    finally:
-        cur.close()
-
-
 def main() -> None:
     conn = _connect()
     try:
         create_db(conn)
-        removed = _clear_eval_fixture(conn)
+        # CLI seed always refreshes the full synthetic corpus.
+        removed = clear_eval_fixture(conn)
         if removed:
             print(f"MYDEBUG -> removed {removed} prior eval_fixture document(s)")
         n = seed_corpus_sync(conn)

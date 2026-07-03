@@ -58,3 +58,32 @@
   address: "300 Cedar Lane, Brookfield, FL 30003"
   latitude: 26.120
   longitude: -81.820
+
+500_palm_example_blvd_gulfview:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "500 Palm Example Boulevard, Gulfview, FL 30050"
+  latitude: 27.120
+  longitude: -82.450
+
+150_ocean_example_terrace_surfside:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "150 Ocean Example Terrace, Surfside, FL 30055"
+  latitude: 27.050
+  longitude: -82.380
+
+800_sand_example_rd_duneville:
+  storm_id: ian-2022
+  storm_name: Ian
+  storm_date_iso: "2022-09-28"
+  address: "800 Sand Example Road, Duneville, FL 30060"
+  latitude: 27.210
+  longitude: -82.520
+
+250_mango_example_ct_groveport:
+  address: "250 Mango Example Court, Groveport, FL 30065"
+  latitude: 26.880
+  longitude: -82.250
