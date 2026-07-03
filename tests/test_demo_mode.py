@@ -162,3 +162,63 @@ def test_demo_ask_quota_returns_429_on_ask():
         clear_api_overrides()
     assert resp.status_code == 429
     assert "Demo limit" in resp.json()["detail"]
+
+
+def test_extract_supabase_project_ref_from_database_url():
+    from app.demo_database import extract_supabase_project_ref_from_database_url
+
+    url = "postgresql://postgres.abc123xyz:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+    assert extract_supabase_project_ref_from_database_url(url) == "abc123xyz"
+
+
+def test_extract_supabase_project_ref_from_supabase_url():
+    from app.demo_database import extract_supabase_project_ref_from_supabase_url
+
+    assert extract_supabase_project_ref_from_supabase_url("https://abc123xyz.supabase.co") == "abc123xyz"
+
+
+def test_assert_demo_database_config_blocks_prod_ref():
+    from app.demo_database import assert_demo_database_config
+
+    db_url = "postgresql://postgres.prodref:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+    with patch("app.demo_database.DEMO_MODE", True):
+        with patch("app.demo_database.DATABASE_URL", db_url):
+            with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "prodref"):
+                with patch("app.demo_database.SUPABASE_URL", "https://demoref.supabase.co"):
+                    with patch("app.demo_database.GOOGLE_REFRESH_TOKEN", ""):
+                        with pytest.raises(RuntimeError, match="production Supabase project"):
+                            assert_demo_database_config()
+
+
+def test_assert_demo_database_config_blocks_google_refresh_token():
+    from app.demo_database import assert_demo_database_config
+
+    with patch("app.demo_database.DEMO_MODE", True):
+        with patch("app.demo_database.GOOGLE_REFRESH_TOKEN", "token"):
+            with pytest.raises(RuntimeError, match="GOOGLE_REFRESH_TOKEN"):
+                assert_demo_database_config()
+
+
+def test_assert_demo_database_content_blocks_non_eval_fixture():
+    from app.demo_database import assert_demo_database_content
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchall.return_value = [("google_drive", 12)]
+
+    with patch("app.demo_database.DEMO_MODE", True):
+        with pytest.raises(RuntimeError, match="non-synthetic documents"):
+            assert_demo_database_content(conn)
+
+
+def test_assert_demo_database_content_allows_eval_fixture_only():
+    from app.demo_database import assert_demo_database_content
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchall.return_value = []
+
+    with patch("app.demo_database.DEMO_MODE", True):
+        assert_demo_database_content(conn)

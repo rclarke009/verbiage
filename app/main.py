@@ -173,6 +173,9 @@ async def _warm_reranker(app):
 async def lifespan(app):
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL must be set for Postgres connection")
+    from app.demo_database import assert_demo_database_config, assert_demo_database_content
+
+    assert_demo_database_config()
     # Retry pool creation: Supabase free-tier projects pause after inactivity and may drop the first connection.
     last_error = None
     for attempt in range(1, 4):
@@ -181,6 +184,7 @@ async def lifespan(app):
             conn = db_pool.getconn()
             try:
                 create_db(conn)
+                assert_demo_database_content(conn)
             finally:
                 db_pool.putconn(conn)
             break

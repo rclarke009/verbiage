@@ -215,3 +215,7 @@ DEMO_GATE_MESSAGE_TEMPLATE = os.getenv(
     "DEMO_GATE_MESSAGE_TEMPLATE",
     "{feature} is available in the full version. Contact us for details.",
 ).strip()
+# Optional blocklist: set on the demo Render service to the prod Supabase project ref
+# (the segment in postgres.<ref> or https://<ref>.supabase.co). Demo startup fails if
+# DATABASE_URL points at this ref.
+PROD_SUPABASE_PROJECT_REF = os.getenv("PROD_SUPABASE_PROJECT_REF", "").strip().lower()

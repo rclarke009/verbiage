@@ -73,6 +73,7 @@ Render → **verbiage-demo** → **Environment**:
 | `SUPABASE_SERVICE_ROLE_KEY` | Demo service role |
 | `OPENAI_API_KEY` | Your key (set billing alerts in OpenAI) |
 | `PUBLIC_APP_URL` | `https://<demo-host>.onrender.com` |
+| `PROD_SUPABASE_PROJECT_REF` | Prod Supabase project ref (blocklist; startup fails if `DATABASE_URL` matches) |
 
 Non-secret defaults (from [`render.yaml`](../render.yaml) or set manually):
 
@@ -87,6 +88,8 @@ Non-secret defaults (from [`render.yaml`](../render.yaml) or set manually):
 - `LLM_TOKEN_LIMIT=5`
 
 **Do not set on demo:** `GOOGLE_*`, `SIGNUP_INVITE_CODE`.
+
+**Startup guard:** With `DEMO_MODE=1`, the app refuses to boot if `GOOGLE_REFRESH_TOKEN` is set, if `DATABASE_URL` matches `PROD_SUPABASE_PROJECT_REF`, if `DATABASE_URL` and `SUPABASE_URL` refer to different projects, or if the database contains documents whose `source` is not `eval_fixture`.
 
 ---
 

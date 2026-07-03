@@ -103,3 +103,5 @@ services:
         sync: false
       - key: PUBLIC_APP_URL
         sync: false
+      - key: PROD_SUPABASE_PROJECT_REF
+        sync: false
