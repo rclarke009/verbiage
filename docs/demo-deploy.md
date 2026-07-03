@@ -1,6 +1,6 @@
 # Demo deployment operator runbook
 
-Public Ask-only demo on a **second Render web service** with a **separate Supabase project** and the synthetic eval corpus (`tests/eval/corpus/`). Production is unchanged when prod env vars stay as they are today.
+Public Ask-only demo on a **second Render web service** with a **separate Supabase project** and the synthetic eval corpus (`app/demo_corpus/`). Production is unchanged when prod env vars stay as they are today.
 
 ## Render terminology
 
@@ -104,7 +104,7 @@ python scripts/seed_demo_db.py
 
 Or from Render **Shell** on `verbiage-demo` after first deploy.
 
-Seeds 12 fictional reports from `tests/eval/corpus/` — no real client data.
+Seeds 12 fictional reports from `app/demo_corpus/` — no real client data.
 
 On deploy, demo mode also auto-seeds when the database is empty or has fewer `eval_fixture` documents than the corpus directory. Set `DEMO_RESEED_CORPUS=1` to force a full refresh.
 

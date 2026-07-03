@@ -8,7 +8,7 @@ import os
 from psycopg2.extensions import connection as PgConnection
 
 from app.config import DEMO_MODE
-from tests.eval.seed import corpus_docs, seed_corpus_sync
+from app.demo_corpus.seed import corpus_docs, seed_corpus_sync
 
 logger = logging.getLogger(__name__)
 

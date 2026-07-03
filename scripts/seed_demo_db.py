@@ -23,7 +23,7 @@ if _REPO_ROOT not in sys.path:
 
 from app.db import create_db  # noqa: E402
 from app.demo_seed import clear_eval_fixture  # noqa: E402
-from tests.eval.seed import seed_corpus_sync  # noqa: E402
+from app.demo_corpus.seed import seed_corpus_sync  # noqa: E402
 
 
 def _connect() -> psycopg2.extensions.connection:
