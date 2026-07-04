@@ -280,11 +280,9 @@ async def lifespan(app):
     else:
         logger.info("Report Writer disabled (demo mode)")
 
-    app.state.tracer_provider = init_tracing(app)
-
     yield
 
-    shutdown_tracing(getattr(app.state, "tracer_provider", None))
+    shutdown_tracing()
 
     if report_writer_cm is not None:
         try:
@@ -326,6 +324,10 @@ if _cors:
     )
 
 app.add_middleware(PrometheusMiddleware)
+
+# Must run here (not in lifespan): FastAPIInstrumentor registers ASGI middleware and
+# must be in place before the first request so rag.* spans share the HTTP parent trace.
+init_tracing(app)
 
 
 def block_in_demo() -> None:

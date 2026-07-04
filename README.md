@@ -191,6 +191,8 @@ Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml)
 
 Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
 
+**Observability:** [docs/prod-observability.md](docs/prod-observability.md) — enable Prometheus metrics (recommended always on) and on-demand OpenTelemetry traces via Render env vars + restart; no code push required.
+
 **Worker setup checklist:** [docs/render-worker-setup.md](docs/render-worker-setup.md)
 
 #### Stuck photo analysis (ops)

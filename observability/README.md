@@ -162,4 +162,6 @@ print('expired:', p['exp'] < time.time())
 
 ## Grafana MCP / Grafana Cloud
 
-This folder is a **self-hosted** stack. For **Grafana Cloud**, import `grafana/dashboards/verbiage.json`, point a Prometheus/Mimir scraper at each deployment’s `/metrics` URL (with Bearer token when `METRICS_TOKEN` is set), and give each scrape job a distinct `job_name` (e.g. `verbiage-prod`, `verbiage-staging`). The dashboard **Environment** variable lists those jobs so one dashboard can show all projects at once or filter to one.
+This folder is a **self-hosted** stack. For **Grafana Cloud** and **Render prod** env vars (metrics always on, traces on demand, incident playbook), see **[docs/prod-observability.md](../docs/prod-observability.md)**.
+
+Summary: import `grafana/dashboards/verbiage.json`, point a Prometheus/Mimir scraper at each deployment’s `/metrics` URL (with Bearer token when `METRICS_TOKEN` is set), and give each scrape job a distinct `job_name` (e.g. `verbiage-prod`, `verbiage-staging`). The dashboard **Environment** variable lists those jobs so one dashboard can show all projects at once or filter to one.

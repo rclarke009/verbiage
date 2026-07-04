@@ -65,8 +65,13 @@ def init_tracing(app: FastAPI) -> TracerProvider | None:
     """
     Configure OTLP export and auto-instrument FastAPI + httpx.
 
-    Call once from app lifespan startup. Returns the provider (store on app.state for shutdown)
-    or None when tracing is disabled.
+    Call once at module import time, immediately after ``app = FastAPI(...)`` and any
+    ``add_middleware`` calls — **not** from lifespan startup. FastAPIInstrumentor registers
+    ASGI middleware; if that runs too late the HTTP parent span is never created and each
+    ``rag.*`` phase becomes its own orphan trace.
+
+    Returns the provider or None when tracing is disabled. Call ``shutdown_tracing()`` from
+    lifespan shutdown to flush spans on exit.
     """
     global _tracer_provider, _fastapi_instrumented, _httpx_instrumented
 
@@ -103,10 +108,13 @@ def init_tracing(app: FastAPI) -> TracerProvider | None:
     return provider
 
 
-def shutdown_tracing(provider: TracerProvider | None) -> None:
+def shutdown_tracing(provider: TracerProvider | None = None) -> None:
     """Flush and shut down the tracer provider on app shutdown."""
-    if provider is not None:
-        provider.shutdown()
+    global _tracer_provider
+    active = provider if provider is not None else _tracer_provider
+    if active is not None:
+        active.shutdown()
+        _tracer_provider = None
 
 
 def _get_tracer():

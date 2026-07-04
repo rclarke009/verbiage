@@ -22,9 +22,10 @@ flowchart TD
     Route -->|rag| Embed[rag.embed]
     Embed --> Retrieve[rag.retrieve]
     Retrieve --> Rerank[rag.rerank optional]
-    Rerank --> Gate{chunks empty?}
-    Gate -->|yes| Refuse[rag.refused=true]
+    Rerank --> Gate{best cosine < 0.5?}
+    Gate -->|yes| HardRefuse[hard refuse rag.refused=true]
     Gate -->|no| LLM[rag.llm]
+    LLM --> SoftRefuse[soft refuse in model text]
     Embed -.->|child| HttpxEmbed[httpx POST embed API]
     LLM -.->|child| HttpxLLM[httpx POST chat API]
 ```
@@ -39,7 +40,7 @@ Tests and production without a collector should pay **zero** export cost. Same p
 
 ### 2. Auto-instrument FastAPI + httpx; manual spans for RAG phases
 
-- **FastAPIInstrumentor** — creates the parent HTTP span (`POST /ask`) with route template labels. You don't maintain this by hand.
+- **FastAPIInstrumentor** — creates the parent HTTP span (`POST /ask`) with route template labels. You don't maintain this by hand. Must be called at **import time** (right after `app = FastAPI(...)`), not in lifespan startup — otherwise middleware is registered too late and each `rag.*` span becomes its own orphan trace.
 - **HTTPXClientInstrumentor** — creates child spans for OpenAI/Ollama HTTP calls inside [`app/llm_client.py`](../app/llm_client.py) and embedders **without editing those files**. High learning value, minimal diff.
 - **`rag_phase_span()`** — manual spans for domain-specific phases Prometheus already names. Only RAG code knows about retrieve modes, relevance gates, and rerank.
 
@@ -67,7 +68,7 @@ We attach **outcome metadata**, not content:
 | `rag.chunk_count` | Chunks after retrieve (before prompt trim) |
 | `rag.top_cosine` | Best cosine when available (gate signal) |
 | `rag.gate_blocked` | Relevance gate cleared chunks |
-| `rag.refused` | Fixed no-context reply returned |
+| `rag.refused` | **Hard** refusal only — fixed no-context reply before any LLM call |
 
 **Never on spans:** question text, chunk content, doc IDs — PII risk and cardinality explosion in Tempo.
 
@@ -93,10 +94,14 @@ When tracing is on, log records get `trace_id` and `span_id` fields. Future step
 | File | Role |
 |------|------|
 | [`app/monitoring/tracing.py`](../app/monitoring/tracing.py) | SDK setup, `rag_phase_span`, attribute helpers |
-| [`app/main.py`](../app/main.py) | `init_tracing` in lifespan; spans on ask paths |
+| [`app/main.py`](../app/main.py) | `init_tracing` at import time; spans on ask paths |
 | [`app/monitoring/metrics.py`](../app/monitoring/metrics.py) | Unchanged Prometheus helpers (kept alongside traces) |
 | [`observability/docker-compose.yml`](../observability/docker-compose.yml) | Collector + Tempo + existing Prometheus/Grafana |
 | [`observability/otel-collector-config.yaml`](../observability/otel-collector-config.yaml) | OTLP in → Tempo out |
+
+## Production (Render)
+
+For env vars, Grafana Cloud OTLP, and an incident playbook without a code push, see **[prod-observability.md](prod-observability.md)**.
 
 ## Local workflow
 
@@ -107,11 +112,174 @@ When tracing is on, log records get `trace_id` and `span_id` fields. Future step
    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
    METRICS_ENABLED=true   # optional but nice to compare both signals
    ```
-2. Restart the API on `:8000`.
+2. Restart the API (e.g. `uvicorn app.main:app --reload --port 8002`). Restart again after changing any `OTEL_*` var — tracing initializes at import time; editing `.env` alone does not trigger `--reload`.
 3. `cd observability && docker compose up -d`
 4. Ask a question in the app.
-5. Grafana → **Explore** → datasource **Tempo** → Search → `{resource.service.name="verbiage"}`.
+5. Grafana → **Explore** → datasource **Tempo** → **Search** → use a query that excludes metrics noise (see below). Set time range to **Last 15 minutes**.
 6. Open a trace: you should see `POST /ask` → `rag.embed` → httpx child → `rag.retrieve` → optional `rag.rerank` → `rag.llm` → httpx child.
+
+## Reading a trace (what you are seeing)
+
+A healthy streaming ask looks like this in the Tempo waterfall:
+
+```
+POST /ask/stream                    3.4s   ← HTTP parent (FastAPI auto-instrumentation)
+├── rag.embed                       584ms  ← embed the user's question
+│   └── POST                        581ms  ← httpx child → OpenAI embeddings API
+├── rag.retrieve                    140ms  ← hybrid/vector/lexical DB search
+├── rag.llm                         2.6s   ← generate answer (often dominates total time)
+│   └── POST                        505ms  ← httpx child → OpenAI chat/completions
+└── POST /ask/stream http send × N   ~µs   ← one tiny span per SSE chunk sent to browser
+```
+
+| Span | What it means |
+|------|---------------|
+| **Root (`POST /ask` or `POST /ask/stream`)** | Wall-clock for the whole request |
+| **`rag.embed`** | Embed phase; almost all time is usually the httpx **POST** child (OpenAI) |
+| **`rag.retrieve`** | Postgres/pgvector search — no httpx child (local DB) |
+| **`rag.rerank`** | Optional; nested under retrieve when `RERANK_ENABLED=1` and multiple candidates |
+| **`rag.llm`** | Full LLM phase: rate limit, call model, stream tokens, yield SSE events |
+| **POST under embed/llm** | Outbound HTTP to OpenAI/Ollama (httpx auto-instrumentation) |
+| **`http send` (many, stream only)** | FastAPI ASGI instrumentation for each SSE chunk — safe to ignore for latency analysis |
+
+**Key insight:** If `rag.llm` is much longer than its httpx **POST** child, most LLM time is token streaming and SSE delivery, not the initial HTTP round-trip.
+
+### Two kinds of "refusal" (different trace shapes)
+
+Verbiage can decline to answer in two ways. Traces look different — do not conflate them.
+
+| | **Hard refusal** (relevance gate) | **Soft refusal** (LLM) |
+|---|-----------------------------------|------------------------|
+| **When** | Empty chunks or best cosine &lt; `RAG_MIN_RELEVANCE_SCORE` (0.5) | Chunks pass the gate but prompt instructs model to reject irrelevant context |
+| **UI message** | *"I don't have relevant context to answer that question."* | *"No source documents contain that information."* |
+| **`rag.llm` span** | **Absent** — no LLM call, no `chat/completions` in logs | **Present** — LLM runs (~0.5–1s even for a short answer) |
+| **`rag.refused` attribute** | `true` on root HTTP span | **Not set** |
+| **Prometheus** | `rag_no_context_response_total` increments | Normal LLM phase metrics |
+
+**Hard refusal trace** (gate blocks before LLM — e.g. off-topic question like *"What is the recipe for chocolate chip cookies?"*):
+
+```
+POST /ask/stream     ~1–2s
+├── rag.embed
+├── rag.retrieve     ← rag.gate_blocked=true, low rag.top_cosine
+└── (no rag.llm)     ← rag.refused=true on root span
+```
+
+**Soft refusal trace** (retrieval passes gate, model rejects context — e.g. *"Summarize the earthquake and seismic foundation damage reported in the inspections."* on a storm-only library):
+
+```
+POST /ask/stream     ~3–5s
+├── rag.embed
+├── rag.retrieve     ← rag.chunk_count > 0, rag.top_cosine likely ≥ 0.5, no gate_blocked
+├── rag.llm          ← short LLM phase; model returns fixed "no source documents" line
+│   └── POST         ← chat/completions still called
+└── http send × N
+```
+
+Soft refusals are easy to mistake for hard refusals in the UI but **`span.rag.refused=true` will not match** — search by time range and confirm absence of `rag.llm`, or filter `{ ... && name="rag.llm" && duration < 1s }` for quick LLM rejections.
+
+**Nearby-storm trace** (structured lookup, no LLM):
+
+```
+POST /ask/stream     ← rag.route=nearby_storm; no rag.embed / rag.llm
+```
+
+Click individual spans to inspect attributes (`rag.chunk_count`, `rag.top_cosine`, etc.).
+
+## Useful Grafana Tempo queries (TraceQL)
+
+Grafana → **Explore** → datasource **Tempo** → **Search** → paste a query → set time range to **Last 15 minutes** (or **Last 1 hour**).
+
+### Avoid metrics noise
+
+Prometheus scrapes `/metrics` every ~15s and each scrape creates a `GET /metrics` trace. The default service filter alone will bury your `/ask` traces.
+
+| Goal | Query |
+|------|-------|
+| **All ask traffic (recommended default)** | `{ resource.service.name="verbiage" && name=~"POST /ask.*" }` |
+| Streaming asks only | `{ resource.service.name="verbiage" && name="POST /ask/stream" }` |
+| Sync asks only | `{ resource.service.name="verbiage" && name="POST /ask" }` |
+| Metrics scrapes only (debugging scrape volume) | `{ resource.service.name="verbiage" && name="GET /metrics" }` |
+
+### Find slow requests
+
+| Goal | Query |
+|------|-------|
+| Any ask slower than 3s | `{ resource.service.name="verbiage" && name=~"POST /ask.*" && duration > 3s }` |
+| Slow LLM phase | `{ resource.service.name="verbiage" && name="rag.llm" && duration > 2s }` |
+| Slow embed phase | `{ resource.service.name="verbiage" && name="rag.embed" && duration > 1s }` |
+| Slow retrieve phase | `{ resource.service.name="verbiage" && name="rag.retrieve" && duration > 500ms }` |
+
+When Prometheus shows a spike in `rag_phase_seconds{phase="llm"}`, use the **slow LLM** query above, open a trace, and compare `rag.llm` duration vs its httpx **POST** child.
+
+### Filter by RAG outcome (span attributes)
+
+Attributes are set in [`app/monitoring/tracing.py`](../app/monitoring/tracing.py) and ask handlers in [`app/main.py`](../app/main.py). Click a span in the trace view to inspect attributes if a query returns no results (you may not have generated that scenario yet).
+
+| Goal | Query |
+|------|-------|
+| Hard refusals only (`rag.refused` set) | `{ resource.service.name="verbiage" && span.rag.refused=true }` |
+| Relevance gate blocked chunks | `{ resource.service.name="verbiage" && span.rag.gate_blocked=true }` |
+| Short LLM phase (incl. soft refusals) | `{ resource.service.name="verbiage" && name="rag.llm" && duration < 1s }` |
+| Stream endpoint | `{ resource.service.name="verbiage" && span.rag.endpoint="stream" }` |
+| Sync endpoint | `{ resource.service.name="verbiage" && span.rag.endpoint="sync" }` |
+| Hybrid retrieval | `{ resource.service.name="verbiage" && span.rag.retrieval_mode="hybrid" }` |
+| Lexical retrieval | `{ resource.service.name="verbiage" && span.rag.retrieval_mode="lexical" }` |
+| Vector retrieval | `{ resource.service.name="verbiage" && span.rag.retrieval_mode="vector" }` |
+| Auto mode picked a route | `{ resource.service.name="verbiage" && span.rag.auto_routed=true }` |
+| Nearby-storm path (no LLM) | `{ resource.service.name="verbiage" && span.rag.route="nearby_storm" }` |
+
+### Errors
+
+| Goal | Query |
+|------|-------|
+| Any failed span | `{ resource.service.name="verbiage" && status=error }` |
+| Failed LLM phase | `{ resource.service.name="verbiage" && name="rag.llm" && status=error }` |
+| Failed embed | `{ resource.service.name="verbiage" && name="rag.embed" && status=error }` |
+
+### By phase name
+
+| Goal | Query |
+|------|-------|
+| Any embed span | `{ resource.service.name="verbiage" && name="rag.embed" }` |
+| Any retrieve span | `{ resource.service.name="verbiage" && name="rag.retrieve" }` |
+| Rerank ran | `{ resource.service.name="verbiage" && name="rag.rerank" }` |
+| Any LLM span | `{ resource.service.name="verbiage" && name="rag.llm" }` |
+
+### Tips
+
+- Traces appear **2–5 seconds** after the request (`BatchSpanProcessor` batching).
+- Restart the API after changing `OTEL_*` in `.env` — tracing initializes at import time.
+- If you know a `trace_id` from logs (`TraceContextFilter`), paste it into Tempo's **Trace ID** field instead of searching.
+
+## Trace tour (example questions)
+
+Use the UI or `/ask/stream` to generate traces. **`make eval` does not produce Tempo traces** — the eval runner calls the pipeline directly, not over HTTP.
+
+Gold questions live in [`tests/eval/gold_questions.yaml`](../tests/eval/gold_questions.yaml). Several are tuned for the **small eval corpus**, not a full production library — behavior on your indexed docs may differ (see table below).
+
+| Example question | Expected on full library | Trace shape | UI message |
+|------------------|--------------------------|-------------|------------|
+| Any normal storm question | Full answer with citations | embed → retrieve → llm (long) | Grounded answer |
+| *"What is the recipe for chocolate chip cookies?"* | Hard refusal | embed → retrieve → **no llm** | *I don't have relevant context…* |
+| *"Summarize the earthquake and seismic foundation damage…"* (`earthquake_foundation`) | **Soft** refusal (storm chunks may pass gate) | embed → retrieve → **llm** (short) | *No source documents contain…* |
+| *"What hail damage was found on roofs in Wyoming?"* (`wyoming_hail`) | **May answer** if library has Wyoming reports | Full pipeline on prod; hard refusal only on eval corpus | Grounded or hard refuse |
+| Address-specific gold Q (e.g. Gulfview hail) | Answer if that report is indexed | Full pipeline; inspect `rag.chunk_count` / `rag.top_cosine` on retrieve | Grounded answer |
+| `nearby_ian_sampletown` | Needs curl — `query_mode: nearby_storm` + `claim_context` | `rag.route=nearby_storm`; no embed/llm | Structured distance list |
+
+**Recommended 5-minute tour:**
+
+1. **Baseline** — any storm-damage question you know works → full pipeline (~3–5s, long `rag.llm`).
+2. **Hard refusal** — *"What is the recipe for chocolate chip cookies?"* → confirm UI says *I don't have relevant context…*, trace has **no `rag.llm`**, search `{ ... && span.rag.refused=true }`.
+3. **Soft refusal** — earthquake/seismic gold question → confirm UI says *No source documents contain…*, trace **has `rag.llm`** (~1s), **`rag.refused` not set**.
+4. **Compare retrieve attrs** — click `rag.retrieve` on step 2 vs 3: hard refusal shows `gate_blocked` / low `top_cosine`; soft shows chunks above gate.
+5. **Optional** — nearby-storm gold question via curl with payload from `gold_questions.yaml`.
+
+**What these examples will not show** (with current defaults):
+
+- `rag.rerank` — requires `RERANK_ENABLED=1`
+- `rag.retrieval_mode=lexical` — tour questions are natural language (3+ words) → auto routes to `hybrid`
+- Errors — examples expect success or clean refusal, not crashes
 
 ## Phase 2 ideas (not implemented yet)
 
@@ -124,4 +292,4 @@ When tracing is on, log records get `trace_id` and `span_id` fields. Future step
 
 - [OpenTelemetry Python docs](https://opentelemetry.io/docs/languages/python/)
 - [Grafana Tempo](https://grafana.com/docs/tempo/latest/)
-- Verbiage metrics runbook: [`observability/README.md`](README.md)
+- Verbiage metrics runbook: [`observability/README.md`](../observability/README.md)

@@ -1,17 +1,28 @@
 import { useReportSearch } from '../../hooks/useReportSearch'
 import { useCollectedPassages } from '../../hooks/useCollectedPassages'
+import { useAuth } from '../../context/AuthContext'
 import { ResultCard } from './ResultCard'
 import { CollectedPanel } from './CollectedPanel'
 import { ChatInput } from './ChatInput'
 
 export function ChatTab() {
+  const { publicConfig } = useAuth()
+  const demoMode = !!publicConfig?.demo_mode
   const { results, searching, search, removeResult, clearResults } = useReportSearch()
   const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages()
 
   return (
     <div style={{ display: 'flex', gap: 20, height: 'calc(100vh - 140px)' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <ChatInput onSubmit={search} disabled={searching} />
+        <ChatInput
+          onSubmit={search}
+          disabled={searching}
+          placeholder={
+            demoMode
+              ? 'Try: what causes shingle damage after hail? (Enter to search)'
+              : undefined
+          }
+        />
 
         {results.length === 0 ? (
           <div style={{ color: 'var(--app-text-subtle)', textAlign: 'center', marginTop: 40, fontSize: 14 }}>

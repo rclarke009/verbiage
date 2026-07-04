@@ -16,13 +16,21 @@ from app.monitoring.tracing import (
 
 @pytest.fixture(scope="module")
 def memory_exporter():
-    """One in-memory exporter for all tracing tests (OTel disallows provider override)."""
+    """Capture spans in memory; reuse provider if app.main already called init_tracing."""
     exporter = InMemorySpanExporter()
-    provider = TracerProvider(resource=Resource.create({"service.name": "test-verbiage"}))
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    processor = SimpleSpanProcessor(exporter)
+    provider = trace.get_tracer_provider()
+    owns_provider = False
+    if isinstance(provider, TracerProvider):
+        provider.add_span_processor(processor)
+    else:
+        provider = TracerProvider(resource=Resource.create({"service.name": "test-verbiage"}))
+        provider.add_span_processor(processor)
+        trace.set_tracer_provider(provider)
+        owns_provider = True
     yield exporter
-    provider.shutdown()
+    if owns_provider:
+        provider.shutdown()
 
 
 def test_rag_phase_span_disabled_is_noop(monkeypatch):

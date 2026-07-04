@@ -141,7 +141,8 @@ function AppInner() {
             border: '1px solid var(--app-border)',
           }}
         >
-          Demo — synthetic report library. Search is limited to 10 queries per hour
+          Demo — limited ingested library of sample inspection reports. Try a question
+          about shingle damage or hail. Search is limited to 10 queries per hour
           {demoAnonymous ? ' per visitor.' : ' per account.'}
         </p>
       )}
