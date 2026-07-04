@@ -8,6 +8,7 @@
 #
 # Sub-2GB instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
 # INGEST_WORKER_ENABLED=1 processes photo vision on this service (no second worker).
+# Liveness probe: /health (instant). Use /health/ready manually or in deep monitoring (Postgres).
 #
 # Secrets use sync: false — managed in the Render dashboard.
 services:
@@ -15,7 +16,7 @@ services:
     name: rag-document-analysis-backend
     runtime: docker
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health/ready
+    healthCheckPath: /health
     envVars:
       - key: RERANK_ENABLED
         value: "0"
@@ -62,7 +63,7 @@ services:
     name: verbiage-demo
     runtime: docker
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health/ready
+    healthCheckPath: /health
     plan: starter
     envVars:
       - key: DEMO_MODE

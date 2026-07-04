@@ -16,7 +16,6 @@ from app.db import (
     finish_ingest_job,
     get_document_index_by_doc_ids,
     get_ingest_job_status,
-    get_valid_conn,
     is_ingest_batch_cancelled,
     reclaim_stale_ingest_jobs,
     refresh_batch_counts,
@@ -28,7 +27,11 @@ from app.drive_client import (
     drive_source_url_for_mime,
     fetch_drive_file_async,
 )
-from app.ingest_core import ingest_new_document, reingest_existing_document
+from app.ingest_core import (
+    _run_db,
+    ingest_new_document_pooled,
+    reingest_existing_document_pooled,
+)
 from app.models import ChunkingOptions, IngestResponse
 from app.report_writer.queries import (
     get_claim,
@@ -49,16 +52,16 @@ def _ingest_response_to_result(response: IngestResponse) -> dict[str, Any]:
     return response.model_dump()
 
 
-def _should_skip_cancelled_job(pool, job: dict[str, Any]) -> bool:
+async def _should_skip_cancelled_job(pool, job: dict[str, Any]) -> bool:
     """True when the job or batch was cancelled before expensive work."""
-    conn = get_valid_conn(pool)
-    try:
+
+    def _check(conn) -> bool:
         status = get_ingest_job_status(conn, job["id"])
         if status != "running":
             return True
         return is_ingest_batch_cancelled(conn, job["batch_id"])
-    finally:
-        pool.putconn(conn)
+
+    return await _run_db(pool, _check)
 
 
 async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict | None, str | None]:
@@ -70,7 +73,7 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
     payload = job["payload"] or {}
     drive_file_id = payload.get("drive_file_id") or doc_id
 
-    if _should_skip_cancelled_job(pool, job):
+    if await _should_skip_cancelled_job(pool, job):
         return "skipped", {"doc_id": doc_id, "reason": "batch_cancelled"}, None
 
     try:
@@ -81,19 +84,24 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
     source_url = drive_source_url_for_mime(doc.doc_id, doc.mime_type)
     drive_modified = doc.source_modified_at
 
-    if _should_skip_cancelled_job(pool, job):
+    if await _should_skip_cancelled_job(pool, job):
         return "skipped", {"doc_id": doc_id, "reason": "batch_cancelled"}, None
 
-    conn = get_valid_conn(pool)
+    def _already_indexed(conn) -> bool:
+        if not doc_exist(conn, doc_id):
+            return False
+        index_meta = get_document_index_by_doc_ids(conn, [doc_id])
+        source_modified_at = index_meta.get(doc_id, (None, 0))[0]
+        status = compute_index_status(True, drive_modified, source_modified_at)
+        return status == "indexed"
+
     try:
-        if doc_exist(conn, doc_id):
-            index_meta = get_document_index_by_doc_ids(conn, [doc_id])
-            source_modified_at = index_meta.get(doc_id, (None, 0))[0]
-            status = compute_index_status(True, drive_modified, source_modified_at)
-            if status == "indexed":
-                return "skipped", {"doc_id": doc_id, "reason": "already_indexed"}, None
-            result = await reingest_existing_document(
-                conn,
+        if await _run_db(pool, _already_indexed):
+            return "skipped", {"doc_id": doc_id, "reason": "already_indexed"}, None
+
+        if await _run_db(pool, lambda conn: doc_exist(conn, doc_id)):
+            result = await reingest_existing_document_pooled(
+                pool,
                 doc.doc_id,
                 doc.title,
                 doc.source,
@@ -104,8 +112,8 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
                 source_filename=doc.title,
             )
         else:
-            result = await ingest_new_document(
-                conn,
+            result = await ingest_new_document_pooled(
+                pool,
                 doc.doc_id,
                 doc.title,
                 doc.source,
@@ -115,14 +123,17 @@ async def process_google_drive_job(pool, job: dict[str, Any]) -> tuple[str, dict
                 source_url=source_url,
                 source_filename=doc.title,
             )
-        conn.commit()
         return "succeeded", _ingest_response_to_result(result), None
     except Exception as e:
-        conn.rollback()
         logger.exception("Ingest job %s failed for %s", job["id"], doc_id)
         return "failed", None, str(e)
-    finally:
-        pool.putconn(conn)
+
+
+async def _set_image_status(pool, image_id: str, status: str) -> None:
+    def _update(conn) -> None:
+        update_image_analysis_status(conn, image_id, status)
+
+    await _run_db(pool, _update)
 
 
 async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str, dict | None, str | None]:
@@ -135,29 +146,31 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
     if not claim_id or not user_id or not image_id:
         return "failed", None, "Missing claim_id, user_id, or image_id in payload"
 
-    conn = get_valid_conn(pool)
-    try:
+    def _load_image(conn) -> dict[str, Any] | None:
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
-            return "failed", None, "Claim not found or access denied"
+            raise ValueError("Claim not found or access denied")
         img = get_claim_image(conn, image_id)
         if not img:
-            return "failed", None, f"Image {image_id} not found"
+            raise ValueError(f"Image {image_id} not found")
         if img.get("vision_analysis"):
-            return "skipped", {"image_id": image_id, "reason": "already_analyzed"}, None
-
+            return None
         update_image_analysis_status(conn, image_id, "running")
-        conn.commit()
-    finally:
-        pool.putconn(conn)
+        return dict(img)
 
-    if _should_skip_cancelled_job(pool, job):
-        conn_skip = get_valid_conn(pool)
-        try:
-            update_image_analysis_status(conn_skip, image_id, "pending")
-            conn_skip.commit()
-        finally:
-            pool.putconn(conn_skip)
+    try:
+        img = await _run_db(pool, _load_image)
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("Image ") and "not found" in msg:
+            return "failed", None, msg
+        return "failed", None, msg
+
+    if img is None:
+        return "skipped", {"image_id": image_id, "reason": "already_analyzed"}, None
+
+    if await _should_skip_cancelled_job(pool, job):
+        await _set_image_status(pool, image_id, "pending")
         return "skipped", {"image_id": image_id, "reason": "batch_cancelled"}, None
 
     try:
@@ -172,19 +185,13 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
                 return "failed", None, "Image has no drive_file_id or storage_path"
             data = await asyncio.to_thread(read_claim_image_bytes, storage_path)
             mime = img.get("content_type") or "image/jpeg"
-        if _should_skip_cancelled_job(pool, job):
-            conn_skip = get_valid_conn(pool)
-            try:
-                update_image_analysis_status(conn_skip, image_id, "pending")
-                conn_skip.commit()
-            finally:
-                pool.putconn(conn_skip)
+        if await _should_skip_cancelled_job(pool, job):
+            await _set_image_status(pool, image_id, "pending")
             return "skipped", {"image_id": image_id, "reason": "batch_cancelled"}, None
         result = await analyze_image_bytes(data, mime)
         result["image_id"] = image_id
 
-        conn2 = get_valid_conn(pool)
-        try:
+        def _persist(conn) -> None:
             if not img.get("storage_path"):
                 path = storage_path_for(
                     user_id,
@@ -193,19 +200,13 @@ async def process_claim_photo_vision_job(pool, job: dict[str, Any]) -> tuple[str
                     img.get("filename") or f"{image_id}.jpg",
                 )
                 write_claim_image(path, data)
-                update_image_storage_path(conn2, image_id, path, len(data))
-            update_image_vision_analysis(conn2, image_id, result)
-            conn2.commit()
-        finally:
-            pool.putconn(conn2)
+                update_image_storage_path(conn, image_id, path, len(data))
+            update_image_vision_analysis(conn, image_id, result)
+
+        await _run_db(pool, _persist)
         return "succeeded", {"image_id": image_id}, None
     except Exception as e:
-        conn3 = get_valid_conn(pool)
-        try:
-            update_image_analysis_status(conn3, image_id, "failed")
-            conn3.commit()
-        finally:
-            pool.putconn(conn3)
+        await _set_image_status(pool, image_id, "failed")
         logger.exception("Vision job failed for image %s", image_id)
         return "failed", None, str(e)
 
@@ -222,13 +223,30 @@ async def process_ingest_job(pool, job: dict[str, Any]) -> None:
     else:
         terminal, result, error = "failed", None, f"Unknown job kind: {kind}"
 
-    conn = get_valid_conn(pool)
-    try:
+    def _finish(conn) -> None:
         finish_ingest_job(conn, job_id, terminal, result=result, error=error)
         refresh_batch_counts(conn, batch_id)
-        conn.commit()
-    finally:
-        pool.putconn(conn)
+
+    await _run_db(pool, _finish)
+
+
+async def _claim_next_job(pool) -> dict[str, Any] | None:
+    def _claim(conn) -> dict[str, Any] | None:
+        job = claim_next_ingest_job(conn)
+        if job:
+            conn.commit()
+        else:
+            conn.rollback()
+        return job
+
+    return await _run_db(pool, _claim, commit=False)
+
+
+async def _reclaim_stale_jobs(pool) -> int:
+    def _reclaim(conn) -> int:
+        return reclaim_stale_ingest_jobs(conn, max_age_minutes=STALE_JOB_MINUTES)
+
+    return await _run_db(pool, _reclaim)
 
 
 async def ingest_worker_loop(pool) -> None:
@@ -237,40 +255,21 @@ async def ingest_worker_loop(pool) -> None:
         logger.info("Ingest worker disabled (INGEST_WORKER_ENABLED=0)")
         return
 
-    conn = get_valid_conn(pool)
-    try:
-        reclaimed = reclaim_stale_ingest_jobs(conn, max_age_minutes=STALE_JOB_MINUTES)
-        conn.commit()
-        if reclaimed:
-            logger.info("Reclaimed %s stale ingest job(s) on worker startup", reclaimed)
-    finally:
-        pool.putconn(conn)
+    reclaimed = await _reclaim_stale_jobs(pool)
+    if reclaimed:
+        logger.info("Reclaimed %s stale ingest job(s) on worker startup", reclaimed)
 
     logger.info("Ingest worker started")
     last_reclaim = time.monotonic()
     while True:
         try:
             if time.monotonic() - last_reclaim >= 600:
-                conn_reclaim = get_valid_conn(pool)
-                try:
-                    reclaimed = reclaim_stale_ingest_jobs(conn_reclaim, max_age_minutes=STALE_JOB_MINUTES)
-                    conn_reclaim.commit()
-                    if reclaimed:
-                        logger.info("Reclaimed %s stale ingest job(s)", reclaimed)
-                finally:
-                    pool.putconn(conn_reclaim)
+                reclaimed = await _reclaim_stale_jobs(pool)
+                if reclaimed:
+                    logger.info("Reclaimed %s stale ingest job(s)", reclaimed)
                 last_reclaim = time.monotonic()
 
-            conn = get_valid_conn(pool)
-            try:
-                job = claim_next_ingest_job(conn)
-                if job:
-                    conn.commit()
-                else:
-                    conn.rollback()
-            finally:
-                pool.putconn(conn)
-
+            job = await _claim_next_job(pool)
             if not job:
                 await asyncio.sleep(0.5)
                 continue
@@ -279,13 +278,12 @@ async def ingest_worker_loop(pool) -> None:
                 await process_ingest_job(pool, job)
             except Exception as e:
                 logger.error("Unexpected error processing ingest job %s: %s", job.get("id"), e)
-                conn2 = get_valid_conn(pool)
-                try:
-                    finish_ingest_job(conn2, job["id"], "failed", error=str(e))
-                    refresh_batch_counts(conn2, job["batch_id"])
-                    conn2.commit()
-                finally:
-                    pool.putconn(conn2)
+
+                def _fail(conn) -> None:
+                    finish_ingest_job(conn, job["id"], "failed", error=str(e))
+                    refresh_batch_counts(conn, job["batch_id"])
+
+                await _run_db(pool, _fail)
         except Exception as e:
             logger.error("Ingest worker loop error: %s", e)
             await asyncio.sleep(1.0)

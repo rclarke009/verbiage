@@ -14,6 +14,7 @@ from app.db import (
     delete_chunks_for_doc,
     get_document_breadcrumb_fields,
     get_document_geo_storm_fields,
+    get_valid_conn,
     insert_chunk,
     insert_embedding,
     update_document_geo_storm_metadata,
@@ -148,3 +149,76 @@ async def reindex_document(
     """Re-chunk and re-embed from stored full_text without re-upload."""
     opts = chunking_options or ChunkingOptions()
     return await index_document(conn, doc_id, full_text, opts, embedder=embedder)
+
+
+async def index_document_pooled(
+    pool,
+    doc_id: str,
+    text: str,
+    chunking_options: ChunkingOptions,
+    embedder: HttpEmbedder | None = None,
+) -> IngestResponse:
+    """
+    Like index_document but returns the DB connection to the pool before embedding.
+    Used by the background ingest worker so long embed calls do not hold pool slots.
+    """
+    embedder = embedder or HttpEmbedder()
+    opts = chunking_options
+
+    conn = await asyncio.to_thread(get_valid_conn, pool)
+    try:
+        title, _, _ = get_document_breadcrumb_fields(conn, doc_id)
+        await _refresh_document_geo_metadata(conn, doc_id, text, title)
+        chunks = await asyncio.to_thread(_chunk_and_insert, conn, doc_id, text, opts)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        await asyncio.to_thread(pool.putconn, conn)
+
+    try:
+        vectors = await embedder.embed_many([c.content for c in chunks])
+    except Exception:
+        conn = await asyncio.to_thread(get_valid_conn, pool)
+        try:
+            delete_chunks_for_doc(conn, doc_id)
+            conn.commit()
+        finally:
+            await asyncio.to_thread(pool.putconn, conn)
+        raise
+
+    conn = await asyncio.to_thread(get_valid_conn, pool)
+    try:
+        for chunk, vector in zip(chunks, vectors):
+            chunk_id = f"{doc_id}:{chunk.chunk_index}"
+            insert_embedding(conn, chunk_id, embedder.model, vector, embedder.dim)
+        update_document_indexing_metadata(conn, doc_id, opts.model_dump(), embedder.model)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        await asyncio.to_thread(pool.putconn, conn)
+
+    chars_total, toks_estimate = embedding_metering([c.content for c in chunks])
+    return IngestResponse(
+        doc_id=doc_id,
+        num_chunks=len(chunks),
+        embedding_model=embedder.model,
+        dim=embedder.dim,
+        embedding_chars_total=chars_total,
+        embedding_tokens_estimate=toks_estimate,
+    )
+
+
+async def reindex_document_pooled(
+    pool,
+    doc_id: str,
+    full_text: str,
+    chunking_options: ChunkingOptions | None = None,
+    embedder: HttpEmbedder | None = None,
+) -> IngestResponse:
+    """Re-chunk and re-embed without holding a pool connection during embedding."""
+    opts = chunking_options or ChunkingOptions()
+    return await index_document_pooled(pool, doc_id, full_text, opts, embedder=embedder)

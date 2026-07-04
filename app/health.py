@@ -4,6 +4,8 @@ Health probes: liveness (/health), readiness (DB), deep (DB + embed + optional L
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import psycopg2
 from fastapi.responses import JSONResponse
@@ -15,6 +17,7 @@ from app.config import (
     EMBED_MODEL,
     HEALTH_DEEP_CHECK_LLM,
     HEALTH_DEEP_TIMEOUT,
+    HEALTH_READY_DB_TIMEOUT,
     LLM_BASE_URL,
     OPENAI_API_KEY,
 )
@@ -129,6 +132,21 @@ def check_reranker(request: Request) -> tuple[bool, str]:
 
 def build_ready_response(request: Request) -> JSONResponse:
     db_ok, db_msg = check_database(request)
+    rr_ok, rr_msg = check_reranker(request)
+    ok = db_ok and rr_ok
+    body = {"ready": ok, "checks": {"database": db_msg, "reranker": rr_msg}}
+    return JSONResponse(status_code=200 if ok else 503, content=body)
+
+
+async def build_ready_response_async(request: Request) -> JSONResponse:
+    """Readiness with a bounded DB wait so pool exhaustion does not hang probes."""
+    try:
+        db_ok, db_msg = await asyncio.wait_for(
+            asyncio.to_thread(check_database, request),
+            timeout=HEALTH_READY_DB_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        db_ok, db_msg = False, "database check timed out"
     rr_ok, rr_msg = check_reranker(request)
     ok = db_ok and rr_ok
     body = {"ready": ok, "checks": {"database": db_msg, "reranker": rr_msg}}

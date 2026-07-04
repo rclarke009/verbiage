@@ -99,7 +99,7 @@ from app.demo import (
     demo_open_signup_enabled,
     is_demo_mode,
 )
-from app.health import build_deep_response, build_ready_response
+from app.health import build_deep_response, build_ready_response_async
 from app.config import (
     DATABASE_URL,
     DEMO_GATE_MESSAGE_TEMPLATE,
@@ -1416,8 +1416,8 @@ def health():
 
 
 @app.get("/health/ready")
-def health_ready(request: Request):
-    return build_ready_response(request)
+async def health_ready(request: Request):
+    return await build_ready_response_async(request)
 
 
 @app.get("/health/deep")
