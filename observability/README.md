@@ -1,6 +1,8 @@
-# Verbiage observability (Prometheus + Grafana)
+# Verbiage observability (Prometheus + Grafana + Tempo)
 
-Local Docker stack that scrapes Verbiage **`GET /metrics`** and shows a pre-provisioned **Verbiage RAG** dashboard.
+Local Docker stack that scrapes Verbiage **`GET /metrics`** and receives **OpenTelemetry traces** via OTLP.
+
+**Learning guide:** see [docs/otel-learning.md](../docs/otel-learning.md) for why we chose this architecture, how spans map to the RAG pipeline, and design trade-offs.
 
 ## Prerequisites
 
@@ -8,6 +10,16 @@ Local Docker stack that scrapes Verbiage **`GET /metrics`** and shows a pre-prov
    - `METRICS_ENABLED=true` in `.env`
    - Restart the API after changing env vars
 2. **Docker** (Docker Desktop on macOS is fine)
+
+For **tracing**, also set in `.env`:
+
+```bash
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=verbiage
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+Restart the API after enabling tracing.
 
 Verify metrics:
 
@@ -26,16 +38,20 @@ cd observability
 docker compose up -d
 ```
 
-| Service     | URL                         |
-|------------|-----------------------------|
-| Grafana    | http://localhost:3000       |
-| Prometheus | http://localhost:9090       |
+| Service          | URL                         |
+|------------------|-----------------------------|
+| Grafana          | http://localhost:3000       |
+| Prometheus       | http://localhost:9090       |
+| OTel Collector   | http://localhost:4318 (OTLP HTTP) |
+| Tempo            | http://localhost:3200       |
 
 Grafana login: **admin** / **admin** (change password on first login).
 
 **Prometheus:** Status → Targets → `verbiage-local` should be **UP**.
 
 **Grafana:** Dashboards → folder **Verbiage** → **Verbiage RAG**.
+
+**Traces:** Explore → datasource **Tempo** → Search traces → filter `{resource.service.name="verbiage"}`. After an `/ask`, open a trace to see `rag.embed` → `rag.retrieve` → `rag.llm` with httpx child spans for upstream API calls.
 
 Use the **Environment** dropdown (top of dashboard) to filter or compare scrape targets. Each Prometheus `job_name` appears as an environment (`verbiage-local`, `verbiage-prod`, etc.). Select **All** to aggregate every target; pick one or more jobs to compare side by side.
 

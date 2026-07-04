@@ -134,6 +134,15 @@ from app.monitoring.metrics import (
     record_retrieval_scores,
     record_stream_retrieval_failed,
 )
+from app.monitoring.tracing import (
+    init_tracing,
+    rag_phase_span,
+    set_refused_attribute,
+    set_retrieval_attributes,
+    set_route_attribute,
+    shutdown_tracing,
+)
+from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 logging.basicConfig(
@@ -271,7 +280,11 @@ async def lifespan(app):
     else:
         logger.info("Report Writer disabled (demo mode)")
 
+    app.state.tracer_provider = init_tracing(app)
+
     yield
+
+    shutdown_tracing(getattr(app.state, "tracer_provider", None))
 
     if report_writer_cm is not None:
         try:
@@ -1022,53 +1035,84 @@ async def _retrieve_for_ask(
     the existing zero-chunk path in _ask_prompt_from_chunks turns it into a refusal.
     Pure lexical lookups have no cosine and are never gated.
     """
-    top_k = ask_request.top_k
-    # Pull a wider candidate pool when reranking; otherwise retrieve exactly top_k as before.
-    pool_k = max(top_k * 4, 20) if reranker is not None else top_k
+    with rag_phase_span("retrieve", endpoint=rag_endpoint) as retrieve_span:
+        top_k = ask_request.top_k
+        pool_k = max(top_k * 4, 20) if reranker is not None else top_k
+        auto_routed = ask_request.retrieval_mode == "auto"
+        resolved_mode = ask_request.retrieval_mode
+        gate_blocked = False
+        top_cosine: float | None = None
 
-    def _hybrid() -> list[RetrievedChunk]:
-        fused = retrieve_top_k_hybrid(
-            conn, query_vec, ask_request.question, pool_k,
-            ask_request.doc_id, embedding_model=embedding_model,
-        )
-        cosine_scores = [h.cosine_score for h in fused if h.cosine_score is not None]
-        record_hybrid_scores(
-            rag_endpoint, cosine_scores,
-            [h.lexical_score for h in fused if h.lexical_score is not None],
-            [h.rrf_score for h in fused],
-        )
-        if _relevance_gate_blocks(cosine_scores):   # gate BEFORE rerank, on cosine
-            return []
-        return [h.chunk for h in fused]
+        def _note_cosine(cosine_scores: list[float]) -> None:
+            nonlocal gate_blocked, top_cosine
+            if cosine_scores:
+                top_cosine = max(cosine_scores)
+            if _relevance_gate_blocks(cosine_scores):
+                gate_blocked = True
 
-    def _run_retrieval() -> list[RetrievedChunk]:
-        mode = ask_request.retrieval_mode
-        auto_routed = mode == "auto"
-        if auto_routed:
-            mode = resolve_auto_mode(ask_request.question)
-        if mode == "hybrid":
-            return _hybrid()
-        if mode == "lexical":
-            candidates = retrieve_top_k_lexical(
-                conn, lexical_query_text(ask_request.question), pool_k, ask_request.doc_id,
+        def _hybrid() -> list[RetrievedChunk]:
+            nonlocal resolved_mode
+            resolved_mode = "hybrid"
+            fused = retrieve_top_k_hybrid(
+                conn, query_vec, ask_request.question, pool_k,
+                ask_request.doc_id, embedding_model=embedding_model,
             )
-            if not candidates and auto_routed:
-                return _hybrid()
-            record_lexical_scores(rag_endpoint, [c.score for c in candidates])
-            return candidates
-        candidates = retrieve_top_k(
-            conn, query_vec, pool_k, ask_request.doc_id, embedding_model=embedding_model,
-        )
-        record_retrieval_scores(rag_endpoint, [c.score for c in candidates])
-        if _relevance_gate_blocks([c.score for c in candidates]):
-            return []
-        return candidates
+            cosine_scores = [h.cosine_score for h in fused if h.cosine_score is not None]
+            record_hybrid_scores(
+                rag_endpoint, cosine_scores,
+                [h.lexical_score for h in fused if h.lexical_score is not None],
+                [h.rrf_score for h in fused],
+            )
+            _note_cosine(cosine_scores)
+            if gate_blocked:
+                return []
+            return [h.chunk for h in fused]
 
-    # Sync psycopg2 retrieval -> off the event loop so concurrent /ask stay responsive
-    candidates = await asyncio.to_thread(_run_retrieval)
-    # Single shared rerank+trim step — gate has already run, so a blocked
-    # retrieval is [] here and stays [] (→ refusal path downstream).
-    return await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
+        def _run_retrieval() -> list[RetrievedChunk]:
+            nonlocal resolved_mode, auto_routed
+            mode = ask_request.retrieval_mode
+            auto_routed = mode == "auto"
+            if auto_routed:
+                mode = resolve_auto_mode(ask_request.question)
+            resolved_mode = mode
+            if mode == "hybrid":
+                return _hybrid()
+            if mode == "lexical":
+                candidates = retrieve_top_k_lexical(
+                    conn, lexical_query_text(ask_request.question), pool_k, ask_request.doc_id,
+                )
+                if not candidates and auto_routed:
+                    return _hybrid()
+                record_lexical_scores(rag_endpoint, [c.score for c in candidates])
+                return candidates
+            candidates = retrieve_top_k(
+                conn, query_vec, pool_k, ask_request.doc_id, embedding_model=embedding_model,
+            )
+            record_retrieval_scores(rag_endpoint, [c.score for c in candidates])
+            _note_cosine([c.score for c in candidates])
+            if gate_blocked:
+                return []
+            return candidates
+
+        candidates = await asyncio.to_thread(_run_retrieval)
+        set_retrieval_attributes(
+            retrieve_span,
+            retrieval_mode=resolved_mode,
+            auto_routed=auto_routed,
+            chunk_count=len(candidates),
+            top_cosine=top_cosine,
+            gate_blocked=gate_blocked if gate_blocked else None,
+        )
+
+        if candidates and reranker is not None and len(candidates) > 1:
+            with rag_phase_span("rerank", endpoint=rag_endpoint) as rerank_span:
+                ranked = await _rerank_chunks(
+                    ask_request.question, candidates, top_k, reranker,
+                )
+                if rerank_span is not None:
+                    rerank_span.set_attribute("rag.chunk_count", len(ranked))
+                return ranked
+        return await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
 
 
 def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
@@ -1110,13 +1154,15 @@ async def ask(
             ask_request.query_mode,
             ask_request.claim_context,
         )
+        set_route_attribute(trace.get_current_span(), route)
         if route == "nearby_storm":
             return await _nearby_storm_ask(conn, ask_request)
 
         embedder = HttpEmbedder()
         logger.info("ask: embedding query (1 text)")
         t_embed = time.perf_counter()
-        query_vectors = await embedder.embed_many([ask_request.question])
+        with rag_phase_span("embed", endpoint=rag_endpoint):
+            query_vectors = await embedder.embed_many([ask_request.question])
         record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         logger.info("ask: embedding succeeded")
         query_vec = query_vectors[0]
@@ -1131,6 +1177,7 @@ async def ask(
         prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
         if prompt is None:
             record_no_context_response(rag_endpoint)
+            set_refused_attribute(trace.get_current_span(), True)
             answer = "I don't have relevant context to answer that question."
             return AskResponse(answer=answer, top_chunks=[])
 
@@ -1138,7 +1185,8 @@ async def ask(
         await rate_limiter.acquire()
         logger.info("ask: rate limit acquired, calling LLM")
         t_llm = time.perf_counter()
-        answer = await llm_client.answer_with_context(prompt)
+        with rag_phase_span("llm", endpoint=rag_endpoint):
+            answer = await llm_client.answer_with_context(prompt)
         record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
         logger.info("ask: LLM answered successfully")
         return AskResponse(answer=answer, top_chunks=top_chunks)
@@ -1164,6 +1212,7 @@ async def ask_stream(
             ask_request.query_mode,
             ask_request.claim_context,
         )
+        set_route_attribute(trace.get_current_span(), route)
         if route == "nearby_storm":
             answer, top_chunks = await retrieve_nearby_storm_chunks(conn, ask_request)
             if answer is None:
@@ -1178,7 +1227,8 @@ async def ask_stream(
         embedder = HttpEmbedder()
         logger.info("ask_stream: embedding query (1 text)")
         t_embed = time.perf_counter()
-        query_vectors = await embedder.embed_many([ask_request.question])
+        with rag_phase_span("embed", endpoint=rag_endpoint):
+            query_vectors = await embedder.embed_many([ask_request.question])
         record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
         query_vec = query_vectors[0]
         t_retrieve = time.perf_counter()
@@ -1212,6 +1262,7 @@ async def ask_stream(
 
         if prompt is None:
             record_no_context_response(rag_endpoint)
+            set_refused_attribute(trace.get_current_span(), True)
             msg = json.dumps({"token": "I don't have relevant context to answer that question."})
             yield f"event: token\ndata: {msg}\n\n"
             yield f"event: sources\ndata: {json.dumps({'sources': [], 'chunks_used': 0})}\n\n"
@@ -1223,9 +1274,10 @@ async def ask_stream(
         await rate_limiter.acquire()
         t_llm = time.perf_counter()
         try:
-            async for delta in llm_client.answer_with_context_stream(prompt):
-                if delta:
-                    yield f"event: token\ndata: {json.dumps({'token': delta})}\n\n"
+            with rag_phase_span("llm", endpoint=rag_endpoint):
+                async for delta in llm_client.answer_with_context_stream(prompt):
+                    if delta:
+                        yield f"event: token\ndata: {json.dumps({'token': delta})}\n\n"
         except asyncio.CancelledError:
             raise
         except LLMRateLimitedError:

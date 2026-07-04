@@ -45,7 +45,7 @@ Optional polish: add UI screenshots under [`docs/screenshots/`](docs/screenshots
 - **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
 - **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information"), plus a **pre-LLM relevance gate** — off-corpus questions are refused before any LLM call when the best chunk's cosine similarity falls below `RAG_MIN_RELEVANCE_SCORE` (deterministic, zero-spend refusals)
 - **Production reliability**: Durable **Postgres-backed ingest job queue** with a background worker (batch enqueue + status polling), input validation, and structured logging
-- **Observability**: Optional Prometheus `/metrics`, including a low-quality-retrieval counter (`rag_retrieval_low_quality_total`) for alerting when top-1 similarity is weak
+- **Observability**: Optional Prometheus `/metrics`, including a low-quality-retrieval counter (`rag_retrieval_low_quality_total`) for alerting when top-1 similarity is weak; optional OpenTelemetry traces exported to Grafana Tempo (local learning stack in `observability/`)
 - **Flexible LLM backend**: OpenAI (production) or Ollama (local/dev); PostgreSQL (Supabase) in production or SQLite for local dev
 - **Access control**: Supabase JWT on protected routes, with **closed signup** via invite code or email allowlist and a password-reset flow
 - **Shared library**: All signed-in users see the same document set; list, filter, delete

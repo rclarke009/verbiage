@@ -172,6 +172,18 @@ RAG_SIMILARITY_ALERT_THRESHOLD: float | None = (
     float(_raw_sim_thresh) if _raw_sim_thresh else None
 )
 
+# OpenTelemetry tracing: export spans via OTLP when OTEL_ENABLED; off by default (tests/CI).
+def tracing_enabled() -> bool:
+    """True when OTEL_ENABLED env is set (read each time for tests)."""
+    return os.getenv("OTEL_ENABLED", "").lower() in ("1", "true", "yes")
+
+
+OTEL_ENABLED = tracing_enabled()
+OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "verbiage").strip()
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"
+).strip().rstrip("/")
+
 # Visual Crossing Timeline API — historical wind for Report Writer weather section.
 VISUAL_CROSSING_API_KEY = os.getenv("VISUAL_CROSSING_API_KEY", "").strip()
 

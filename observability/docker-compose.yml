@@ -1,10 +1,11 @@
-# Prometheus + Grafana for Verbiage /metrics.
-# Prereq: Verbiage API with METRICS_ENABLED=true listening on host :8000.
+# Prometheus + Grafana (+ Tempo tracing) for Verbiage /metrics and OTLP traces.
+# Prereq: Verbiage API with METRICS_ENABLED=true and OTEL_ENABLED=true on host :8000.
 #
 #   cd observability && docker compose up -d
 #
 # Grafana:     http://localhost:3000  (admin / admin — change on first login)
 # Prometheus:  http://localhost:9090  (Status → Targets → verbiage-local UP)
+# Tempo:       http://localhost:3200  (queried via Grafana Explore)
 
 services:
   prometheus:
@@ -16,6 +17,25 @@ services:
       - ./secrets:/etc/prometheus/secrets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
 
   grafana:
     image: grafana/grafana:11.4.0
@@ -30,3 +50,4 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+      - tempo
