@@ -136,6 +136,8 @@ export async function suggestAddresses(q: string): Promise<AddressSuggestion[]> 
 }
 
 export async function syncClaimPhotosFromDrive(claimId: string, folderId?: string) {
+  // Omit folder_id so the server syncs every linked folder on the claim.
+  // Passing folder_id forces a single-folder override (legacy / one-off use).
   const res = await apiFetchRetry(
     `${BASE}/claims/${claimId}/photos/sync-drive`,
     {
@@ -150,6 +152,7 @@ export async function syncClaimPhotosFromDrive(claimId: string, folderId?: strin
     total: number
     image_count: number
     job_ids: string[]
+    folder_ids?: string[]
   }>
 }
 

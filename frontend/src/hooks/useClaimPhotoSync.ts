@@ -136,7 +136,9 @@ export function useClaimPhotoSync(claimId: string | null) {
       setSyncError(null)
       setPollError(null)
       try {
+        // Pass no folderId to sync all claim-linked folders; folderId is a single-folder override.
         const res = await syncClaimPhotosFromDrive(claimId, folderId)
+        console.log('MYDEBUG →', { syncedFolders: res.folder_ids, imageCount: res.image_count })
         await refreshCounts()
         queryClient.invalidateQueries({ queryKey: ['claim-images', claimId] })
         if (res.batch_id) {

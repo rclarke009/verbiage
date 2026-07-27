@@ -253,8 +253,8 @@ export function ReportWriterTab() {
   const handleConfirmPhotoSync = async () => {
     if (!activeId) return
     await saveMutation.mutateAsync()
-    const folderId = draft.property_metadata?.drive_photo_folder_id
-    await photoSync.startSync(folderId)
+    // Do not pass folder_id — that overrides to a single folder. Sync all linked folders from claim metadata.
+    await photoSync.startSync()
   }
 
   const handleRegenerateSection = async (sectionKey: string) => {
