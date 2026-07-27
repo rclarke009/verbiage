@@ -42,6 +42,7 @@ export function ClaimForm({
   propertyMapError,
   propertyMapPreview,
   onRefreshPropertyMap,
+  onCachedImagesUnavailable,
   canGenerate = false,
   generating = false,
   onGenerate,
@@ -66,6 +67,7 @@ export function ClaimForm({
   propertyMapError?: string | null
   propertyMapPreview?: PropertyMapResponse | null
   onRefreshPropertyMap?: () => void
+  onCachedImagesUnavailable?: () => void
   canGenerate?: boolean
   generating?: boolean
   onGenerate?: () => void
@@ -139,6 +141,7 @@ export function ClaimForm({
           error={propertyMapError ?? null}
           resolvedAddress={meta.property_map_resolved_address}
           onRefresh={onRefreshPropertyMap ?? (() => {})}
+          onCachedImagesUnavailable={onCachedImagesUnavailable}
         />
       </div>
 

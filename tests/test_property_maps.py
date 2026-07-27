@@ -226,3 +226,80 @@ def test_pdf_export_includes_property_location(
     data = draft_to_pdf_bytes(sample_sections, claim=claim, images=[])
     assert data.startswith(b"%PDF")
     assert len(data) > 1000
+
+
+def test_property_map_image_clears_stale_path_on_missing_file(
+    sample_claim: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    import app.main as main
+    from app.auth import get_current_user
+
+    claim = {
+        **sample_claim,
+        "property_metadata": {
+            **sample_claim["property_metadata"],
+            "property_map_satellite_path": "maps/missing.jpg",
+        },
+    }
+    updates: list[dict] = []
+
+    async def fake_with_conn(_request, fn):
+        conn = MagicMock()
+        return fn(conn)
+
+    def fake_get_claim(_conn, _claim_id, _user_id):
+        return claim
+
+    def fake_update_claim(_conn, _claim_id, _user_id, **kwargs):
+        updates.append(kwargs.get("property_metadata") or {})
+        claim["property_metadata"] = kwargs["property_metadata"]
+        return claim
+
+    def boom(_path: str) -> bytes:
+        raise FileNotFoundError("missing")
+
+    main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    client = TestClient(main.app)
+    try:
+        with (
+            patch("app.report_writer.router._with_conn", new=fake_with_conn),
+            patch("app.report_writer.router.get_claim", side_effect=fake_get_claim),
+            patch("app.report_writer.router.update_claim", side_effect=fake_update_claim),
+            patch("app.report_writer.router.read_claim_image_bytes", side_effect=boom),
+        ):
+            resp = client.get(
+                f"/report-writer/claims/{sample_claim['claim_id']}/property-map/image"
+                "?variant=satellite"
+            )
+        assert resp.status_code == 404
+        assert updates
+        assert "property_map_satellite_path" not in updates[0]
+    finally:
+        main.app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_with_conn_maps_pool_exhausted_to_503() -> None:
+    from fastapi import HTTPException
+    from psycopg2.pool import PoolError
+    from unittest.mock import MagicMock, patch
+
+    from app.report_writer.router import _with_conn
+
+    request = MagicMock()
+    request.app.state.db_pool = MagicMock()
+
+    async def run() -> None:
+        with patch(
+            "app.report_writer.router.get_valid_conn",
+            side_effect=PoolError("connection pool exhausted"),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await _with_conn(request, lambda _conn: None)
+            assert exc_info.value.status_code == 503
+            assert "unavailable" in str(exc_info.value.detail).lower()
+
+    asyncio.run(run())

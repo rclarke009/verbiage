@@ -67,6 +67,10 @@ export function usePropertyMap({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestIdRef = useRef(0)
   const prevAddressRef = useRef(address)
+  /** fetch_keys where cached image URLs already 404'd — do not re-attach URLs. */
+  const deadImageKeysRef = useRef<Set<string>>(new Set())
+  const previewRef = useRef(preview)
+  previewRef.current = preview
 
   const isMapCurrent = useCallback(
     (addr: string) => metadata.property_map_fetch_key === propertyMapFetchKey(addr),
@@ -97,22 +101,34 @@ export function usePropertyMap({
       const addr = address.trim()
       if (addr.length < MIN_ADDRESS_LEN) return
 
+      const fetchKey = metadata.property_map_fetch_key ?? ''
+      const imagesDead = fetchKey !== '' && deadImageKeysRef.current.has(fetchKey)
+
       if (!force && isMapCurrent(addr) && metadata.property_map_satellite_path) {
+        const prev = previewRef.current
+        const sameKey = prev?.fetch_key === fetchKey
+        // Keep existing data-URL previews; never wipe them just because paths exist.
+        const satellitePreview = sameKey && prev?.satellite_preview ? prev.satellite_preview : ''
+        const roadmapPreview = sameKey && prev?.roadmap_preview ? prev.roadmap_preview : ''
+        const attachUrls = !imagesDead && !!claimId
         setPreview({
           resolved_address: metadata.property_map_resolved_address ?? '',
           latitude: metadata.property_latitude ? Number(metadata.property_latitude) : null,
           longitude: metadata.property_longitude ? Number(metadata.property_longitude) : null,
-          fetch_key: metadata.property_map_fetch_key ?? '',
-          satellite_url: claimId
+          fetch_key: fetchKey,
+          satellite_url: attachUrls
             ? `/report-writer/claims/${claimId}/property-map/image?variant=satellite`
             : null,
-          roadmap_url: claimId
+          roadmap_url: attachUrls
             ? `/report-writer/claims/${claimId}/property-map/image?variant=roadmap`
             : null,
-          satellite_preview: '',
-          roadmap_preview: '',
+          satellite_preview: satellitePreview,
+          roadmap_preview: roadmapPreview,
           attribution: ['Map data © Google'],
         })
+        if (imagesDead && !satellitePreview && !roadmapPreview) {
+          setError('Property map images unavailable. Use Refresh to re-fetch.')
+        }
         return
       }
 
@@ -124,6 +140,10 @@ export function usePropertyMap({
         const response = await fetchPropertyMap(addr, claimId ?? undefined)
         if (reqId !== requestIdRef.current) return
 
+        // Successful force/network fetch: clear dead-key for this fetch_key.
+        if (response.fetch_key) {
+          deadImageKeysRef.current.delete(response.fetch_key)
+        }
         setPreview(response)
         if (claimId) {
           const patch = basePatchFromResponse(response)
@@ -145,12 +165,30 @@ export function usePropertyMap({
     void fetchMap(true)
   }, [fetchMap])
 
+  /** After image endpoint 404s for this fetch_key, stop attaching URLs (no retry storm). */
+  const markCachedImagesUnavailable = useCallback(() => {
+    const key = previewRef.current?.fetch_key
+    if (!key) return
+    deadImageKeysRef.current.add(key)
+    setPreview(prev =>
+      prev
+        ? {
+            ...prev,
+            satellite_url: null,
+            roadmap_url: null,
+          }
+        : prev,
+    )
+    setError('Property map images unavailable. Use Refresh to re-fetch.')
+  }, [])
+
   useEffect(() => {
     if (prevAddressRef.current !== address) {
       prevAddressRef.current = address
       if (metadata.property_map_fetch_key && !isMapCurrent(address.trim())) {
         onPropertyMapClear?.()
         setPreview(null)
+        setError(null)
       }
     }
   }, [address, isMapCurrent, metadata.property_map_fetch_key, onPropertyMapClear])
@@ -178,5 +216,12 @@ export function usePropertyMap({
     }
   }, [address, claimId, fetchMap, isMapCurrent, metadata.property_map_satellite_path])
 
-  return { loading, error, refresh, preview, hasPersistedMaps: !!metadata.property_map_satellite_path }
+  return {
+    loading,
+    error,
+    refresh,
+    preview,
+    hasPersistedMaps: !!metadata.property_map_satellite_path,
+    markCachedImagesUnavailable,
+  }
 }

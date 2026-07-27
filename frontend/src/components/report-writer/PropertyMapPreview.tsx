@@ -22,6 +22,9 @@ function MapImage({
 }) {
   const [src, setSrc] = useState(previewSrc)
   const [failed, setFailed] = useState(false)
+  const [loading, setLoading] = useState(!previewSrc && !!urlPath)
+  const onLoadFailedRef = useRef(onLoadFailed)
+  onLoadFailedRef.current = onLoadFailed
 
   useEffect(() => {
     let objectUrl: string | null = null
@@ -31,13 +34,18 @@ function MapImage({
       if (previewSrc) {
         setSrc(previewSrc)
         setFailed(false)
+        setLoading(false)
         return
       }
       if (!urlPath) {
+        setSrc('')
         setFailed(true)
-        onLoadFailed?.()
+        setLoading(false)
         return
       }
+      setLoading(true)
+      setFailed(false)
+      setSrc('')
       try {
         const init = await getAuthFetchInit({ method: 'GET' })
         const res = await fetch(joinUrl(apiOrigin(), urlPath), init)
@@ -47,10 +55,14 @@ function MapImage({
         objectUrl = URL.createObjectURL(blob)
         setSrc(objectUrl)
         setFailed(false)
+        setLoading(false)
       } catch {
         if (!cancelled) {
+          setSrc('')
           setFailed(true)
-          onLoadFailed?.()
+          setLoading(false)
+          // Only treat a real HTTP/network failure as stale-cache signal.
+          onLoadFailedRef.current?.()
         }
       }
     }
@@ -60,31 +72,36 @@ function MapImage({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [previewSrc, urlPath, onLoadFailed])
+  }, [previewSrc, urlPath])
+
+  const unavailable = (
+    <div
+      style={{
+        border: '1px dashed var(--app-border)',
+        borderRadius: 6,
+        padding: 24,
+        fontSize: 12,
+        color: 'var(--app-text-muted)',
+        textAlign: 'center',
+      }}
+    >
+      {loading ? 'Loading map…' : 'Map preview unavailable'}
+    </div>
+  )
 
   return (
     <figure style={{ margin: 0, flex: 1, minWidth: 0 }}>
       <figcaption style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{label}</figcaption>
-      {failed ? (
-        <div
-          style={{
-            border: '1px dashed var(--app-border)',
-            borderRadius: 6,
-            padding: 24,
-            fontSize: 12,
-            color: 'var(--app-text-muted)',
-            textAlign: 'center',
-          }}
-        >
-          Map preview unavailable
-        </div>
+      {failed || loading || !src ? (
+        unavailable
       ) : (
         <img
           src={src}
           alt={label}
           onError={() => {
+            // Bad blob/data URL only — do not trigger stale-cache refresh.
             setFailed(true)
-            onLoadFailed?.()
+            setSrc('')
           }}
           style={{
             width: '100%',
@@ -105,24 +122,48 @@ export function PropertyMapPreview({
   error,
   resolvedAddress,
   onRefresh,
+  onCachedImagesUnavailable,
 }: {
   preview: PropertyMapResponse | null
   loading: boolean
   error: string | null
   resolvedAddress?: string
   onRefresh: () => void
+  onCachedImagesUnavailable?: () => void
 }) {
-  const staleRetryRef = useRef(false)
+  // Cap auto-refresh to once per fetch_key. Do not reset when preview strings clear.
+  const staleRetryKeyRef = useRef<string | null>(null)
+  const refreshInFlightRef = useRef(false)
+  const lastFetchKeyRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
-    staleRetryRef.current = false
-  }, [preview?.fetch_key, preview?.satellite_preview, preview?.roadmap_preview])
+    const key = preview?.fetch_key
+    if (key !== lastFetchKeyRef.current) {
+      lastFetchKeyRef.current = key
+      staleRetryKeyRef.current = null
+      refreshInFlightRef.current = false
+    }
+  }, [preview?.fetch_key])
+
+  useEffect(() => {
+    if (!loading) {
+      refreshInFlightRef.current = false
+    }
+  }, [loading])
 
   const handleStaleCache = useCallback(() => {
-    if (staleRetryRef.current || loading) return
-    staleRetryRef.current = true
+    if (loading || refreshInFlightRef.current) return
+    const key = preview?.fetch_key ?? ''
+    if (!key) return
+    if (staleRetryKeyRef.current === key) {
+      // Already refreshed once for this key — stop attaching dead image URLs.
+      onCachedImagesUnavailable?.()
+      return
+    }
+    staleRetryKeyRef.current = key
+    refreshInFlightRef.current = true
     onRefresh()
-  }, [loading, onRefresh])
+  }, [loading, onCachedImagesUnavailable, onRefresh, preview?.fetch_key])
 
   const showMaps =
     preview &&

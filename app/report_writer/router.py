@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
+from psycopg2.pool import PoolError
 
 from app.auth import get_current_user
 from app.config import GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID, GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL
@@ -127,7 +128,13 @@ def _claim_response(claim: dict, sections: dict | None = None) -> ClaimResponse:
 
 async def _with_conn(request: Request, fn):
     pool = request.app.state.db_pool
-    conn = get_valid_conn(pool)
+    try:
+        conn = get_valid_conn(pool)
+    except PoolError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Database temporarily unavailable",
+        ) from e
     try:
         return await asyncio.to_thread(fn, conn)
     finally:
@@ -355,6 +362,23 @@ async def get_property_map_image(
     try:
         data = read_claim_image_bytes(path)
     except OSError as e:
+        # Best-effort: drop stale path so clients stop hitting a dead file.
+        meta_key = f"property_map_{variant}_path"
+
+        def _clear_stale_path(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return
+            meta = dict(claim.get("property_metadata") or {})
+            if meta_key not in meta:
+                return
+            meta.pop(meta_key, None)
+            update_claim(conn, claim_id, user_id, property_metadata=meta)
+
+        try:
+            await _with_conn(request, _clear_stale_path)
+        except HTTPException:
+            pass
         raise HTTPException(status_code=404, detail="Property map image not found") from e
 
     return Response(content=data, media_type="image/jpeg")

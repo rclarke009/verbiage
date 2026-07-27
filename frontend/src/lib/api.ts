@@ -88,6 +88,16 @@ export async function apiFetchRetry(
   throw lastError ?? new Error('Request failed after retries')
 }
 
+function looksLikeHtml(body: string): boolean {
+  const head = body.slice(0, 200).toLowerCase()
+  return (
+    head.includes('<!doctype') ||
+    head.includes('<html') ||
+    head.includes('<title>') ||
+    head.includes('<head')
+  )
+}
+
 export async function readErrorDetail(res: Response): Promise<string> {
   try {
     const t = await res.text()
@@ -97,6 +107,10 @@ export async function readErrorDetail(res: Response): Promise<string> {
       if (j && typeof j.detail === 'string') return j.detail
     } catch {
       /* not JSON */
+    }
+    // Gateway / proxy HTML pages (e.g. Render 502) must not dump into the UI.
+    if (looksLikeHtml(t) || res.status === 502 || res.status === 503 || res.status === 504) {
+      return `Service temporarily unavailable (${res.status})`
     }
     return t.slice(0, 500)
   } catch {

@@ -424,6 +424,7 @@ export function ReportWriterTab() {
                   propertyMapError={propertyMap.error}
                   propertyMapPreview={propertyMap.preview}
                   onRefreshPropertyMap={propertyMap.refresh}
+                  onCachedImagesUnavailable={propertyMap.markCachedImagesUnavailable}
                   canGenerate={canGenerate}
                   generating={generating}
                   onGenerate={() => void handleGenerate()}
