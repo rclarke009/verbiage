@@ -3,9 +3,16 @@ import { useQuery } from '@tanstack/react-query'
 
 import { listClaimImages, uploadClaimImage } from '../../api/reportWriter'
 import { useAddressFolderMatch } from '../../hooks/useAddressFolderMatch'
-import { composeFullAddress } from '../../lib/address'
-import { driveFolderUrl, parseDriveFolderInput } from '../../lib/driveFolder'
-import type { Claim, PhotoAnalysisCounts } from '../../types'
+import { composeFullAddress, type StructuredAddress } from '../../lib/address'
+import {
+  addDrivePhotoFolder,
+  normalizeDrivePhotoFolders,
+  parseAndLinkFolder,
+  removeDrivePhotoFolder,
+  replaceDrivePhotoFolder,
+} from '../../lib/drivePhotoFolders'
+import { driveFolderUrl } from '../../lib/driveFolder'
+import type { Claim, PhotoAnalysisCounts, PropertyMetadata } from '../../types'
 
 const stepLegend: React.CSSProperties = {
   fontSize: 13,
@@ -15,6 +22,8 @@ const stepLegend: React.CSSProperties = {
 }
 
 const MIN_FOLDER_MATCH_SCORE = 0.7
+
+type LinkMode = { kind: 'idle' } | { kind: 'add' } | { kind: 'change'; index: number }
 
 export function PhotoFolderPanel({
   claimId,
@@ -28,7 +37,7 @@ export function PhotoFolderPanel({
 }: {
   claimId: string
   claim: Claim
-  onMetadataChange: (patch: Record<string, string>) => void
+  onMetadataChange: (patch: PropertyMetadata) => void
   onConfirmSync: () => void
   syncing: boolean
   syncError: string | null
@@ -36,15 +45,16 @@ export function PhotoFolderPanel({
   onUploadBatchStarted?: (batchId: string) => void
 }) {
   const meta = claim.property_metadata || {}
-  const address = composeFullAddress(meta)
-  const folderId = meta.drive_photo_folder_id ?? ''
-  const folderLabel = meta.drive_photo_folder_label ?? ''
+  const address = composeFullAddress(meta as StructuredAddress)
+  const folders = normalizeDrivePhotoFolders(meta)
+  const hasFolders = folders.length > 0
   const { matches, suggestedId, status: matchStatus, error: matchError } = useAddressFolderMatch(address)
   const visibleMatches = matches.filter(m => m.score >= MIN_FOLDER_MATCH_SCORE)
   const possibleMatch =
     !suggestedId && visibleMatches.length === 1 ? visibleMatches[0] : null
   const [manualInput, setManualInput] = useState('')
   const [manualError, setManualError] = useState('')
+  const [linkMode, setLinkMode] = useState<LinkMode>({ kind: 'idle' })
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -55,27 +65,33 @@ export function PhotoFolderPanel({
     enabled: !!claimId,
   })
 
-  const pickFolder = (id: string, name: string) => {
-    onMetadataChange({
-      drive_photo_folder_id: id,
-      drive_photo_folder_label: name,
-    })
+  const showLinker = !hasFolders || linkMode.kind !== 'idle'
+
+  const applyFolder = (id: string, name: string) => {
+    if (linkMode.kind === 'change') {
+      onMetadataChange(replaceDrivePhotoFolder(meta, linkMode.index, id, name))
+    } else {
+      onMetadataChange(addDrivePhotoFolder(meta, id, name))
+    }
+    setLinkMode({ kind: 'idle' })
+    setManualInput('')
+    setManualError('')
   }
 
   const applySuggested = () => {
     if (!suggestedId) return
     const match = matches.find(m => m.id === suggestedId)
-    if (match) pickFolder(match.id, match.name)
+    if (match) applyFolder(match.id, match.name)
   }
 
   const applyManual = () => {
-    const { id, error } = parseDriveFolderInput(manualInput)
-    if (!id) {
-      setManualError(error ?? 'Could not parse folder')
+    const parsed = parseAndLinkFolder(manualInput)
+    if ('error' in parsed) {
+      setManualError(parsed.error)
       return
     }
     setManualError('')
-    pickFolder(id, manualInput.trim())
+    applyFolder(parsed.id, parsed.label)
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -100,10 +116,18 @@ export function PhotoFolderPanel({
     }
   }
 
-  const folderUrl = folderId ? driveFolderUrl(folderId) : null
   const images = imagesQuery.data ?? []
   const examined = photoCounts?.succeeded ?? images.filter(i => i.analysis_status === 'succeeded').length
   const withDamage = photoCounts?.with_damage ?? 0
+
+  const linkButtonStyle: React.CSSProperties = {
+    padding: '6px 12px',
+    borderRadius: 6,
+    border: '1px solid var(--app-border)',
+    background: 'var(--app-surface)',
+    cursor: 'pointer',
+    fontSize: 13,
+  }
 
   return (
     <fieldset
@@ -118,157 +142,260 @@ export function PhotoFolderPanel({
       <legend style={{ ...stepLegend, padding: '0 6px' }}>Step 2 — Job photos (link Drive folder first)</legend>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
         After you enter the address above, we search your jobs folder in Drive. Confirm the match to start
-        analyzing photos while you write field notes.
+        analyzing photos while you write field notes. You can change a mistyped link or add another folder.
       </p>
 
-      {matchStatus === 'searching' && (
-        <p style={{ fontSize: 13, color: 'var(--app-text-muted)', margin: '0 0 8px' }}>Searching Drive for this address…</p>
-      )}
-      {matchError && (
-        <p style={{ fontSize: 13, color: 'var(--app-danger)', margin: '0 0 8px' }}>{matchError}</p>
-      )}
-
-      {suggestedId && !folderId && matchStatus === 'done' && (
-        <div
-          style={{
-            padding: 10,
-            borderRadius: 6,
-            background: 'var(--app-info-bg)',
-            border: '1px solid var(--app-info-border)',
-            marginBottom: 10,
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 13 }}>
-            Found job folder:{' '}
-            <strong>{matches.find(m => m.id === suggestedId)?.name ?? suggestedId}</strong>
-          </p>
-          <button
-            type="button"
-            onClick={applySuggested}
-            style={{
-              marginTop: 8,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--app-primary)',
-              color: 'var(--app-on-primary)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            Use this folder
-          </button>
-        </div>
-      )}
-
-      {possibleMatch && !folderId && matchStatus === 'done' && (
-        <div
-          style={{
-            padding: 10,
-            borderRadius: 6,
-            background: 'var(--app-warning-bg)',
-            border: '1px solid var(--app-warning-border)',
-            marginBottom: 10,
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 13 }}>
-            Possible match ({Math.round(possibleMatch.score * 100)}%):{' '}
-            <strong>{possibleMatch.name}</strong>
-          </p>
-          <button
-            type="button"
-            onClick={() => pickFolder(possibleMatch.id, possibleMatch.name)}
-            style={{
-              marginTop: 8,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--app-primary)',
-              color: 'var(--app-on-primary)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            Use this folder
-          </button>
-        </div>
-      )}
-
-      {matchStatus === 'done' && visibleMatches.length > 1 && !folderId && (
+      {hasFolders ? (
         <div style={{ marginBottom: 10 }}>
-          <p style={{ fontSize: 13, margin: '0 0 6px' }}>Multiple folders match — pick one:</p>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-            {visibleMatches.map(m => (
-              <li key={m.id} style={{ marginBottom: 4 }}>
-                <button
-                  type="button"
-                  onClick={() => pickFolder(m.id, m.name)}
-                  style={{ background: 'none', border: 'none', color: 'var(--app-primary)', cursor: 'pointer', padding: 0 }}
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+            {folders.map((folder, index) => {
+              const folderUrl = driveFolderUrl(folder.id)
+              return (
+                <li
+                  key={`${folder.id}-${index}`}
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    alignItems: 'center',
+                    marginBottom: 8,
+                    fontSize: 13,
+                  }}
                 >
-                  {m.name}
-                </button>{' '}
-                <span style={{ color: 'var(--app-text-muted)' }}>({Math.round(m.score * 100)}% match)</span>
-              </li>
-            ))}
+                  <span>
+                    Linked folder: <strong>{folder.label || folder.id}</strong>{' '}
+                    <a href={folderUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                      Open in Drive
+                    </a>
+                  </span>
+                  <button
+                    type="button"
+                    style={linkButtonStyle}
+                    onClick={() => {
+                      setLinkMode({ kind: 'change', index })
+                      setManualInput('')
+                      setManualError('')
+                    }}
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    style={linkButtonStyle}
+                    onClick={() => {
+                      onMetadataChange(removeDrivePhotoFolder(meta, index))
+                      setLinkMode({ kind: 'idle' })
+                    }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              )
+            })}
           </ul>
-        </div>
-      )}
-
-      {matchStatus === 'done' && visibleMatches.length === 0 && address.trim().length >= 5 && !folderId && (
-        <p style={{ fontSize: 13, color: 'var(--app-warning)', margin: '0 0 8px' }}>
-          No folder found for this address. Paste a folder link below.
-        </p>
-      )}
-
-      {folderId ? (
-        <div style={{ marginBottom: 10 }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            Linked folder: <strong>{folderLabel || folderId}</strong>
-            {folderUrl ? (
-              <>
-                {' '}
-                <a href={folderUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
-                  Open in Drive
-                </a>
-              </>
-            ) : null}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              style={linkButtonStyle}
+              onClick={() => {
+                setLinkMode({ kind: 'add' })
+                setManualInput('')
+                setManualError('')
+              }}
+            >
+              Add another folder
+            </button>
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={onConfirmSync}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--app-success)',
+                color: 'var(--app-on-primary)',
+                cursor: syncing ? 'wait' : 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {syncing ? 'Starting analysis…' : 'Confirm & start analysis'}
+            </button>
+          </div>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--app-text-muted)' }}>
+            Removing a folder unlinks it only — photos already pulled in stay on this claim.
           </p>
-          <button
-            type="button"
-            disabled={syncing}
-            onClick={onConfirmSync}
-            style={{
-              marginTop: 8,
-              padding: '8px 14px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--app-success)',
-              color: 'var(--app-on-primary)',
-              cursor: syncing ? 'wait' : 'pointer',
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            {syncing ? 'Starting analysis…' : 'Confirm & start analysis'}
-          </button>
         </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          <input
-            value={manualInput}
-            onChange={e => setManualInput(e.target.value)}
-            placeholder="Paste drive.google.com/.../folders/…"
-            style={{ flex: 1, minWidth: 200, padding: 8, borderRadius: 6, border: '1px solid var(--app-border)' }}
-          />
-          <button
-            type="button"
-            onClick={applyManual}
-            style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
-          >
-            Link folder
-          </button>
-        </div>
-      )}
+      ) : null}
+
+      {showLinker ? (
+        <>
+          {linkMode.kind === 'change' ? (
+            <p style={{ fontSize: 13, margin: '0 0 8px', color: 'var(--app-text-muted)' }}>
+              Paste or pick a replacement for folder {linkMode.index + 1}.
+            </p>
+          ) : null}
+          {linkMode.kind === 'add' ? (
+            <p style={{ fontSize: 13, margin: '0 0 8px', color: 'var(--app-text-muted)' }}>
+              Link an additional Drive folder. Photos from all linked folders are analyzed together.
+            </p>
+          ) : null}
+
+          {matchStatus === 'searching' && (
+            <p style={{ fontSize: 13, color: 'var(--app-text-muted)', margin: '0 0 8px' }}>
+              Searching Drive for this address…
+            </p>
+          )}
+          {matchError && (
+            <p style={{ fontSize: 13, color: 'var(--app-danger)', margin: '0 0 8px' }}>{matchError}</p>
+          )}
+
+          {suggestedId && matchStatus === 'done' && (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 6,
+                background: 'var(--app-info-bg)',
+                border: '1px solid var(--app-info-border)',
+                marginBottom: 10,
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 13 }}>
+                Found job folder:{' '}
+                <strong>{matches.find(m => m.id === suggestedId)?.name ?? suggestedId}</strong>
+              </p>
+              <button
+                type="button"
+                onClick={applySuggested}
+                style={{
+                  marginTop: 8,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--app-primary)',
+                  color: 'var(--app-on-primary)',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                Use this folder
+              </button>
+            </div>
+          )}
+
+          {possibleMatch && matchStatus === 'done' && (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 6,
+                background: 'var(--app-warning-bg)',
+                border: '1px solid var(--app-warning-border)',
+                marginBottom: 10,
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 13 }}>
+                Possible match ({Math.round(possibleMatch.score * 100)}%):{' '}
+                <strong>{possibleMatch.name}</strong>
+              </p>
+              <button
+                type="button"
+                onClick={() => applyFolder(possibleMatch.id, possibleMatch.name)}
+                style={{
+                  marginTop: 8,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--app-primary)',
+                  color: 'var(--app-on-primary)',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                Use this folder
+              </button>
+            </div>
+          )}
+
+          {matchStatus === 'done' && visibleMatches.length > 1 && (
+            <div style={{ marginBottom: 10 }}>
+              <p style={{ fontSize: 13, margin: '0 0 6px' }}>Multiple folders match — pick one:</p>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                {visibleMatches.map(m => (
+                  <li key={m.id} style={{ marginBottom: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => applyFolder(m.id, m.name)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--app-primary)',
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    >
+                      {m.name}
+                    </button>{' '}
+                    <span style={{ color: 'var(--app-text-muted)' }}>
+                      ({Math.round(m.score * 100)}% match)
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {matchStatus === 'done' &&
+            visibleMatches.length === 0 &&
+            address.trim().length >= 5 &&
+            !hasFolders && (
+              <p style={{ fontSize: 13, color: 'var(--app-warning)', margin: '0 0 8px' }}>
+                No folder found for this address. Paste a folder link below.
+              </p>
+            )}
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <input
+              value={manualInput}
+              onChange={e => setManualInput(e.target.value)}
+              placeholder="Paste drive.google.com/.../folders/…"
+              style={{
+                flex: 1,
+                minWidth: 200,
+                padding: 8,
+                borderRadius: 6,
+                border: '1px solid var(--app-border)',
+              }}
+            />
+            <button
+              type="button"
+              onClick={applyManual}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: '1px solid var(--app-border)',
+                cursor: 'pointer',
+              }}
+            >
+              {linkMode.kind === 'change' ? 'Replace folder' : 'Link folder'}
+            </button>
+            {linkMode.kind !== 'idle' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkMode({ kind: 'idle' })
+                  setManualInput('')
+                  setManualError('')
+                }}
+                style={linkButtonStyle}
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
       {manualError ? <p style={{ color: 'var(--app-danger)', fontSize: 12 }}>{manualError}</p> : null}
       {syncError ? <p style={{ color: 'var(--app-danger)', fontSize: 12 }}>{syncError}</p> : null}
 

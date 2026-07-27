@@ -176,6 +176,11 @@ export interface SectionContent {
   sources?: ReportWriterSource[]
 }
 
+export interface DrivePhotoFolderRef {
+  id: string
+  label: string
+}
+
 export interface ClaimPropertyMetadata {
   report_type?: string
   address?: string
@@ -214,8 +219,14 @@ export interface ClaimPropertyMetadata {
   property_map_satellite_path?: string
   property_map_roadmap_path?: string
   property_map_fetched_at?: string
-  [key: string]: string | undefined
+  drive_photo_folder_id?: string
+  drive_photo_folder_label?: string
+  drive_photo_folders?: DrivePhotoFolderRef[]
+  [key: string]: string | DrivePhotoFolderRef[] | undefined
 }
+
+/** Alias used by claim forms and Drive folder helpers. */
+export type PropertyMetadata = ClaimPropertyMetadata
 
 export type WeatherMetric = 'wind_speed' | 'wind_gust' | 'hail_size' | 'precip'
 
@@ -284,7 +295,7 @@ export interface Claim {
   claim_id: string
   user_id: string
   title: string
-  property_metadata: Record<string, string>
+  property_metadata: PropertyMetadata
   field_notes: string
   status: string
   created_at?: string | null
@@ -294,13 +305,13 @@ export interface Claim {
 
 export interface ClaimCreatePayload {
   title?: string
-  property_metadata?: Record<string, string>
+  property_metadata?: PropertyMetadata
   field_notes?: string
 }
 
 export interface ClaimUpdatePayload {
   title?: string
-  property_metadata?: Record<string, string>
+  property_metadata?: PropertyMetadata
   field_notes?: string
 }
 

@@ -81,9 +81,9 @@ export function usePropertyMap({
     async (patch: Record<string, string>) => {
       onMetadataPatch(patch)
       if (!claimId) return
-      const merged: Record<string, string> = {}
+      const merged: ClaimPropertyMetadata = {}
       for (const [k, v] of Object.entries(metadata)) {
-        if (typeof v === 'string') merged[k] = v
+        if (typeof v === 'string' || Array.isArray(v)) merged[k] = v
       }
       for (const [k, v] of Object.entries(patch)) {
         if (v === '') delete merged[k]

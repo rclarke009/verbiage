@@ -16,6 +16,7 @@ from app.drive_client import (
     drive_file_view_url,
     list_image_files_metadata_async,
 )
+from app.report_writer.drive_photo_folders import resolve_drive_photo_folder_ids
 from app.report_writer.queries import upsert_drive_claim_image
 
 
@@ -72,17 +73,15 @@ def enqueue_vision_jobs_for_claim(
     }
 
 
-async def sync_claim_photos_from_drive(
+async def upsert_images_from_drive_folder(
     conn,
     *,
     claim_id: str,
     user_id: str,
     folder_id: str,
-) -> dict[str, Any]:
-    """
-    Upsert Drive image rows for folder_id and enqueue vision jobs for uncached images.
-    Returns { batch_id, total, image_count, job_ids, enqueued }.
-    """
+    sort_order_start: int = 0,
+) -> list[dict]:
+    """List images in a Drive folder and upsert claim image rows. Does not enqueue vision."""
     try:
         metas = await list_image_files_metadata_async(folder_id)
     except DriveClientError as e:
@@ -103,18 +102,64 @@ async def sync_claim_photos_from_drive(
             filename=name,
             content_type=mime,
             size_bytes=size,
-            sort_order=idx,
+            sort_order=sort_order_start + idx,
         )
         images.append(row)
+    return images
+
+
+async def sync_claim_photos_from_drive(
+    conn,
+    *,
+    claim_id: str,
+    user_id: str,
+    folder_id: str | None = None,
+    folder_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Upsert Drive image rows for one or more folders and enqueue vision for uncached images.
+    Prefer folder_ids; folder_id remains a single-folder override.
+    Returns { batch_id, total, image_count, job_ids, enqueued, folder_ids }.
+    """
+    ids = [fid for fid in (folder_ids or ([folder_id] if folder_id else [])) if fid]
+    if not ids:
+        raise ValueError("No Drive photo folder IDs to sync")
+
+    images: list[dict] = []
+    sort_base = 0
+    for fid in ids:
+        folder_images = await upsert_images_from_drive_folder(
+            conn,
+            claim_id=claim_id,
+            user_id=user_id,
+            folder_id=fid,
+            sort_order_start=sort_base,
+        )
+        sort_base += len(folder_images)
+        images.extend(folder_images)
+
+    # Deduplicate by image_id if the same Drive file appeared in multiple folders
+    by_id: dict[str, dict] = {}
+    for img in images:
+        by_id[img["image_id"]] = img
+    unique_images = list(by_id.values())
 
     result = enqueue_vision_jobs_for_claim(
         conn,
         claim_id=claim_id,
         user_id=user_id,
-        images=images,
+        images=unique_images,
         skip_active=False,
     )
+    result["folder_ids"] = ids
     return result
+
+
+def folder_ids_for_claim_sync(meta: dict | None, *, override_folder_id: str | None = None) -> list[str]:
+    """Resolve folder IDs for sync: optional single override, else all linked folders."""
+    if override_folder_id:
+        return [override_folder_id]
+    return resolve_drive_photo_folder_ids(meta)
 
 
 def claim_photo_analysis_counts(conn, claim_id: str, user_id: str) -> dict[str, int]:

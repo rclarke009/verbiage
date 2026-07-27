@@ -73,6 +73,7 @@ from app.report_writer.queries import (
 from app.report_writer.photo_sync import (
     claim_photo_analysis_counts,
     enqueue_vision_jobs_for_claim,
+    folder_ids_for_claim_sync,
     sync_claim_photos_from_drive,
 )
 from app.report_writer.property_maps import (
@@ -409,26 +410,28 @@ async def sync_photos_from_drive(
     body: PhotoSyncRequest | None = None,
     user_id: str = Depends(get_current_user),
 ):
-    def _folder_for_claim(conn):
+    def _folders_for_claim(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
             return None
         meta = claim.get("property_metadata") or {}
-        folder_raw = (body.folder_id if body and body.folder_id else None) or meta.get(
-            "drive_photo_folder_id"
-        )
-        return parse_drive_folder_id(folder_raw) if folder_raw else None
+        override_raw = body.folder_id if body and body.folder_id else None
+        override = parse_drive_folder_id(override_raw) if override_raw else None
+        ids = folder_ids_for_claim_sync(meta, override_folder_id=override)
+        parsed: list[str] = []
+        for raw in ids:
+            fid = parse_drive_folder_id(raw)
+            if fid:
+                parsed.append(fid)
+        return parsed
 
-    folder_id = await _with_conn(request, _folder_for_claim)
-    if folder_id is None:
-        claim_exists = await _with_conn(
-            request, lambda conn: get_claim(conn, claim_id, user_id) is not None
-        )
-        if not claim_exists:
-            raise HTTPException(status_code=404, detail="Claim not found")
+    folder_ids = await _with_conn(request, _folders_for_claim)
+    if folder_ids is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if not folder_ids:
         raise HTTPException(
             status_code=400,
-            detail="No photo folder linked. Set drive_photo_folder_id on the claim or pass folder_id.",
+            detail="No photo folder linked. Set drive_photo_folders on the claim or pass folder_id.",
         )
 
     conn = get_valid_conn(request.app.state.db_pool)
@@ -438,7 +441,7 @@ async def sync_photos_from_drive(
                 conn,
                 claim_id=claim_id,
                 user_id=user_id,
-                folder_id=folder_id,
+                folder_ids=folder_ids,
             )
         except ValueError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e

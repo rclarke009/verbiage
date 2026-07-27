@@ -123,7 +123,7 @@ export function ReportWriterTab() {
     onWeatherClear: () =>
       updateDraft(prev => ({
         ...prev,
-        property_metadata: clearWeatherMetadata(prev.property_metadata ?? {}) as Record<string, string>,
+        property_metadata: clearWeatherMetadata(prev.property_metadata ?? {}),
       })),
   })
 
@@ -143,7 +143,7 @@ export function ReportWriterTab() {
     onPropertyMapClear: () =>
       updateDraft(prev => ({
         ...prev,
-        property_metadata: clearPropertyMapMetadata(prev.property_metadata ?? {}) as Record<string, string>,
+        property_metadata: clearPropertyMapMetadata(prev.property_metadata ?? {}),
       })),
   })
 

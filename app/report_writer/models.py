@@ -134,6 +134,7 @@ class PhotoSyncResponse(BaseModel):
     image_count: int = 0
     job_ids: list[str] = Field(default_factory=list)
     enqueued: int = 0
+    folder_ids: list[str] = Field(default_factory=list)
 
 
 class PhotoRetryStuckResponse(BaseModel):

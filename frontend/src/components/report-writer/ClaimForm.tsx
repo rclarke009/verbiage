@@ -1,5 +1,15 @@
 import { useState } from 'react'
-import type { Claim, PhotoAnalysisCounts, ReportTypeDefinition } from '../../types'
+import type {
+  Claim,
+  PhotoAnalysisCounts,
+  PropertyMetadata,
+  ReportTypeDefinition,
+} from '../../types'
+import {
+  metaString,
+  normalizeDrivePhotoFolders,
+  setDrivePhotoFolders,
+} from '../../lib/drivePhotoFolders'
 import { AddressFields } from './AddressFields'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { PropertyMapPreview } from './PropertyMapPreview'
@@ -75,24 +85,36 @@ export function ClaimForm({
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
-  const showManualDate = !meta.storm_id || stormCustom
-  const selectedType = reportTypes.find(t => t.id === meta.report_type)
+  const showManualDate = !metaString(meta, 'storm_id') || stormCustom
+  const selectedType = reportTypes.find(t => t.id === metaString(meta, 'report_type'))
 
-  const keepBaseFields = (base: Record<string, string>): Record<string, string> => {
-    const next: Record<string, string> = {}
-    if (base.report_type) next.report_type = base.report_type
-    if (base.address) next.address = base.address
-    if (base.address2) next.address2 = base.address2
-    if (base.city) next.city = base.city
-    if (base.state) next.state = base.state
-    if (base.zip) next.zip = base.zip
-    if (base.property_type) next.property_type = base.property_type
-    if (base.drive_photo_folder_id) next.drive_photo_folder_id = base.drive_photo_folder_id
-    if (base.drive_photo_folder_label) next.drive_photo_folder_label = base.drive_photo_folder_label
+  const keepBaseFields = (base: PropertyMetadata): PropertyMetadata => {
+    const next: PropertyMetadata = {}
+    for (const key of [
+      'report_type',
+      'address',
+      'address2',
+      'city',
+      'state',
+      'zip',
+      'property_type',
+    ] as const) {
+      const v = metaString(base, key)
+      if (v) next[key] = v
+    }
+    const folders = normalizeDrivePhotoFolders(base)
+    // Preserve linked folders including intentional clear (empty list / cleared legacy id).
+    if (
+      Array.isArray(base.drive_photo_folders) ||
+      metaString(base, 'drive_photo_folder_id') ||
+      folders.length
+    ) {
+      Object.assign(next, setDrivePhotoFolders({}, folders))
+    }
     return next
   }
 
-  const updateMetadata = (patch: Record<string, string>) => {
+  const updateMetadata = (patch: PropertyMetadata) => {
     onChange({ property_metadata: { ...meta, ...patch } })
   }
 
@@ -116,13 +138,13 @@ export function ClaimForm({
           </p>
           <AddressFields
             value={{
-              address: meta.address,
-              address2: meta.address2,
-              city: meta.city,
-              state: meta.state,
-              zip: meta.zip,
+              address: metaString(meta, 'address'),
+              address2: metaString(meta, 'address2'),
+              city: metaString(meta, 'city'),
+              state: metaString(meta, 'state'),
+              zip: metaString(meta, 'zip'),
             }}
-            onChange={patch => updateMetadata(patch as Record<string, string>)}
+            onChange={patch => updateMetadata(patch)}
             disabled={typeLocked}
           />
           <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
@@ -139,7 +161,7 @@ export function ClaimForm({
           preview={propertyMapPreview ?? null}
           loading={!!propertyMapLoading}
           error={propertyMapError ?? null}
-          resolvedAddress={meta.property_map_resolved_address}
+          resolvedAddress={metaString(meta, 'property_map_resolved_address') || undefined}
           onRefresh={onRefreshPropertyMap ?? (() => {})}
           onCachedImagesUnavailable={onCachedImagesUnavailable}
         />
@@ -182,7 +204,7 @@ export function ClaimForm({
                 type="radio"
                 name="report_type"
                 value={type.id}
-                checked={meta.report_type === type.id}
+                checked={metaString(meta, 'report_type') === type.id}
                 onChange={() => updateMetadata({ report_type: type.id })}
                 style={{ marginTop: 3 }}
               />
@@ -200,7 +222,7 @@ export function ClaimForm({
             Report type is locked after generation.
           </p>
         ) : null}
-        {!meta.report_type ? (
+        {!metaString(meta, 'report_type') ? (
           <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--app-warning)' }}>
             Select a report type before generating a draft.
           </p>
@@ -223,7 +245,7 @@ export function ClaimForm({
       >
         <legend style={{ ...stepLegend, color: 'var(--app-text)' }}>Step 4 — Storm &amp; property</legend>
         <StormPicker
-          stormId={meta.storm_id}
+          stormId={metaString(meta, 'storm_id')}
           customMode={stormCustom}
           onSelect={selection => {
             if (selection.kind === 'storm') {
@@ -239,7 +261,8 @@ export function ClaimForm({
             if (selection.kind === 'custom') {
               setStormCustom(true)
               const next = keepBaseFields(meta)
-              if (meta.storm_date) next.storm_date = meta.storm_date
+              const stormDate = metaString(meta, 'storm_date')
+              if (stormDate) next.storm_date = stormDate
               onChange({ property_metadata: next })
               return
             }
@@ -251,7 +274,7 @@ export function ClaimForm({
           <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
             <span style={{ display: 'block', marginBottom: 4 }}>Storm date</span>
             <input
-              value={meta.storm_date ?? ''}
+              value={metaString(meta, 'storm_date')}
               onChange={e => updateMetadata({ storm_date: e.target.value })}
               placeholder="e.g. September 28, 2022"
               style={inputStyle}
@@ -261,7 +284,7 @@ export function ClaimForm({
         <label style={{ fontSize: 13, display: 'block', marginTop: 10 }}>
           <span style={{ display: 'block', marginBottom: 4 }}>Property type</span>
           <input
-            value={meta.property_type ?? ''}
+            value={metaString(meta, 'property_type')}
             onChange={e => updateMetadata({ property_type: e.target.value })}
             style={inputStyle}
           />

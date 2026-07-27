@@ -1,3 +1,4 @@
+import { metaString } from '../../lib/drivePhotoFolders'
 import type { ClaimPropertyMetadata, WeatherCandidate, WeatherMetric, WeatherOptionsResponse } from '../../types'
 
 const METRIC_LABELS: Record<WeatherMetric, string> = {
@@ -102,15 +103,15 @@ export function WeatherPicker({
 }) {
   const selected: Record<string, string> = {}
   for (const metric of DISPLAY_METRICS) {
-    const src = metadata[metricSourceKey(metric)]
+    const src = metaString(metadata, String(metricSourceKey(metric)))
     if (src && src !== 'custom') selected[metric] = src
     else if (options?.selected[metric]) selected[metric] = options.selected[metric]
   }
 
   const customValues: Partial<Record<WeatherMetric, string>> = {
-    wind_speed: metadata.weather_custom_wind_speed,
-    wind_gust: metadata.weather_custom_wind_gust,
-    hail_size: metadata.weather_custom_hail,
+    wind_speed: metaString(metadata, 'weather_custom_wind_speed') || undefined,
+    wind_gust: metaString(metadata, 'weather_custom_wind_gust') || undefined,
+    hail_size: metaString(metadata, 'weather_custom_hail') || undefined,
   }
 
   const handleSelect = (metric: WeatherMetric, candidateId: string) => {
