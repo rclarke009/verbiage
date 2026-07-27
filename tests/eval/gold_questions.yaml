@@ -64,3 +64,128 @@ questions:
       latitude: 26.976
       longitude: -82.090
     must_mention: ["Maple", "Willow"]
+
+  # --- Expanded set (25): grounded in app/demo_corpus + deliberate refusals ---
+
+  - id: maple_lakeside_shingles
+    question: "What roof damage was observed at 100 Maple Court in Lakeside?"
+    category: answerable_single
+    must_mention: ["shingles", "windward"]
+
+  - id: birch_riverton_crown_molding
+    question: "What interior cracking was found in the primary bedroom at 200 Birch Avenue in Riverton?"
+    category: answerable_single
+    must_mention: ["crown molding", "water intrusion"]
+
+  - id: farville_bathroom_window
+    question: "Describe the hall bathroom damage at 200 Remote Example Street in Farville."
+    category: answerable_single
+    must_mention: ["window frame", "wall cavity"]
+
+  - id: cedar_brookfield_plumbing
+    question: "What caused the interior moisture at 300 Cedar Lane in Brookfield?"
+    category: answerable_single
+    must_mention: ["plumbing", "kitchen sink"]
+
+  - id: willow_hillcrest_moisture_readings
+    question: "What did moisture readings show at 400 Willow Way in Hillcrest?"
+    category: answerable_single
+    must_mention: ["moisture readings", "elevated"]
+
+  - id: windward_farpoint_family_room
+    question: "What floor tile condition was reported at 600 Windward Example Lane in Farpoint?"
+    category: answerable_single
+    must_mention: ["family room", "adhering"]
+
+  - id: duneville_chimney_cricket
+    question: "What storm-created opening was found near the chimney at 800 Sand Example Road in Duneville?"
+    category: answerable_single
+    must_mention: ["chimney cricket", "flashing"]
+
+  - id: duneville_west_stucco
+    question: "What exterior stucco damage was noted on the west elevation at 800 Sand Example Road in Duneville?"
+    category: answerable_single
+    must_mention: ["stucco", "window corners"]
+
+  - id: surfside_attic_staining
+    question: "What attic conditions were observed at 150 Ocean Example Terrace in Surfside?"
+    category: answerable_single
+    must_mention: ["attic sheathing", "water staining"]
+
+  - id: gulfview_living_room_ceiling
+    question: "What interior ceiling damage was found at 500 Palm Example Boulevard in Gulfview?"
+    category: answerable_single
+    must_mention: ["living room", "ceiling", "moisture"]
+
+  - id: groveport_metal_roof_intact
+    question: "Were the metal roof panels damaged at 250 Mango Example Court in Groveport?"
+    category: answerable_single
+    must_mention: ["metal roof", "intact"]
+
+  - id: sampletown_garage_ceiling
+    question: "What garage water damage was documented at 100 Harbor Example Road in Sampletown?"
+    category: answerable_single
+    must_mention: ["garage", "ceiling", "drywall"]
+
+  - id: sampletown_bedroom_windowsill
+    question: "What windowsill damage was observed at 100 Harbor Example Road in Sampletown?"
+    category: answerable_single
+    must_mention: ["windowsill", "cracking"]
+
+  - id: plumbing_not_storm_multi
+    question: "Which inspected properties had interior moisture from a plumbing leak rather than a storm-created opening?"
+    category: answerable_multi
+    must_mention: ["plumbing", "kitchen sink"]
+
+  - id: hip_roof_south_slope_multi
+    question: "Which reports describe high-velocity winds tearing shingles on a south-facing slope of a hip roof?"
+    category: answerable_multi
+    must_mention: ["south-facing", "hip roof", "underlayment"]
+
+  - id: tile_roof_no_storm_opening_multi
+    question: "Which tile-roof properties had intact roof tiles and no storm-created opening?"
+    category: answerable_multi
+    must_mention: ["tile", "no storm-created opening"]
+
+  - id: nearby_ian_willow
+    question: "Which nearby properties share the same storm as this claim?"
+    category: answerable_multi
+    query_mode: nearby_storm
+    claim_context:
+      address: "400 Willow Way, Hillcrest, FL 30004"
+      storm_id: ian-2022
+      latitude: 26.968
+      longitude: -82.115
+    must_mention: ["Maple", "Harbor"]
+
+  - id: wildfire_california_ash
+    question: "Summarize wildfire ash and smoke damage findings for California properties in the inspections."
+    category: unanswerable
+
+  - id: tornado_oklahoma
+    question: "What tornado damage was documented on roofs in Oklahoma?"
+    category: unanswerable
+
+  - id: solar_panel_hail
+    question: "What hail impact damage was found on rooftop solar panels?"
+    category: unanswerable
+
+  - id: asbestos_survey
+    question: "What asbestos-containing materials were identified during the inspections?"
+    category: unanswerable
+
+  - id: snow_load_alaska
+    question: "Which roofs collapsed under snow load in Alaska according to the reports?"
+    category: unanswerable
+
+  - id: flood_payout_amount
+    question: "How much did the insurer pay for flood claims on these properties?"
+    category: unanswerable
+
+  - id: lightning_electronics
+    question: "What lightning-strike damage to electronics and appliances was reported?"
+    category: unanswerable
+
+  - id: termite_damage
+    question: "Describe the termite and wood-destroying insect damage found in the inspections."
+    category: unanswerable

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import type { LookupResult, Source } from '../types'
+import type { LookupResult, RetrievalDebug, Source } from '../types'
 
 import { apiOrigin, getAuthFetchInit } from '../lib/api'
 
@@ -8,6 +8,19 @@ const RESULTS_STORAGE_KEY = 'verbiage-search-results'
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function parseRetrievalDebug(raw: unknown): RetrievalDebug | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  if (typeof d.rewritten_query !== 'string' || typeof d.original_query !== 'string') {
+    return null
+  }
+  return {
+    retried: d.retried !== false,
+    original_query: d.original_query,
+    rewritten_query: d.rewritten_query,
+  }
 }
 
 function loadStoredResults(): LookupResult[] {
@@ -136,6 +149,7 @@ export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto')
                     sources: Array.isArray(data.sources) ? (data.sources as Source[]) : r.sources,
                     chunksUsed:
                       typeof data.chunks_used === 'number' ? data.chunks_used : r.chunksUsed,
+                    retrievalDebug: parseRetrievalDebug(data.retrieval_debug),
                   }))
                 } else if (currentEvent === 'error') {
                   const detail = typeof data.detail === 'string' ? data.detail : ''

@@ -1,0 +1,507 @@
+# Provisioned alert rules for verbiage-prod (Render). Tune thresholds after you have baseline traffic.
+# Linked to dashboard verbiage-rag where panels exist. Import the same PromQL into Grafana Cloud manually.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: verbiage-prod-1m
+    folder: Verbiage Alerts
+    interval: 1m
+    rules:
+      - uid: verbiage_prod_scrape_down
+        title: Prod — metrics scrape target down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: up{job="verbiage-prod"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 13
+        noDataState: Alerting
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Prometheus cannot scrape verbiage-prod /metrics
+          description: Check Render service health, METRICS_ENABLED, METRICS_TOKEN, and the scrape job in prometheus.yml.
+        labels:
+          team: verbiage
+          severity: critical
+        isPaused: false
+
+      - uid: verbiage_prod_5xx_rate
+        title: Prod — HTTP 5xx rate elevated
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: sum(rate(http_requests_total{job="verbiage-prod",status_class="5xx"}[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.01
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 2
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: verbiage-prod is returning 5xx responses
+          description: 5xx rate exceeded 0.01 req/s for 5 minutes. Check Render logs and upstream_timeouts_total on the Verbiage RAG dashboard.
+        labels:
+          team: verbiage
+          severity: warning
+        isPaused: false
+
+      - uid: verbiage_prod_upstream_timeout
+        title: Prod — upstream timeout
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: sum(increase(upstream_timeouts_total{job="verbiage-prod"}[15m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 8
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: OpenAI or embedding API timed out on verbiage-prod
+          description: At least one upstream_timeouts_total increment in the last 15 minutes. Check OpenAI status and Render CPU/memory.
+        labels:
+          team: verbiage
+          severity: warning
+        isPaused: false
+
+      - uid: verbiage_prod_low_quality
+        title: Prod — low-quality retrieval spike
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: sum(rate(rag_retrieval_low_quality_total{job="verbiage-prod"}[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.1
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 5
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: Many asks have weak top-1 cosine similarity on verbiage-prod
+          description: Low-quality retrieval rate exceeded 0.1/s for 10 minutes. Requires RAG_SIMILARITY_ALERT_THRESHOLD on Render. May indicate corpus drift or bad queries — not always a 5xx.
+        labels:
+          team: verbiage
+          severity: warning
+        isPaused: false
+
+      - uid: verbiage_prod_ask_latency
+        title: Prod — /ask latency p95 high
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="verbiage-prod",route=~"/ask.*",method="POST"}[5m])) by (le))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 120
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 9
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: POST /ask p95 latency exceeds 120s on verbiage-prod
+          description: End-to-end ask latency is high. Check rag_phase_seconds (embed vs llm) and enable OTEL traces for a single slow request.
+        labels:
+          team: verbiage
+          severity: warning
+        isPaused: false
+
+      - uid: verbiage_prod_stream_retrieval_fail
+        title: Prod — stream retrieval failure
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: sum(increase(rag_stream_retrieval_failed_total{job="verbiage-prod"}[15m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: verbiage-rag
+        panelId: 12
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: /ask/stream embed/retrieve failed on verbiage-prod
+          description: rag_stream_retrieval_failed_total increased in the last 15 minutes. Clients receive SSE error events.
+        labels:
+          team: verbiage
+          severity: warning
+        isPaused: false

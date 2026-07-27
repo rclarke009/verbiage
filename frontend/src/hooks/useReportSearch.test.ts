@@ -81,6 +81,24 @@ describe('useReportSearch', () => {
     expect(r.answer).toBe('Error: HTTP 502')
   })
 
+  it('parses retrieval_debug from the sources event', async () => {
+    mockFetch(
+      sseResponse([
+        'event: sources\ndata: {"sources": [], "chunks_used": 0, "retrieval_debug": {"retried": true, "original_query": "q1", "rewritten_query": "intact roof tiles"}}\n\n',
+        'event: token\ndata: {"token": "ok"}\n\n',
+      ]),
+    )
+
+    const { result } = renderHook(() => useReportSearch())
+    await act(async () => {
+      await result.current.search('q1')
+    })
+
+    const r = result.current.results[0]
+    expect(r.retrievalDebug?.retried).toBe(true)
+    expect(r.retrievalDebug?.rewritten_query).toBe('intact roof tiles')
+  })
+
   it('parses an event whose type and data arrive in separate network reads', async () => {
     // currentEvent must persist across read() chunks, not reset per chunk.
     mockFetch(sseResponse(['event: token\n', 'data: {"token": "split"}\n\n']))

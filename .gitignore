@@ -2,6 +2,7 @@
 .env
 *.pem
 observability/secrets/metrics_token
+observability/.env
 
 # Python
 __pycache__/

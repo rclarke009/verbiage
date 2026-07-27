@@ -1,17 +1,19 @@
 """SSE wire contract for POST /ask/stream.
 
 These lock the frames the SPA's useReportSearch hook parses: an `event: error`
-frame on a prepare/retrieval failure, and an `event: token` refusal when there is
-no relevant context. TestClient is used WITHOUT a context manager so the app
-lifespan (and its real DB connection) never runs; with_db_conn_retry is patched.
+frame on a prepare/retrieval failure, and sources+token frames for refusals and
+answers (including optional retrieval_debug after rewrite-once). TestClient is
+used WITHOUT a context manager so the app lifespan (and its real DB connection)
+never runs; with_db_conn_retry is patched.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 import app.main as main
 from app.auth import get_ask_user, get_current_user
+from app.models import RetrievalDebug
 
 
 def _client() -> TestClient:
@@ -50,12 +52,15 @@ def test_ask_stream_emits_error_frame_when_prepare_fails():
 
 
 def test_ask_stream_emits_refusal_token_when_no_context():
-    """No relevant chunks -> a token refusal plus an empty sources frame, no error."""
+    """No relevant chunks -> sources then a token refusal, no error."""
     client = _client()
-    rate_limiter = MagicMock()
-    # do_prepare returns (rate_limiter, prompt, top_chunks); prompt=None is the
-    # "no context" path, which must not call the LLM or the rate limiter.
-    prepared = (rate_limiter, None, [])
+    # do_prepare returns (kind, answer, top_chunks, retrieval_debug)
+    prepared = (
+        "rag",
+        "I don't have relevant context to answer that question.",
+        [],
+        None,
+    )
     try:
         with patch.object(
             main, "with_db_conn_retry", new=AsyncMock(return_value=prepared)
@@ -68,4 +73,24 @@ def test_ask_stream_emits_refusal_token_when_no_context():
     assert "don't have relevant context" in body
     assert "event: sources" in body
     assert "event: error" not in body
-    rate_limiter.acquire.assert_not_called()
+
+
+def test_ask_stream_includes_retrieval_debug_when_rewrite_ran():
+    client = _client()
+    debug = RetrievalDebug(
+        retried=True,
+        original_query="Which tile-roof properties had intact roof tiles?",
+        rewritten_query="intact roof tiles. No storm-created opening was identified",
+    )
+    prepared = ("rag", "412 Example Drive had intact tiles.", [], debug)
+    try:
+        with patch.object(
+            main, "with_db_conn_retry", new=AsyncMock(return_value=prepared)
+        ):
+            body = _post_stream(client)
+    finally:
+        _clear_overrides()
+
+    assert "retrieval_debug" in body
+    assert "rewritten_query" in body
+    assert "intact roof tiles" in body

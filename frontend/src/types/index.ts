@@ -24,6 +24,14 @@ export interface LookupResult {
   sources: Source[]
   chunksUsed: number
   streaming: boolean
+  retrievalDebug?: RetrievalDebug | null
+}
+
+/** Present when Ask ran soft-refuse → rewrite-once corrective retrieval. */
+export interface RetrievalDebug {
+  retried: boolean
+  original_query: string
+  rewritten_query: string
 }
 
 /** A passage the user kept aside to reuse while drafting a new report. */
@@ -49,6 +57,7 @@ export interface AskResponseJson {
   answer: string
   top_chunks: RetrievedChunk[]
   prompt_tokens_estimate?: number | null
+  retrieval_debug?: RetrievalDebug | null
 }
 
 export interface DocumentSummary {

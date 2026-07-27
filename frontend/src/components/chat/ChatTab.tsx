@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useReportSearch } from '../../hooks/useReportSearch'
 import { useCollectedPassages } from '../../hooks/useCollectedPassages'
 import { useAuth } from '../../context/AuthContext'
@@ -5,11 +6,33 @@ import { ResultCard } from './ResultCard'
 import { CollectedPanel } from './CollectedPanel'
 import { ChatInput } from './ChatInput'
 
+const RETRIEVAL_DEBUG_STORAGE_KEY = 'verbiage-show-retrieval-debug'
+
+function loadShowRetrievalDebug(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    const raw = window.localStorage.getItem(RETRIEVAL_DEBUG_STORAGE_KEY)
+    if (raw === null) return true
+    return raw === '1' || raw === 'true'
+  } catch {
+    return true
+  }
+}
+
 export function ChatTab() {
   const { publicConfig } = useAuth()
   const demoMode = !!publicConfig?.demo_mode
   const { results, searching, search, removeResult, clearResults } = useReportSearch()
   const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages()
+  const [showRetrievalDebug, setShowRetrievalDebug] = useState(loadShowRetrievalDebug)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(
+      RETRIEVAL_DEBUG_STORAGE_KEY,
+      showRetrievalDebug ? '1' : '0',
+    )
+  }, [showRetrievalDebug])
 
   return (
     <div style={{ display: 'flex', gap: 20, height: 'calc(100vh - 140px)' }}>
@@ -23,6 +46,25 @@ export function ChatTab() {
               : undefined
           }
         />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'var(--app-text-subtle)',
+            marginBottom: 4,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showRetrievalDebug}
+            onChange={e => setShowRetrievalDebug(e.target.checked)}
+          />
+          Show retrieval retries (rewritten query)
+        </label>
 
         {results.length === 0 ? (
           <div style={{ color: 'var(--app-text-subtle)', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
@@ -36,7 +78,13 @@ export function ChatTab() {
           <>
             <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, marginTop: 4 }}>
               {results.map(r => (
-                <ResultCard key={r.id} result={r} onSave={savePassage} onRemove={removeResult} />
+                <ResultCard
+                  key={r.id}
+                  result={r}
+                  onSave={savePassage}
+                  onRemove={removeResult}
+                  showRetrievalDebug={showRetrievalDebug}
+                />
               ))}
             </div>
             <button

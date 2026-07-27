@@ -160,6 +160,40 @@ print('expired:', p['exp'] < time.time())
 
 **Latency** — embed + LLM dominate p95; retrieval stays sub-second. Prefer **`/ask/stream`** in the SPA for demos; sync `/ask` can look much slower under concurrent load.
 
+## Alerting (email notifications)
+
+Provisioned rules live in `grafana/provisioning/alerting/` and load on Grafana startup. They target **`verbiage-prod`** only (Render). Your **Profile → Email** field in Grafana is **not** where alerts go.
+
+### Local stack setup
+
+1. Copy `observability/.env.example` → `observability/.env`.
+2. Edit **`grafana/provisioning/alerting/alert_resources.yaml`** — set `addresses:` under `verbiage-email` to your real address (default is `you@example.com`).
+3. Configure **`GF_SMTP_*`** in `.env` so Grafana can send mail (see `.env.example`).
+4. Restart Grafana: `docker compose restart grafana` (from **`observability/`**).
+
+**Alerting → Alert rules → Verbiage Alerts** lists six prod rules. They evaluate even without SMTP; email only sends when SMTP is configured.
+
+| Rule | Fires when | Default threshold |
+|------|------------|-------------------|
+| Metrics scrape target down | `up{job="verbiage-prod"} < 1` | 2m |
+| HTTP 5xx rate elevated | 5xx rate > 0.01 req/s | 5m |
+| Upstream timeout | Any timeout in 15m | immediate |
+| Low-quality retrieval spike | `rag_retrieval_low_quality_total` rate > 0.1/s | 10m |
+| /ask latency p95 high | p95 > 120s | 10m |
+| Stream retrieval failure | Any failure in 15m | immediate |
+
+Tune thresholds in the provisioned YAML (or pause rules) after you have baseline traffic. Low-quality alerts need **`RAG_SIMILARITY_ALERT_THRESHOLD`** on Render.
+
+### Grafana Cloud (prod)
+
+File provisioning is **not** available on Grafana Cloud. Create the same rules manually:
+
+1. **Alerting → Contact points** → Email → your address (not Profile).
+2. **Alerting → Alert rules → New alert rule** — use the PromQL from `alert_rules.yaml` (replace `job="verbiage-prod"` if your scrape job name differs).
+3. Set **`RAG_SIMILARITY_ALERT_THRESHOLD=0.35`** on Render for low-quality alerts to increment.
+
+See [docs/prod-observability.md](../docs/prod-observability.md#alert-notifications-grafana-cloud).
+
 ## Grafana MCP / Grafana Cloud
 
 This folder is a **self-hosted** stack. For **Grafana Cloud** and **Render prod** env vars (metrics always on, traces on demand, incident playbook), see **[docs/prod-observability.md](../docs/prod-observability.md)**.

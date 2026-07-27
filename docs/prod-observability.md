@@ -187,3 +187,28 @@ Only if you skip `METRICS_TOKEN`. Always set a token on prod.
 
 **Demo service (`verbiage-demo`)?**  
 Same vars apply; use `OTEL_SERVICE_NAME=verbiage-demo` and a separate Prometheus `job_name` if you scrape both.
+
+---
+
+## Alert notifications (Grafana Cloud)
+
+The **Profile → Email** field in Grafana is your user account, not the alert destination. For prod email notifications:
+
+1. **Alerting → Contact points → New contact point → Email** — enter your real address.
+2. **Alerting → Notification policies** — ensure firing alerts route to that contact point (Grafana Cloud includes email by default).
+3. **Alerting → Alert rules** — create rules against your Mimir/Prometheus datasource.
+
+Example rules (same PromQL as `observability/grafana/provisioning/alerting/alert_rules.yaml`; adjust `job` if your scrape job is not `verbiage-prod`):
+
+| Alert | PromQL (instant) | For | Threshold |
+|-------|------------------|-----|-----------|
+| Scrape down | `up{job="verbiage-prod"}` | 2m | `< 1` |
+| 5xx spike | `sum(rate(http_requests_total{job="verbiage-prod",status_class="5xx"}[5m]))` | 5m | `> 0.01` |
+| Upstream timeout | `sum(increase(upstream_timeouts_total{job="verbiage-prod"}[15m]))` | 0m | `> 0` |
+| Low-quality retrieval | `sum(rate(rag_retrieval_low_quality_total{job="verbiage-prod"}[5m]))` | 10m | `> 0.1` |
+| /ask p95 slow | `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="verbiage-prod",route=~"/ask.*",method="POST"}[5m])) by (le))` | 10m | `> 120` |
+| Stream retrieve fail | `sum(increase(rag_stream_retrieval_failed_total{job="verbiage-prod"}[15m]))` | 0m | `> 0` |
+
+Set **`RAG_SIMILARITY_ALERT_THRESHOLD=0.35`** on Render so the low-quality counter increments before the hard relevance gate.
+
+For the **local Docker stack**, edit `observability/grafana/provisioning/alerting/alert_resources.yaml` (contact point `addresses`), copy `observability/.env.example` → `observability/.env`, set `GF_SMTP_*`, and restart Grafana — rules are provisioned automatically. See [observability/README.md § Alerting](../observability/README.md#alerting-email-notifications).

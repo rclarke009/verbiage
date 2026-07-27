@@ -6,6 +6,7 @@ interface Props {
   result: LookupResult
   onSave: (text: string, query: string, sources: Source[]) => void
   onRemove: (id: string) => void
+  showRetrievalDebug?: boolean
 }
 
 /** Returns the user's current selection if it falls inside `container`, else ''. */
@@ -18,7 +19,7 @@ function selectionWithin(container: HTMLElement | null): string {
   return sel.toString().trim()
 }
 
-export function ResultCard({ result, onSave, onRemove }: Props) {
+export function ResultCard({ result, onSave, onRemove, showRetrievalDebug = true }: Props) {
   const answerRef = useRef<HTMLDivElement>(null)
   const [saved, setSaved] = useState(false)
 
@@ -30,6 +31,8 @@ export function ResultCard({ result, onSave, onRemove }: Props) {
     setSaved(true)
     window.setTimeout(() => setSaved(false), 1500)
   }
+
+  const debug = showRetrievalDebug ? result.retrievalDebug : null
 
   return (
     <div
@@ -54,6 +57,29 @@ export function ResultCard({ result, onSave, onRemove }: Props) {
           ×
         </button>
       </div>
+
+      {debug && (
+        <div
+          style={{
+            marginBottom: 10,
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px dashed var(--app-border)',
+            background: 'var(--app-bg-elevated, transparent)',
+            fontSize: 12,
+            color: 'var(--app-text-subtle)',
+            lineHeight: 1.45,
+          }}
+        >
+          <div style={{ fontWeight: 600, color: 'var(--app-text)', marginBottom: 4 }}>
+            Retrieval retried once
+          </div>
+          <div>
+            <span style={{ opacity: 0.8 }}>Rewritten: </span>
+            <code style={{ fontSize: 11, wordBreak: 'break-word' }}>{debug.rewritten_query}</code>
+          </div>
+        </div>
+      )}
 
       <div
         ref={answerRef}

@@ -44,6 +44,7 @@ from app.db import (
 from app.models import (
     AskRequest,
     AskResponse,
+    RetrievalDebug,
     RetrievedChunk,
     ChunkingOptions,
     DocumentSummary,
@@ -61,6 +62,7 @@ from app.models import (
     SignupRequest,
     SignupResponse,
 )
+from app.corrective import is_soft_refuse, rewrite_query_for_retry
 from app.rate_limit import TokenBucket
 from app.indexing import index_document, reindex_document
 from app.embeddings import HttpEmbedder
@@ -964,8 +966,12 @@ def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> 
     context_str = "\n".join(context_parts) if context_parts else "(No relevant context found.)"
     return (
         "You help reuse text from past engineering reports. Using only the context below, "
-        "quote any passages that are relevant to the question. If none of the context is "
-        'relevant, reply exactly: "No source documents contain that information."\n\n'
+        "quote any passages that are relevant to the question. "
+        "When more than one context block matches, list each matching report by its title "
+        "(or doc_id) and include a short grounded quote or key facts for each — do not "
+        "collapse multiple properties into a single \"the subject property\" narrative. "
+        "If none of the context is relevant, reply exactly: "
+        '"No source documents contain that information."\n\n'
         "Context:\n" + context_str + "\n\n"
         "Question: " + question
     )
@@ -1138,6 +1144,107 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
     return payload
 
 
+def _sse_sources_event(
+    top_chunks: list[RetrievedChunk],
+    retrieval_debug: RetrievalDebug | None = None,
+) -> str:
+    payload: dict = {
+        "sources": _sources_payload_for_sse(top_chunks),
+        "chunks_used": len(top_chunks),
+    }
+    if retrieval_debug is not None:
+        payload["retrieval_debug"] = retrieval_debug.model_dump()
+    return f"event: sources\ndata: {json.dumps(payload)}\n\n"
+
+
+def _note_rewrite_once(original: str, rewritten: str) -> None:
+    span = trace.get_current_span()
+    if span is not None:
+        span.set_attribute("rag.rewrite_once", True)
+        span.set_attribute("rag.rewrite_query", rewritten[:500])
+        span.set_attribute("rag.original_query", original[:500])
+
+
+async def _run_ask_rag_with_corrective(
+    conn,
+    ask_request: AskRequest,
+    *,
+    embedder: HttpEmbedder,
+    rag_endpoint: str,
+    reranker,
+    rate_limiter,
+) -> AskResponse:
+    """Retrieve → generate; on soft refuse, rewrite query once and try again.
+
+    Second-pass prompt still uses the *original* user question with the new chunks.
+    Hard gate / empty retrieve refuses without LLM and without rewrite.
+    """
+    original_question = ask_request.question
+    logger.info("ask: embedding query (1 text)")
+    t_embed = time.perf_counter()
+    with rag_phase_span("embed", endpoint=rag_endpoint):
+        query_vectors = await embedder.embed_many([original_question])
+    record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
+    query_vec = query_vectors[0]
+
+    t_retrieve = time.perf_counter()
+    top_chunks = await _retrieve_for_ask(
+        conn, ask_request, query_vec, embedder.model, rag_endpoint, reranker,
+    )
+    record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+
+    prompt = _ask_prompt_from_chunks(original_question, top_chunks)
+    if prompt is None:
+        record_no_context_response(rag_endpoint)
+        set_refused_attribute(trace.get_current_span(), True)
+        return AskResponse(
+            answer="I don't have relevant context to answer that question.",
+            top_chunks=[],
+        )
+
+    await rate_limiter.acquire()
+    t_llm = time.perf_counter()
+    with rag_phase_span("llm", endpoint=rag_endpoint):
+        answer = await llm_client.answer_with_context(prompt)
+    record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
+
+    if not is_soft_refuse(answer):
+        return AskResponse(answer=answer, top_chunks=top_chunks)
+
+    rewritten = rewrite_query_for_retry(original_question)
+    if not rewritten:
+        return AskResponse(answer=answer, top_chunks=top_chunks)
+
+    logger.info("ask: soft refuse — rewrite-once retry")
+    _note_rewrite_once(original_question, rewritten)
+    retry_request = ask_request.model_copy(update={"question": rewritten})
+    t_embed = time.perf_counter()
+    with rag_phase_span("embed", endpoint=rag_endpoint):
+        retry_vectors = await embedder.embed_many([rewritten])
+    record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
+    t_retrieve = time.perf_counter()
+    retry_chunks = await _retrieve_for_ask(
+        conn, retry_request, retry_vectors[0], embedder.model, rag_endpoint, reranker,
+    )
+    record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+    retry_prompt = _ask_prompt_from_chunks(original_question, retry_chunks)
+    debug = RetrievalDebug(
+        retried=True,
+        original_query=original_question,
+        rewritten_query=rewritten,
+    )
+    if retry_prompt is None:
+        # Keep first soft refuse; still surface that we retried retrieval.
+        return AskResponse(answer=answer, top_chunks=top_chunks, retrieval_debug=debug)
+
+    await rate_limiter.acquire()
+    t_llm = time.perf_counter()
+    with rag_phase_span("llm", endpoint=rag_endpoint):
+        answer = await llm_client.answer_with_context(retry_prompt)
+    record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
+    return AskResponse(answer=answer, top_chunks=retry_chunks, retrieval_debug=debug)
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask(
     request: Request,
@@ -1160,38 +1267,14 @@ async def ask(
         if route == "nearby_storm":
             return await _nearby_storm_ask(conn, ask_request)
 
-        embedder = HttpEmbedder()
-        logger.info("ask: embedding query (1 text)")
-        t_embed = time.perf_counter()
-        with rag_phase_span("embed", endpoint=rag_endpoint):
-            query_vectors = await embedder.embed_many([ask_request.question])
-        record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
-        logger.info("ask: embedding succeeded")
-        query_vec = query_vectors[0]
-
-        t_retrieve = time.perf_counter()
-        top_chunks = await _retrieve_for_ask(
-            conn, ask_request, query_vec, embedder.model, rag_endpoint,
-            request.app.state.reranker,
+        return await _run_ask_rag_with_corrective(
+            conn,
+            ask_request,
+            embedder=HttpEmbedder(),
+            rag_endpoint=rag_endpoint,
+            reranker=request.app.state.reranker,
+            rate_limiter=rate_limiter,
         )
-        record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
-
-        prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
-        if prompt is None:
-            record_no_context_response(rag_endpoint)
-            set_refused_attribute(trace.get_current_span(), True)
-            answer = "I don't have relevant context to answer that question."
-            return AskResponse(answer=answer, top_chunks=[])
-
-        logger.info("ask: acquiring rate limit token")
-        await rate_limiter.acquire()
-        logger.info("ask: rate limit acquired, calling LLM")
-        t_llm = time.perf_counter()
-        with rag_phase_span("llm", endpoint=rag_endpoint):
-            answer = await llm_client.answer_with_context(prompt)
-        record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
-        logger.info("ask: LLM answered successfully")
-        return AskResponse(answer=answer, top_chunks=top_chunks)
 
     return await with_db_conn_retry(request, do_ask)
 
@@ -1202,7 +1285,11 @@ async def ask_stream(
     ask_request: AskRequest,
     user_id: str = Depends(get_ask_user),
 ):
-    """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk."""
+    """SSE stream: ``event: sources`` then ``event: token`` (JSON payloads), aligned with SPA useStreamingAsk.
+
+    Corrective rewrite-once buffers the first LLM call; the client still receives
+    sources (final chunks + optional retrieval_debug) then answer tokens.
+    """
     if is_demo_mode():
         await acquire_demo_ask_quota(request, user_id)
 
@@ -1223,24 +1310,17 @@ async def ask_stream(
                     "Provide claim_context with storm_id and an address or coordinates."
                 )
                 top_chunks = []
-            return None, answer, top_chunks
+            return ("nearby", answer, top_chunks, None)
 
-        rate_limiter = request.app.state.rate_limiter
-        embedder = HttpEmbedder()
-        logger.info("ask_stream: embedding query (1 text)")
-        t_embed = time.perf_counter()
-        with rag_phase_span("embed", endpoint=rag_endpoint):
-            query_vectors = await embedder.embed_many([ask_request.question])
-        record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
-        query_vec = query_vectors[0]
-        t_retrieve = time.perf_counter()
-        top_chunks = await _retrieve_for_ask(
-            conn, ask_request, query_vec, embedder.model, rag_endpoint,
-            request.app.state.reranker,
+        result = await _run_ask_rag_with_corrective(
+            conn,
+            ask_request,
+            embedder=HttpEmbedder(),
+            rag_endpoint=rag_endpoint,
+            reranker=request.app.state.reranker,
+            rate_limiter=request.app.state.rate_limiter,
         )
-        record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
-        prompt = _ask_prompt_from_chunks(ask_request.question, top_chunks)
-        return rate_limiter, prompt, top_chunks
+        return ("rag", result.answer, result.top_chunks, result.retrieval_debug)
 
     async def event_iter():
         try:
@@ -1250,47 +1330,15 @@ async def ask_stream(
             yield f"event: error\ndata: {json.dumps({'detail': 'retrieval_failed'})}\n\n"
             return
 
-        # Nearby-storm route returns (None, answer, chunks) — no LLM.
-        if prepared[0] is None and prepared[1] is not None:
-            _, answer, top_chunks = prepared
-            if not top_chunks:
-                record_no_context_response(rag_endpoint)
-            payload = {"sources": _sources_payload_for_sse(top_chunks), "chunks_used": len(top_chunks)}
-            yield f"event: sources\ndata: {json.dumps(payload)}\n\n"
-            yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
-            return
-
-        rate_limiter, prompt, top_chunks = prepared
-
-        if prompt is None:
+        kind, answer, top_chunks, retrieval_debug = prepared
+        if kind == "nearby" and not top_chunks:
+            record_no_context_response(rag_endpoint)
+        if kind == "rag" and not top_chunks:
             record_no_context_response(rag_endpoint)
             set_refused_attribute(trace.get_current_span(), True)
-            msg = json.dumps({"token": "I don't have relevant context to answer that question."})
-            yield f"event: token\ndata: {msg}\n\n"
-            yield f"event: sources\ndata: {json.dumps({'sources': [], 'chunks_used': 0})}\n\n"
-            return
 
-        payload = {"sources": _sources_payload_for_sse(top_chunks), "chunks_used": len(top_chunks)}
-        yield f"event: sources\ndata: {json.dumps(payload)}\n\n"
-
-        await rate_limiter.acquire()
-        t_llm = time.perf_counter()
-        try:
-            with rag_phase_span("llm", endpoint=rag_endpoint):
-                async for delta in llm_client.answer_with_context_stream(prompt):
-                    if delta:
-                        yield f"event: token\ndata: {json.dumps({'token': delta})}\n\n"
-        except asyncio.CancelledError:
-            raise
-        except LLMRateLimitedError:
-            err_msg = json.dumps({"token": "\\n(Error: LLM rate limited.)"})
-            yield f"event: token\ndata: {err_msg}\n\n"
-        except (LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError) as e:
-            err_msg = json.dumps({"token": "\\n(Error: LLM unavailable.)"})
-            yield f"event: token\ndata: {err_msg}\n\n"
-            logger.warning("ask_stream LLM error: %s", e)
-        finally:
-            record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
+        yield _sse_sources_event(top_chunks, retrieval_debug)
+        yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
 
     return StreamingResponse(event_iter(), media_type="text/event-stream")
 

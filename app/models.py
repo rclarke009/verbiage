@@ -114,10 +114,22 @@ class RetrievedChunk(BaseModel):
         description="Distance in miles when returned by structured nearby-storm lookup",
     )
 
+class RetrievalDebug(BaseModel):
+    """Power-user / engineer visibility when corrective rewrite-once ran."""
+
+    retried: bool = Field(default=True, description="True when a second retrieval ran")
+    original_query: str = Field(..., description="User question used for the first retrieve")
+    rewritten_query: str = Field(..., description="Query used for the corrective retrieve")
+
+
 class AskResponse(BaseModel):
     answer: str = Field(...,description="Answer from system")
     top_chunks: list[RetrievedChunk] = Field(..., description="top _ chunks")
     prompt_tokens_estimate: int | None = Field(default=None, description="Prompt tokens estimate (optional)")
+    retrieval_debug: RetrievalDebug | None = Field(
+        default=None,
+        description="Present when soft-refuse triggered one rewrite-and-retrieve retry",
+    )
 
 
 class DocumentSummary(BaseModel):
