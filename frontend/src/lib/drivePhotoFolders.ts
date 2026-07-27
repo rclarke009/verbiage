@@ -92,10 +92,29 @@ export function removeDrivePhotoFolder(meta: PropertyMetadata, index: number): P
   return setDrivePhotoFolders(meta, folders)
 }
 
+/** Short label for pasted IDs/URLs (avoid dumping the full Drive URL into the UI). */
+export function labelForLinkedFolder(id: string, rawInput?: string): string {
+  const trimmed = (rawInput ?? '').trim()
+  if (trimmed && !/drive\.google\.com/i.test(trimmed) && trimmed !== id) {
+    return trimmed
+  }
+  if (id.length <= 12) return `Drive folder (${id})`
+  return `Drive folder (${id.slice(0, 8)}…)`
+}
+
+/** Prefer a human folder name; rewrite stored Drive URLs to a short label. */
+export function displayDriveFolderLabel(folder: { id: string; label: string }): string {
+  const label = (folder.label || '').trim()
+  if (!label || /drive\.google\.com/i.test(label) || label === folder.id) {
+    return labelForLinkedFolder(folder.id)
+  }
+  return label
+}
+
 export function parseAndLinkFolder(
   input: string,
 ): { id: string; label: string } | { error: string } {
   const { id, error } = parseDriveFolderInput(input)
   if (!id) return { error: error ?? 'Could not parse folder' }
-  return { id, label: input.trim() }
+  return { id, label: labelForLinkedFolder(id, input) }
 }

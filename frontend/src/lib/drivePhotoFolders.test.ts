@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   addDrivePhotoFolder,
+  displayDriveFolderLabel,
   metaString,
   normalizeDrivePhotoFolders,
   parseAndLinkFolder,
@@ -88,10 +89,19 @@ describe('folder list mutations', () => {
 })
 
 describe('parseAndLinkFolder', () => {
-  it('parses a Drive URL', () => {
-    expect(parseAndLinkFolder('https://drive.google.com/drive/folders/abc_123')).toEqual({
-      id: 'abc_123',
-      label: 'https://drive.google.com/drive/folders/abc_123',
+  it('parses a Drive URL with a short label (not the raw URL)', () => {
+    expect(
+      parseAndLinkFolder('https://drive.google.com/drive/folders/1uQHiszkdkm2KFmLkSx2DmiCDHCzHX8OL'),
+    ).toEqual({
+      id: '1uQHiszkdkm2KFmLkSx2DmiCDHCzHX8OL',
+      label: 'Drive folder (1uQHiszk…)',
+    })
+  })
+
+  it('labels a raw folder id briefly', () => {
+    expect(parseAndLinkFolder('folder_id_here_long')).toEqual({
+      id: 'folder_id_here_long',
+      label: 'Drive folder (folder_i…)',
     })
   })
 
@@ -99,6 +109,21 @@ describe('parseAndLinkFolder', () => {
     expect(parseAndLinkFolder('not a folder!!!')).toEqual({
       error: 'Could not parse a folder ID from that value.',
     })
+  })
+})
+
+describe('displayDriveFolderLabel', () => {
+  it('rewrites stored Drive URLs', () => {
+    expect(
+      displayDriveFolderLabel({
+        id: '1uQHiszkdkm2KFmLkSx2DmiCDHCzHX8OL',
+        label: 'https://drive.google.com/drive/u/1/folders/1uQHiszkdkm2KFmLkSx2DmiCDHCzHX8OL',
+      }),
+    ).toBe('Drive folder (1uQHiszk…)')
+  })
+
+  it('keeps real folder names', () => {
+    expect(displayDriveFolderLabel({ id: 'abc', label: '123 Main St' })).toBe('123 Main St')
   })
 })
 

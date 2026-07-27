@@ -6,6 +6,7 @@ import { useAddressFolderMatch } from '../../hooks/useAddressFolderMatch'
 import { composeFullAddress, type StructuredAddress } from '../../lib/address'
 import {
   addDrivePhotoFolder,
+  displayDriveFolderLabel,
   normalizeDrivePhotoFolders,
   parseAndLinkFolder,
   removeDrivePhotoFolder,
@@ -163,7 +164,7 @@ export function PhotoFolderPanel({
                   }}
                 >
                   <span>
-                    Linked folder: <strong>{folder.label || folder.id}</strong>{' '}
+                    Linked folder: <strong>{displayDriveFolderLabel(folder)}</strong>{' '}
                     <a href={folderUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
                       Open in Drive
                     </a>
