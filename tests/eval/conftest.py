@@ -88,6 +88,7 @@ def _connect(url: str):
 def eval_conn():
     """Ephemeral pgvector DB: (optionally) start container, create schema, seed corpus."""
     from app.db import create_db
+    from embedding_cache import CachedEmbedder
     from seed import seed_corpus_sync
 
     manage = "EVAL_DATABASE_URL" not in os.environ
@@ -102,7 +103,9 @@ def eval_conn():
     try:
         conn = _connect(url)
         create_db(conn)
-        seed_corpus_sync(conn)
+        # Use the committed embeddings cache so seed is offline/deterministic
+        # (matches tests/eval/seed.py and make eval-warm-cache).
+        seed_corpus_sync(conn, embedder=CachedEmbedder())
         yield conn
     finally:
         if conn is not None:

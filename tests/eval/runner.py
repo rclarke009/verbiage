@@ -5,6 +5,8 @@ tweak is reflected in the eval:
     embed (cached) -> _retrieve_for_ask (real auto routing/RRF)
     -> _ask_prompt_from_chunks (exact 8000-char-truncated context)
     -> llm_client.answer_with_context (the generation under test)
+    -> on soft refuse: rewrite_query_for_retry once, re-retrieve, regenerate
+       (mirrors app.main._run_ask_rag_with_corrective)
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import yaml
 
 from app import llm_client
 from app.ask_router import resolve_ask_route, retrieve_nearby_storm_chunks
+from app.corrective import is_soft_refuse, rewrite_query_for_retry
 from app.main import _ask_prompt_from_chunks, _retrieve_for_ask
 from app.models import AskRequest, ClaimContext, RetrievedChunk
 
@@ -148,6 +151,23 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
     # temperature=0: the faithfulness gate must score a reproducible generation, not a
     # different sample each run (default sampling makes the gate flaky on phrasing).
     answer = await llm_client.answer_with_context(prompt, temperature=0.0)
+
+    # Soft-refuse rewrite-once (same contract as _run_ask_rag_with_corrective):
+    # second-pass prompt still uses the original user question with the new chunks.
+    if is_soft_refuse(answer):
+        rewritten = rewrite_query_for_retry(question)
+        if rewritten:
+            retry_req = req.model_copy(update={"question": rewritten})
+            retry_vec = (await embedder.embed_many([rewritten]))[0]
+            retry_chunks = await _retrieve_for_ask(
+                conn, retry_req, retry_vec, embedder.model, "eval", None,
+            )
+            retry_prompt = _ask_prompt_from_chunks(question, retry_chunks)
+            if retry_prompt is not None:
+                answer = await llm_client.answer_with_context(retry_prompt, temperature=0.0)
+                top_chunks = retry_chunks
+                prompt = retry_prompt
+
     # Recover the context that actually reached the model for faithful judging.
     blocks = _included_blocks(top_chunks)
     # The portion of the prompt after "Context:" up to the question is the context.
