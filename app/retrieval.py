@@ -102,15 +102,18 @@ def resolve_auto_mode(question: str) -> Literal["vector", "lexical", "hybrid"]:
 
 _QUOTE_CHARS = "\"\u201c\u201d'\u2018\u2019"
 
+# Polite openers that precede provide/give/show/find/tell (will/can you please…).
+_POLITE_OPENER = r"(?:(?:will|would|can|could)\s+you\s+)?(?:please\s+)?"
+
 # Instructional wrappers that dilute embeddings / AND-kill lexical search.
 # Conservative: do not strip "What … was found at …" gold-style questions.
 _INSTRUCTIONAL_PREFIX = re.compile(
     r"^(?:"
-    r"(?:please\s+)?(?:provide|give|show|find)\s+"
+    rf"{_POLITE_OPENER}(?:provide|give|show|find)\s+"
     r"(?:quotes?|text|passages?|excerpts?|info(?:rmation)?|details?|examples?)?\s*"
     r"(?:about|on|regarding|for|from(?:\s+a\s+report)?(?:\s+about)?)?\s*"
     r"|"
-    r"(?:can\s+you\s+)?tell\s+me\s+(?:more\s+)?(?:about\s+)?"
+    rf"{_POLITE_OPENER}tell\s+me\s+(?:more\s+)?(?:about\s+)?"
     r"|"
     r"looking\s+for\s+(?:quotes?|info(?:rmation)?|text|passages?)?\s*(?:about|on)?\s*"
     r"|"
@@ -119,12 +122,19 @@ _INSTRUCTIONAL_PREFIX = re.compile(
     re.IGNORECASE,
 )
 
+# Trailing corpus fillers left after stripping instructional prefixes.
+_CORPUS_FILLER_SUFFIX = re.compile(
+    r"\s+(?:from|in)\s+(?:our|the)\s+(?:reports?|corpus|documents?)\s*$",
+    re.IGNORECASE,
+)
+
 
 def normalize_retrieval_query(question: str) -> str:
     """Topic text for embed + lexical search (prompt still uses the original question).
 
     Prefer explicit quoted phrases; otherwise strip a small set of instructional
-    prefixes so hybrid cosine stays above the relevance gate for in-corpus topics.
+    prefixes and trailing corpus fillers so hybrid cosine stays above the relevance
+    gate for in-corpus topics (and short topics can route to lexical via auto).
     Returns the original string when stripping would empty it.
     """
     text = (question or "").strip()
@@ -135,6 +145,7 @@ def normalize_retrieval_query(question: str) -> str:
     if phrases:
         return " ".join(phrases)
     stripped = _INSTRUCTIONAL_PREFIX.sub("", text, count=1)
+    stripped = _CORPUS_FILLER_SUFFIX.sub("", stripped)
     stripped = re.sub(r"\s+", " ", stripped).strip()
     return stripped if stripped else text
 

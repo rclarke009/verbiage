@@ -968,6 +968,9 @@ def _ask_prompt_from_chunks(question: str, top_chunks: list[RetrievedChunk]) -> 
     return (
         "You help reuse text from past engineering reports. Using only the context below, "
         "quote any passages that are relevant to the question. "
+        "Only cite a report when its text itself supports the asked topic; do not include "
+        "reports that omit the topic and then claim they are associated, related, or "
+        "consistent with it. "
         "When more than one context block matches, list each matching report by its title "
         "(or doc_id) and include a short grounded quote or key facts for each — do not "
         "collapse multiple properties into a single \"the subject property\" narrative. "

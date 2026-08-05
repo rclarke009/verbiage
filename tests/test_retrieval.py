@@ -232,6 +232,16 @@ def test_resolve_auto_mode_cases(question, expected):
         ("any evidence of hail damage", "hail damage"),
         ("tell me about creased shingles", "creased shingles"),
         ("looking for quotes about soffit damage", "soffit damage"),
+        # polite openers + trailing corpus fillers
+        (
+            "will you please provide information on hail damage from our reports",
+            "hail damage",
+        ),
+        ("can you please provide quotes about hail damage", "hail damage"),
+        ("could you give details regarding creased shingles", "creased shingles"),
+        ("would you tell me about soffit damage", "soffit damage"),
+        ("please provide quotes about hail damage from the reports", "hail damage"),
+        ("hail damage in our documents", "hail damage"),
         # no wrapper / gold-style -> returned unchanged
         ("torn shingles", "torn shingles"),
         ("what's the hail damage in wyoming", "what's the hail damage in wyoming"),
@@ -248,6 +258,15 @@ def test_lexical_query_text(question, expected):
 
 def test_normalize_idempotent_on_topic_phrase():
     assert normalize_retrieval_query(normalize_retrieval_query("signs of shingle damage")) == "shingle damage"
+
+
+def test_fluffy_hail_ask_normalizes_to_lexical_auto_mode():
+    """Polite wrappers must collapse to the same short topic path as 'hail damage'."""
+    fluffy = "will you please provide information on hail damage from our reports"
+    topic = normalize_retrieval_query(fluffy)
+    assert topic == "hail damage"
+    assert resolve_auto_mode(topic) == "lexical"
+    assert resolve_auto_mode(topic) == resolve_auto_mode("hail damage")
 
 
 # --- lexical dispatch: phrase extraction + auto zero-hit fallback ------------
