@@ -54,6 +54,7 @@ def is_refusal(answer: str) -> bool:
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_DOUBLE_QUOTED = re.compile(r'"([^"]{8,})"')
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -71,11 +72,25 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def split_claims(answer: str) -> list[str]:
-    """Decompose an answer into atomic claims (sentence-level, v1)."""
+    """Decompose an answer into atomic claims (sentence-level, v1).
+
+    When the model answers with report quotes (``"..."``), use the quoted text as
+    the claim source so markdown titles do not dilute NLI — and sentence-split
+    inside each quote so multi-sentence blocks stay atomic.
+    """
     if not answer:
         return []
+    quoted = _DOUBLE_QUOTED.findall(answer)
+    if quoted:
+        parts: list[str] = []
+        for passage in quoted:
+            for part in _SENTENCE_SPLIT.split(passage.strip()):
+                part = part.strip()
+                if len(part) >= 8:
+                    parts.append(part)
+        if parts:
+            return parts
     parts = [s.strip() for s in _SENTENCE_SPLIT.split(answer.strip()) if s.strip()]
-    # Drop trivially short fragments (e.g. a stray "Sure." / bullet markers).
     return [p for p in parts if len(p) >= 8]
 
 

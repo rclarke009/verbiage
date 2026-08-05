@@ -13,6 +13,7 @@ from app.report_writer.prompts import build_section_prompt, build_section_retrie
 from app.report_writer.queries import chunks_to_dicts
 from app.report_writer.retrieval import retrieve_similar_chunks
 from app.report_writer.state import ReportWriterState
+from app.retrieval import normalize_retrieval_query
 
 
 def _chunk_sources(chunks: list[dict]) -> list[dict]:
@@ -45,12 +46,13 @@ async def _retrieve_section_chunks(
         images,
         report_type=type_id,
     )
-    query_vectors = await embedder.embed_many([query])
+    retrieval_q = normalize_retrieval_query(query)
+    query_vectors = await embedder.embed_many([retrieval_q])
     conn = get_valid_conn(deps.db_pool)
     try:
         chunks, _ = await retrieve_similar_chunks(
             conn,
-            query,
+            retrieval_q,
             query_vec=query_vectors[0],
             embedding_model=embedder.model,
             reranker=deps.reranker,

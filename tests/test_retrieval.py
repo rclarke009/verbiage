@@ -7,7 +7,7 @@ import pytest
 import app.main as main
 from app.config import RAG_MIN_RELEVANCE_SCORE
 from app.models import AskRequest, RetrievedChunk
-from app.retrieval import FusedHit, _rrf_fuse, lexical_query_text, resolve_auto_mode
+from app.retrieval import FusedHit, _rrf_fuse, lexical_query_text, normalize_retrieval_query, resolve_auto_mode
 
 _BELOW_GATE = RAG_MIN_RELEVANCE_SCORE - 0.1
 _ABOVE_GATE = RAG_MIN_RELEVANCE_SCORE + 0.1
@@ -212,7 +212,7 @@ def test_resolve_auto_mode_cases(question, expected):
     assert resolve_auto_mode(question) == expected
 
 
-# --- lexical_query_text: search the quoted phrase, not the verbose wrapper ----
+# --- lexical_query_text / normalize_retrieval_query ------------------------
 
 
 @pytest.mark.parametrize(
@@ -224,14 +224,30 @@ def test_resolve_auto_mode_cases(question, expected):
         ("\u201ccreased shingles\u201d in this report", "creased shingles"),  # curly quotes
         # multiple quoted phrases are joined
         ('"a phrase" and "another phrase"', "a phrase another phrase"),
-        # no quoted phrase -> returned unchanged
+        # instructional wrappers without quotes -> strip fluff, keep topic
+        ("please provide quotes about hail damage", "hail damage"),
+        ("Please provide text about water damage due to storm created opening",
+         "water damage due to storm created opening"),
+        ("signs of shingle damage", "shingle damage"),
+        ("any evidence of hail damage", "hail damage"),
+        ("tell me about creased shingles", "creased shingles"),
+        ("looking for quotes about soffit damage", "soffit damage"),
+        # no wrapper / gold-style -> returned unchanged
         ("torn shingles", "torn shingles"),
         ("what's the hail damage in wyoming", "what's the hail damage in wyoming"),
+        ("What hail damage was found on the tile roof at 500 Palm Example Boulevard in Gulfview?",
+         "What hail damage was found on the tile roof at 500 Palm Example Boulevard in Gulfview?"),
+        ("recipe for chocolate chip cookies", "recipe for chocolate chip cookies"),
         ("", ""),
     ],
 )
 def test_lexical_query_text(question, expected):
     assert lexical_query_text(question) == expected
+    assert normalize_retrieval_query(question) == expected
+
+
+def test_normalize_idempotent_on_topic_phrase():
+    assert normalize_retrieval_query(normalize_retrieval_query("signs of shingle damage")) == "shingle damage"
 
 
 # --- lexical dispatch: phrase extraction + auto zero-hit fallback ------------
@@ -252,6 +268,26 @@ def test_retrieve_for_ask_lexical_searches_extracted_phrase(monkeypatch):
 
     assert captured["text"] == "creased shingles"  # verbose wrapper stripped
     assert [c.chunk_id for c in out] == ["l"]
+
+
+def test_retrieve_for_ask_hybrid_uses_normalized_lexical_text(monkeypatch):
+    captured: dict[str, object] = {}
+    fused = [FusedHit(chunk=_rc("h", 0.03), rrf_score=0.03, cosine_score=0.8, lexical_score=0.05)]
+
+    def fake_hybrid(conn, query_vec, query_text, top_k, doc_id=None, embedding_model=None, **kwargs):
+        captured["text"] = query_text
+        return fused
+
+    monkeypatch.setattr(main, "retrieve_top_k_hybrid", fake_hybrid)
+    monkeypatch.setattr(main, "record_hybrid_scores", lambda *a, **k: None)
+
+    # Caller already normalized (as _run_ask_rag_with_corrective does); hybrid must
+    # still run lexical_query_text so wrappers never reach tsquery raw.
+    req = AskRequest(question="please provide quotes about hail damage", retrieval_mode="hybrid")
+    out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
+
+    assert captured["text"] == "hail damage"
+    assert [c.chunk_id for c in out] == ["h"]
 
 
 def test_retrieve_for_ask_auto_lexical_zero_hits_falls_back_to_hybrid(monkeypatch):

@@ -102,21 +102,51 @@ def resolve_auto_mode(question: str) -> Literal["vector", "lexical", "hybrid"]:
 
 _QUOTE_CHARS = "\"\u201c\u201d'\u2018\u2019"
 
+# Instructional wrappers that dilute embeddings / AND-kill lexical search.
+# Conservative: do not strip "What … was found at …" gold-style questions.
+_INSTRUCTIONAL_PREFIX = re.compile(
+    r"^(?:"
+    r"(?:please\s+)?(?:provide|give|show|find)\s+"
+    r"(?:quotes?|text|passages?|excerpts?|info(?:rmation)?|details?|examples?)?\s*"
+    r"(?:about|on|regarding|for|from(?:\s+a\s+report)?(?:\s+about)?)?\s*"
+    r"|"
+    r"(?:can\s+you\s+)?tell\s+me\s+(?:more\s+)?(?:about\s+)?"
+    r"|"
+    r"looking\s+for\s+(?:quotes?|info(?:rmation)?|text|passages?)?\s*(?:about|on)?\s*"
+    r"|"
+    r"(?:any\s+)?(?:signs|evidence)\s+of\s+"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def normalize_retrieval_query(question: str) -> str:
+    """Topic text for embed + lexical search (prompt still uses the original question).
+
+    Prefer explicit quoted phrases; otherwise strip a small set of instructional
+    prefixes so hybrid cosine stays above the relevance gate for in-corpus topics.
+    Returns the original string when stripping would empty it.
+    """
+    text = (question or "").strip()
+    if not text:
+        return text
+    phrases = [m.strip(_QUOTE_CHARS).strip() for m in _QUOTED_PHRASE.findall(text)]
+    phrases = [p for p in phrases if p]
+    if phrases:
+        return " ".join(phrases)
+    stripped = _INSTRUCTIONAL_PREFIX.sub("", text, count=1)
+    stripped = re.sub(r"\s+", " ", stripped).strip()
+    return stripped if stripped else text
+
 
 def lexical_query_text(question: str) -> str:
     """Text to feed the lexical retriever for a query.
 
-    When the query contains explicit quoted phrase(s), search only those phrases
-    (the user's exact-match intent) rather than the full natural-language sentence.
-    ``websearch_to_tsquery`` ANDs every content word, so a verbose wrapper like
-    ``please provide text about 'creased shingles'`` would match nothing; reducing
-    it to ``creased shingles`` recovers the intended lexical hits. Queries without a
-    quoted phrase are returned unchanged.
+    Delegates to ``normalize_retrieval_query``: quoted phrases become the search
+    terms; unquoted instructional wrappers are stripped so
+    ``websearch_to_tsquery`` does not AND away every hit.
     """
-    text = (question or "").strip()
-    phrases = [m.strip(_QUOTE_CHARS).strip() for m in _QUOTED_PHRASE.findall(text)]
-    phrases = [p for p in phrases if p]
-    return " ".join(phrases) if phrases else text
+    return normalize_retrieval_query(question)
 
 
 def retrieve_top_k_lexical(

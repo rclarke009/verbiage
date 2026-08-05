@@ -73,6 +73,7 @@ from app.ingest_worker import ingest_worker_loop
 from app.retrieval import (
     FusedHit,
     lexical_query_text,
+    normalize_retrieval_query,
     resolve_auto_mode,
     retrieve_top_k,
     retrieve_top_k_hybrid,
@@ -1062,7 +1063,7 @@ async def _retrieve_for_ask(
             nonlocal resolved_mode
             resolved_mode = "hybrid"
             fused = retrieve_top_k_hybrid(
-                conn, query_vec, ask_request.question, pool_k,
+                conn, query_vec, lexical_query_text(ask_request.question), pool_k,
                 ask_request.doc_id, embedding_model=embedding_model,
             )
             cosine_scores = [h.cosine_score for h in fused if h.cosine_score is not None]
@@ -1178,18 +1179,22 @@ async def _run_ask_rag_with_corrective(
 
     Second-pass prompt still uses the *original* user question with the new chunks.
     Hard gate / empty retrieve refuses without LLM and without rewrite.
+    Embed + retrieve use a normalized topic string so instructional fluff does not
+    dilute cosine below the relevance gate.
     """
     original_question = ask_request.question
+    retrieval_q = normalize_retrieval_query(original_question)
+    retrieval_request = ask_request.model_copy(update={"question": retrieval_q})
     logger.info("ask: embedding query (1 text)")
     t_embed = time.perf_counter()
     with rag_phase_span("embed", endpoint=rag_endpoint):
-        query_vectors = await embedder.embed_many([original_question])
+        query_vectors = await embedder.embed_many([retrieval_q])
     record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
     query_vec = query_vectors[0]
 
     t_retrieve = time.perf_counter()
     top_chunks = await _retrieve_for_ask(
-        conn, ask_request, query_vec, embedder.model, rag_endpoint, reranker,
+        conn, retrieval_request, query_vec, embedder.model, rag_endpoint, reranker,
     )
     record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
 
@@ -1217,10 +1222,11 @@ async def _run_ask_rag_with_corrective(
 
     logger.info("ask: soft refuse — rewrite-once retry")
     _note_rewrite_once(original_question, rewritten)
-    retry_request = ask_request.model_copy(update={"question": rewritten})
+    retry_q = normalize_retrieval_query(rewritten)
+    retry_request = ask_request.model_copy(update={"question": retry_q})
     t_embed = time.perf_counter()
     with rag_phase_span("embed", endpoint=rag_endpoint):
-        retry_vectors = await embedder.embed_many([rewritten])
+        retry_vectors = await embedder.embed_many([retry_q])
     record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
     t_retrieve = time.perf_counter()
     retry_chunks = await _retrieve_for_ask(

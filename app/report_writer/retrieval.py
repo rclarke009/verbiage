@@ -9,6 +9,7 @@ from app.report_writer.constants import corpus_title_terms_for
 from app.retrieval import (
     FusedHit,
     lexical_query_text,
+    normalize_retrieval_query,
     resolve_auto_mode,
     retrieve_top_k,
     retrieve_top_k_hybrid,
@@ -70,22 +71,26 @@ async def retrieve_similar_chunks(
     """Retrieve candidates; return (chunks, best_cosine) for the gate node."""
     pool_k = max(top_k * 4, 20) if reranker is not None else top_k
     best_cosine: float | None = None
+    retrieval_q = normalize_retrieval_query(query)
 
     def _hybrid() -> tuple[list[RetrievedChunk], float | None]:
         nonlocal best_cosine
         fused: list[FusedHit] = retrieve_top_k_hybrid(
-            conn, query_vec, query, pool_k, None, embedding_model=embedding_model,
+            conn, query_vec, lexical_query_text(retrieval_q), pool_k, None,
+            embedding_model=embedding_model,
         )
         cosines = [h.cosine_score for h in fused if h.cosine_score is not None]
         best_cosine = max(cosines) if cosines else None
         return [h.chunk for h in fused], best_cosine
 
     def _run_retrieval() -> tuple[list[RetrievedChunk], float | None]:
-        mode = resolve_auto_mode(query)
+        mode = resolve_auto_mode(retrieval_q)
         if mode == "hybrid":
             return _hybrid()
         if mode == "lexical":
-            candidates = retrieve_top_k_lexical(conn, lexical_query_text(query), pool_k, None)
+            candidates = retrieve_top_k_lexical(
+                conn, lexical_query_text(retrieval_q), pool_k, None,
+            )
             if not candidates:
                 return _hybrid()
             return candidates, None

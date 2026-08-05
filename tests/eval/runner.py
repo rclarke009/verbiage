@@ -22,6 +22,7 @@ from app.ask_router import resolve_ask_route, retrieve_nearby_storm_chunks
 from app.corrective import is_soft_refuse, rewrite_query_for_retry
 from app.main import _ask_prompt_from_chunks, _retrieve_for_ask
 from app.models import AskRequest, ClaimContext, RetrievedChunk
+from app.retrieval import normalize_retrieval_query
 
 try:
     from .embedding_cache import CachedEmbedder
@@ -128,12 +129,14 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
             refused=False,
         )
 
-    vec = (await embedder.embed_many([question]))[0]
+    retrieval_q = normalize_retrieval_query(question)
+    retrieval_req = req.model_copy(update={"question": retrieval_q})
+    vec = (await embedder.embed_many([retrieval_q]))[0]
 
     # reranker=None: the faithfulness gate scores the un-reranked pipeline (pool_k == top_k,
     # exactly the current retrieval) so the eval stays reproducible and never loads the
     # ~100MB cross-encoder. Pass a Reranker() here instead to measure rerank impact.
-    top_chunks = await _retrieve_for_ask(conn, req, vec, embedder.model, "eval", None)
+    top_chunks = await _retrieve_for_ask(conn, retrieval_req, vec, embedder.model, "eval", None)
 
     prompt = _ask_prompt_from_chunks(question, top_chunks)
     if prompt is None:
@@ -157,8 +160,9 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
     if is_soft_refuse(answer):
         rewritten = rewrite_query_for_retry(question)
         if rewritten:
-            retry_req = req.model_copy(update={"question": rewritten})
-            retry_vec = (await embedder.embed_many([rewritten]))[0]
+            retry_q = normalize_retrieval_query(rewritten)
+            retry_req = req.model_copy(update={"question": retry_q})
+            retry_vec = (await embedder.embed_many([retry_q]))[0]
             retry_chunks = await _retrieve_for_ask(
                 conn, retry_req, retry_vec, embedder.model, "eval", None,
             )

@@ -9,6 +9,7 @@ from app.report_writer.deps import get_report_writer_deps
 from app.report_writer.queries import chunks_to_dicts
 from app.report_writer.retrieval import retrieve_similar_chunks
 from app.report_writer.state import ReportWriterState
+from app.retrieval import normalize_retrieval_query
 
 
 async def retrieve_similar(state: ReportWriterState) -> dict:
@@ -16,14 +17,15 @@ async def retrieve_similar(state: ReportWriterState) -> dict:
     query = state.get("retrieval_query") or ""
     type_id = state.get("report_type") or get_report_type(state.get("property_metadata"))
     embedder = HttpEmbedder()
-    query_vectors = await embedder.embed_many([query])
+    retrieval_q = normalize_retrieval_query(query)
+    query_vectors = await embedder.embed_many([retrieval_q])
     query_vec = query_vectors[0]
 
     conn = get_valid_conn(deps.db_pool)
     try:
         chunks, best_cosine = await retrieve_similar_chunks(
             conn,
-            query,
+            retrieval_q,
             query_vec=query_vec,
             embedding_model=embedder.model,
             reranker=deps.reranker,

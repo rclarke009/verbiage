@@ -36,6 +36,11 @@ questions:
     category: answerable_single
     must_mention: ["hail", "tile"]
 
+  - id: hail_quotes_verbose
+    question: "please provide quotes about hail damage"
+    category: answerable_multi
+    must_mention: ["hail"]
+
   - id: soffit_fascia_surfside
     question: "Describe the soffit and fascia damage at 150 Ocean Example Terrace in Surfside."
     category: answerable_single
