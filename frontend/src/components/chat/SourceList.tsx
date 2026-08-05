@@ -39,7 +39,17 @@ export function SourceList({ sources, chunksUsed }: Props) {
             if (src.section) parts.push(src.section)
             const subtitle = parts.join(' · ')
             return (
-              <div key={i} style={{ marginBottom: 6, fontSize: 13 }}>
+              <div
+                key={i}
+                style={{
+                  marginBottom: i < sources.length - 1 ? 0 : 6,
+                  paddingBottom: i < sources.length - 1 ? 8 : 0,
+                  marginTop: i > 0 ? 8 : 0,
+                  borderBottom:
+                    i < sources.length - 1 ? '1px solid var(--app-border)' : undefined,
+                  fontSize: 13,
+                }}
+              >
                 <span>
                   📄 <strong>{src.filename}</strong>
                 </span>

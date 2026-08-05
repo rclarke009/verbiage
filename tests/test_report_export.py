@@ -8,7 +8,7 @@ import zipfile
 
 import pytest
 
-from app.report_writer.boilerplate import purpose_text, weather_text
+from app.report_writer.boilerplate import purpose_text, weather_continued_text, weather_text
 from app.report_writer.docx_ooxml import xml_escape
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
 from app.report_writer.report_document import _read_image_bytes, build_report_document
@@ -64,20 +64,22 @@ def test_storm_placeholders_in_boilerplate(sample_claim: dict) -> None:
     weather = weather_text(meta)
     assert "September 28, 2022" in purpose
     assert "Hurricane Ian" in weather
-    assert "Cat 4" in weather
+    continued = weather_continued_text(meta)
+    assert "September 28 and 29, 2022" in continued
 
 
 def test_weather_boilerplate_includes_mph_when_metadata_present(sample_claim: dict) -> None:
     meta = {
         **sample_claim["property_metadata"],
-        "wind_speed_mph": "58",
-        "wind_gust_mph": "72",
-        "weather_stations": "KRSW",
+        "wind_speed_mph": "71",
+        "wind_gust_mph": "123",
     }
     weather = weather_text(meta)
-    assert "58 mph" in weather
-    assert "72 mph" in weather
-    assert "KRSW" in weather
+    assert "71 mph" in weather
+    assert "123 mph" in weather
+    assert "station close to the property" in weather
+    assert "power went down" in weather
+    assert "exceeded the measurements" in weather
 
 
 def test_read_image_bytes_falls_back_to_drive_when_storage_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +108,8 @@ def test_build_report_document(sample_claim: dict, sample_sections: dict[str, di
     assert doc.sections[-1].key == "recommendations_conclusion"
     assert doc.include_engineering_letter is True
     assert any("Hurricane Ian" in p for p in doc.engineering_letter_paragraphs)
+    assert "True Report's professional opinion" in doc.weather_continued_text
+    assert "Visual Crossing Corporation" in doc.weather_attribution_text
 
 
 def test_build_report_document_includes_photo_review_summary(
@@ -171,6 +175,8 @@ def test_docx_export_structure(sample_claim: dict, sample_sections: dict[str, di
         assert "PROPERTY OVERVIEW" in doc_xml
         assert "ROOF OBSERVATIONS" in doc_xml
         assert "WEATHER HISTORY" in doc_xml
+        assert "WEATHER HISTORY CONTINUED" in doc_xml
+        assert "Visual Crossing Corporation" in doc_xml
         assert "sectPr" in doc_xml
         ET.fromstring(doc_xml)
 

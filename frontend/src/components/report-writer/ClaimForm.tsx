@@ -12,10 +12,15 @@ import {
 } from '../../lib/drivePhotoFolders'
 import { AddressFields } from './AddressFields'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
+import { HistoricalAerialsPreview } from './HistoricalAerialsPreview'
 import { PropertyMapPreview } from './PropertyMapPreview'
 import { StormPicker } from './StormPicker'
 import { WeatherPicker } from './WeatherPicker'
-import type { WeatherOptionsResponse, PropertyMapResponse } from '../../types'
+import type {
+  HistoricalAerialsResponse,
+  WeatherOptionsResponse,
+  PropertyMapResponse,
+} from '../../types'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -53,6 +58,13 @@ export function ClaimForm({
   propertyMapPreview,
   onRefreshPropertyMap,
   onCachedImagesUnavailable,
+  historicalAerialsLoading,
+  historicalAerialsError,
+  historicalAerialsPreview,
+  onRefreshHistoricalAerials,
+  onHistoricalAerialsCachedUnavailable,
+  onHistoricalAerialIncludeChange,
+  onHistoricalAerialCommentChange,
   canGenerate = false,
   generating = false,
   onGenerate,
@@ -78,6 +90,13 @@ export function ClaimForm({
   propertyMapPreview?: PropertyMapResponse | null
   onRefreshPropertyMap?: () => void
   onCachedImagesUnavailable?: () => void
+  historicalAerialsLoading?: boolean
+  historicalAerialsError?: string | null
+  historicalAerialsPreview?: HistoricalAerialsResponse | null
+  onRefreshHistoricalAerials?: () => void
+  onHistoricalAerialsCachedUnavailable?: () => void
+  onHistoricalAerialIncludeChange?: (year: number, include: boolean) => void
+  onHistoricalAerialCommentChange?: (comment: string) => void
   canGenerate?: boolean
   generating?: boolean
   onGenerate?: () => void
@@ -297,6 +316,16 @@ export function ClaimForm({
           disabled={typeLocked}
           onRefresh={onRefreshWeather ?? (() => {})}
           onSelectionChange={onWeatherSelectionChange ?? (() => {})}
+        />
+        <HistoricalAerialsPreview
+          preview={historicalAerialsPreview ?? null}
+          loading={!!historicalAerialsLoading}
+          error={historicalAerialsError ?? null}
+          disabled={typeLocked}
+          onRefresh={onRefreshHistoricalAerials ?? (() => {})}
+          onCachedImagesUnavailable={onHistoricalAerialsCachedUnavailable}
+          onIncludeChange={onHistoricalAerialIncludeChange ?? (() => {})}
+          onCommentChange={onHistoricalAerialCommentChange ?? (() => {})}
         />
       </fieldset>
 

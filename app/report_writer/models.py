@@ -208,3 +208,22 @@ class PropertyMapResponse(BaseModel):
     satellite_preview: str = ""
     roadmap_preview: str = ""
     attribution: list[str] = Field(default_factory=lambda: ["Map data © Google"])
+
+
+class HistoricalAerialItemModel(BaseModel):
+    year: int
+    path: str | None = None
+    include: bool = False
+    preview: str = ""
+    image_url: str | None = None
+
+
+class HistoricalAerialsResponse(BaseModel):
+    resolved_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    fetch_key: str = ""
+    dol_year: int
+    aerials: list[HistoricalAerialItemModel] = Field(default_factory=list)
+    comment: str = ""
+    attribution: list[str] = Field(default_factory=lambda: ["NAIP / USGS The National Map / USDA"])

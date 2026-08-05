@@ -74,7 +74,7 @@ class ClaimContext(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(..., description="Question from user")
-    top_k: int = Field(default=5, description="Will pull the top __ matches")
+    top_k: int = Field(default=3, description="Will pull the top __ matches")
     doc_id: str | None = Field(default=None, description="If set, restrict search to this document")
     use_rag: bool = True
     retrieval_mode: Literal["vector", "lexical", "hybrid", "auto"] = Field(

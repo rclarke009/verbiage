@@ -41,6 +41,8 @@ from app.report_writer.models import (
     PhotoRetryStuckResponse,
     PhotoSyncRequest,
     PhotoSyncResponse,
+    HistoricalAerialItemModel,
+    HistoricalAerialsResponse,
     PropertyMapResponse,
     RegenerateSectionRequest,
     ReportTypeModel,
@@ -75,6 +77,12 @@ from app.report_writer.photo_sync import (
     enqueue_vision_jobs_for_claim,
     folder_ids_for_claim_sync,
     sync_claim_photos_from_drive,
+)
+from app.report_writer.historical_aerials import (
+    _ATTRIBUTION as _HISTORICAL_AERIALS_ATTRIBUTION,
+    fetch_historical_aerials,
+    merge_historical_aerials_metadata,
+    parse_historical_aerials_list,
 )
 from app.report_writer.property_maps import (
     _MAP_ATTRIBUTION,
@@ -381,6 +389,139 @@ async def get_property_map_image(
         except HTTPException:
             pass
         raise HTTPException(status_code=404, detail="Property map image not found") from e
+
+    return Response(content=data, media_type="image/jpeg")
+
+
+@router.get("/historical-aerials", response_model=HistoricalAerialsResponse)
+async def get_historical_aerials(
+    request: Request,
+    address: str = Query(..., min_length=3),
+    date: str = Query(..., min_length=4, description="Storm / DOL date (ISO or display format)"),
+    claim_id: str | None = Query(default=None),
+    user_id: str = Depends(get_current_user),
+):
+    previous_meta: dict | None = None
+    if claim_id:
+
+        def _load(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return None
+            return claim.get("property_metadata") or {}
+
+        previous_meta = await _with_conn(request, _load)
+        if previous_meta is None:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+    result = await fetch_historical_aerials(
+        address.strip(),
+        date.strip(),
+        user_id=user_id if claim_id else None,
+        claim_id=claim_id,
+        previous_meta=previous_meta,
+    )
+
+    if claim_id:
+        meta_patch = merge_historical_aerials_metadata(result, previous_meta=previous_meta)
+        # Re-apply include flags from just-merged aerials onto response.
+        merged_items = {
+            item["year"]: item for item in parse_historical_aerials_list(meta_patch.get("historical_aerials"))
+        }
+        for aerial in result.aerials:
+            prev = merged_items.get(aerial.year) or {}
+            aerial.include = bool(prev.get("include"))
+            aerial.path = prev.get("path") or aerial.path
+        result.comment = str(meta_patch.get("historical_aerials_comment") or "")
+
+        merged = {**(previous_meta or {}), **meta_patch}
+
+        def _save(conn):
+            updated = update_claim(conn, claim_id, user_id, property_metadata=merged)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Claim not found")
+            return updated
+
+        await _with_conn(request, _save)
+
+    aerial_models: list[HistoricalAerialItemModel] = []
+    for aerial in result.aerials:
+        image_url = (
+            f"/report-writer/claims/{claim_id}/historical-aerials/image?year={aerial.year}"
+            if claim_id and aerial.path
+            else None
+        )
+        aerial_models.append(
+            HistoricalAerialItemModel(
+                year=aerial.year,
+                path=aerial.path,
+                include=aerial.include,
+                preview=aerial.preview,
+                image_url=image_url,
+            )
+        )
+
+    return HistoricalAerialsResponse(
+        resolved_address=result.resolved_address,
+        latitude=result.latitude,
+        longitude=result.longitude,
+        fetch_key=result.fetch_key,
+        dol_year=result.dol_year,
+        aerials=aerial_models,
+        comment=result.comment,
+        attribution=[_HISTORICAL_AERIALS_ATTRIBUTION],
+    )
+
+
+@router.get("/claims/{claim_id}/historical-aerials/image")
+async def get_historical_aerial_image(
+    request: Request,
+    claim_id: str,
+    year: int = Query(..., ge=1990, le=2100),
+    user_id: str = Depends(get_current_user),
+):
+    def _load(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        meta = claim.get("property_metadata") or {}
+        for item in parse_historical_aerials_list(meta.get("historical_aerials")):
+            if item["year"] == year:
+                path = (item.get("path") or "").strip()
+                return path or None
+        return None
+
+    path = await _with_conn(request, _load)
+    if not path:
+        raise HTTPException(status_code=404, detail="Historical aerial image not found")
+
+    try:
+        data = read_claim_image_bytes(path)
+    except OSError as e:
+
+        def _clear_stale_path(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return
+            meta = dict(claim.get("property_metadata") or {})
+            aerials = parse_historical_aerials_list(meta.get("historical_aerials"))
+            changed = False
+            next_aerials = []
+            for item in aerials:
+                if item["year"] == year and item.get("path"):
+                    item = {**item, "path": None}
+                    changed = True
+                next_aerials.append(item)
+            if not changed:
+                return
+            meta["historical_aerials"] = next_aerials
+            update_claim(conn, claim_id, user_id, property_metadata=meta)
+
+        try:
+            await _with_conn(request, _clear_stale_path)
+        except HTTPException:
+            pass
+        raise HTTPException(status_code=404, detail="Historical aerial image not found") from e
 
     return Response(content=data, media_type="image/jpeg")
 

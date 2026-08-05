@@ -73,7 +73,7 @@ services:
       - key: DEMO_OPEN_SIGNUP
         value: "0"
       - key: DEMO_ASK_LIMIT
-        value: "10"
+        value: "20"
       - key: DEMO_ASK_WINDOW_SECONDS
         value: "3600"
       - key: DEMO_SIGNUP_LIMIT

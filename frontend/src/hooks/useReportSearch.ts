@@ -49,7 +49,7 @@ const STREAM_STALL_TIMEOUT_MS = 60000
  * conversation history is sent to the backend (it embeds only the query). Results
  * are kept newest-first so the UI reads as a stack of lookups, not a dialogue.
  */
-export function useReportSearch(topK = 5, retrievalMode: RetrievalMode = 'auto') {
+export function useReportSearch(topK = 3, retrievalMode: RetrievalMode = 'auto') {
   const [results, setResults] = useState<LookupResult[]>(loadStoredResults)
   const [searching, setSearching] = useState(false)
 

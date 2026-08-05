@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 
 def _storm_label(meta: dict) -> str:
@@ -13,6 +13,32 @@ def _storm_label(meta: dict) -> str:
             return f"Hurricane {name}"
         return f"{storm_type.title()} {name}"
     return "the reported storm event"
+
+
+def _parse_event_date(meta: dict) -> date | None:
+    from app.report_writer.weather.utils import parse_storm_date
+
+    for key in ("storm_date_iso", "storm_date", "landfall_display", "weather_date_iso"):
+        raw = (meta.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            return parse_storm_date(raw)
+        except ValueError:
+            continue
+    return None
+
+
+def storm_date_range_display(meta: dict) -> str:
+    """Landfall day + next day, e.g. 'September 28 and 29, 2022'."""
+    day1 = _parse_event_date(meta)
+    if day1 is None:
+        fallback = (meta.get("storm_date") or meta.get("landfall_display") or "").strip()
+        return fallback or "the dates of loss"
+    day2 = day1 + timedelta(days=1)
+    if day1.month == day2.month and day1.year == day2.year:
+        return f"{day1.strftime('%B')} {day1.day} and {day2.day}, {day1.year}"
+    return f"{day1.strftime('%B')} {day1.day}, {day1.year} and {day2.strftime('%B')} {day2.day}, {day2.year}"
 
 
 def purpose_text(meta: dict) -> str:
@@ -46,40 +72,34 @@ def weather_text(meta: dict) -> str:
         return override
     storm = _storm_label(meta)
     storm_date = (meta.get("storm_date") or meta.get("landfall_display") or "").strip()
-    category = (meta.get("storm_category") or "").strip()
-    region = (meta.get("landfall_region") or "").strip()
     wind_speed = (meta.get("wind_speed_mph") or meta.get("weather_custom_wind_speed") or "").strip()
     wind_gust = (meta.get("wind_gust_mph") or meta.get("weather_custom_wind_gust") or "").strip()
     hail_size = (meta.get("hail_size_in") or meta.get("weather_custom_hail") or "").strip()
-    stations = (meta.get("weather_stations") or "").strip()
 
     parts = [f"The home was directly in the path of {storm}."]
-    if storm_date:
-        parts.append(f"The event occurred on {storm_date}.")
-    if category:
-        parts.append(f"The storm was classified as {category}.")
-    if region:
-        parts.append(f"Landfall region: {region}.")
 
     if wind_speed or wind_gust:
         date_for_speeds = storm_date or (meta.get("weather_date_iso") or "").strip()
-        speed_parts: list[str] = []
-        if wind_speed and wind_gust:
-            speed_parts.append(
-                f"On {date_for_speeds}, sustained winds reached {wind_speed} mph "
-                f"with gusts to {wind_gust} mph."
-            )
-        elif wind_speed:
-            speed_parts.append(
-                f"On {date_for_speeds}, sustained winds reached {wind_speed} mph."
+        if wind_gust and wind_speed:
+            parts.append(
+                f"The wind gusts recorded by a station close to the property were {wind_gust} mph "
+                f"while the sustained winds were {wind_speed} mph on {date_for_speeds}."
             )
         elif wind_gust:
-            speed_parts.append(f"On {date_for_speeds}, wind gusts reached {wind_gust} mph.")
-        if stations:
-            speed_parts.append(
-                f"Data from weather stations {stations} near the property."
+            parts.append(
+                f"The wind gusts recorded by a station close to the property were {wind_gust} mph "
+                f"on {date_for_speeds}."
             )
-        parts.append(" ".join(speed_parts))
+        else:
+            parts.append(
+                f"The sustained winds recorded by a station close to the property were {wind_speed} mph "
+                f"on {date_for_speeds}."
+            )
+        parts.append(
+            "The power went down at the weather stations. For this reason, wind and gust readings "
+            "are not available for the entirety of the hurricane. It is reasonable to assume that "
+            "wind and gust speeds exceeded the measurements listed here."
+        )
     else:
         parts.append(
             "It is reasonable to assume that wind and gust speeds in the immediate area "
@@ -96,6 +116,36 @@ def weather_text(meta: dict) -> str:
             parts.append(f"Hail up to {hail_size} inches was reported near the property.")
 
     return " ".join(parts)
+
+
+def weather_continued_text(meta: dict) -> str:
+    """Opinion paragraph for WEATHER HISTORY CONTINUED (Ian / WindowTest2 style)."""
+    override = (meta.get("boilerplate_weather_continued") or "").strip()
+    if override:
+        return override
+    storm = _storm_label(meta)
+    date_range = storm_date_range_display(meta)
+    return (
+        f"It is True Report's professional opinion that {storm}, which affected the area between "
+        f"the dates of {date_range}, caused the damage documented herein. This professional opinion "
+        "is based on all information available to True Reports' Forensic Technician(s) including "
+        "weather data collected at the weather stations close to the subject property."
+    )
+
+
+def weather_attribution_text(meta: dict | None = None) -> str:
+    """Visual Crossing attribution line for WEATHER HISTORY CONTINUED."""
+    today = date.today()
+    year = today.year
+    accessed = f"{today.strftime('%B')} {today.day}, {today.year}"
+    # Prefer storm year when known
+    event = _parse_event_date(meta or {})
+    if event is not None:
+        year = event.year
+    return (
+        f"Weather data provided by: Visual Crossing Corporation. Visual Crossing Weather. {year}, "
+        f"https://www.visualcrossing.com/. Accessed {accessed}."
+    )
 
 
 def engineering_letter_paragraphs(meta: dict, address: str, conclusion: str = "") -> list[str]:

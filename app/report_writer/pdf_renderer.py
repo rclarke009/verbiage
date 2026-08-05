@@ -99,6 +99,8 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     page_count += 1  # purpose/weather
     if doc.property_satellite or doc.property_roadmap:
         page_count += 1
+    if doc.historical_aerials:
+        page_count += 1
     page_count += max(1, len(doc.sections))
     if doc.photos:
         page_count += max(1, (len(doc.photos) + 3) // 4)
@@ -166,7 +168,16 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     story.append(Paragraph(doc.observations_text, styles["body"]))
     story.append(Paragraph("<b>WEATHER HISTORY:</b>", ParagraphStyle("w", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold")))
     story.append(Paragraph(doc.weather_text, styles["body"]))
+    story.append(
+        Paragraph(
+            "<b>WEATHER HISTORY CONTINUED</b>",
+            ParagraphStyle("wc", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold"),
+        )
+    )
+    story.append(Paragraph(doc.weather_continued_text, styles["body"]))
+    story.append(Paragraph(doc.weather_attribution_text, styles["body"]))
     story.extend(_property_location_flow(doc, styles))
+    story.extend(_historical_aerials_flow(doc, styles))
     story.append(PageBreak())
 
     for section in doc.sections:
@@ -266,6 +277,45 @@ def _property_location_flow(doc: ReportDocument, styles: dict[str, ParagraphStyl
         flow.append(row[0][0])
         flow.append(row[0][1])
     flow.append(Paragraph(doc.property_map_attribution, styles["body"]))
+    return flow
+
+
+def _historical_aerials_flow(doc: ReportDocument, styles: dict[str, ParagraphStyle]) -> list:
+    if not doc.historical_aerials:
+        return []
+    flow: list = [
+        PageBreak(),
+        Paragraph("HISTORICAL AERIAL IMAGERY", styles["section"]),
+        Spacer(1, 0.1 * inch),
+    ]
+    if doc.historical_aerials_comment:
+        flow.append(Paragraph(doc.historical_aerials_comment, styles["body"]))
+        flow.append(Spacer(1, 0.08 * inch))
+    photos = doc.historical_aerials
+    for i in range(0, len(photos), 2):
+        pair = photos[i : i + 2]
+        cells_img = []
+        cells_cap = []
+        for photo in pair:
+            cells_img.append(Image(io.BytesIO(photo.data), width=3.1 * inch, height=2.3 * inch))
+            cells_cap.append(Paragraph(photo.caption, styles["body"]))
+        if len(pair) == 2:
+            table = Table([cells_img, cells_cap], colWidths=[3.2 * inch, 3.2 * inch])
+            table.setStyle(
+                TableStyle(
+                    [
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ]
+                )
+            )
+            flow.append(table)
+        else:
+            flow.append(cells_img[0])
+            flow.append(cells_cap[0])
+        flow.append(Spacer(1, 0.08 * inch))
+    flow.append(Paragraph(doc.historical_aerials_attribution, styles["body"]))
     return flow
 
 

@@ -6,7 +6,12 @@ from datetime import date
 
 import pytest
 
-from app.report_writer.boilerplate import weather_text
+from app.report_writer.boilerplate import (
+    storm_date_range_display,
+    weather_attribution_text,
+    weather_continued_text,
+    weather_text,
+)
 from app.report_writer.weather.aggregator import apply_recommendations, weather_metadata_from_options
 from app.report_writer.weather.providers import spc_reports
 from app.report_writer.weather.types import WeatherCandidate, WeatherOptions
@@ -140,22 +145,29 @@ def test_weather_metadata_from_snapshot_legacy() -> None:
     assert meta["wind_gust_mph"] == "86"
 
 
+def test_storm_date_range_display_same_month() -> None:
+    meta = {"storm_date": "September 28, 2022", "storm_date_iso": "2022-09-28"}
+    assert storm_date_range_display(meta) == "September 28 and 29, 2022"
+
+
 def test_weather_text_with_wind_speeds() -> None:
     meta = {
-        "storm_name": "Milton",
+        "storm_name": "Ian",
         "storm_type": "hurricane",
-        "storm_date": "October 9, 2024",
-        "storm_category": "Cat 3",
-        "wind_speed_mph": "60",
-        "wind_gust_mph": "86",
-        "weather_stations": "KTPA",
+        "storm_date": "September 28, 2022",
+        "wind_speed_mph": "71",
+        "wind_gust_mph": "123",
     }
     text = weather_text(meta)
-    assert "Hurricane Milton" in text
-    assert "60 mph" in text
-    assert "86 mph" in text
-    assert "KTPA" in text
-    assert "reasonable to assume" not in text
+    assert "Hurricane Ian" in text
+    assert "directly in the path of" in text
+    assert "station close to the property" in text
+    assert "123 mph" in text
+    assert "71 mph" in text
+    assert "power went down" in text
+    assert "exceeded the measurements" in text
+    assert "sustained winds reached" not in text
+    assert "KTPA" not in text
 
 
 def test_weather_text_with_hail() -> None:
@@ -179,3 +191,23 @@ def test_weather_text_without_wind_speeds_fallback() -> None:
     text = weather_text(meta)
     assert "reasonable to assume" in text
     assert "60 mph" not in text
+    assert "power went down" not in text
+
+
+def test_weather_continued_text_and_attribution() -> None:
+    meta = {
+        "storm_name": "Ian",
+        "storm_type": "hurricane",
+        "storm_date": "September 28, 2022",
+        "storm_date_iso": "2022-09-28",
+    }
+    continued = weather_continued_text(meta)
+    assert "True Report's professional opinion" in continued
+    assert "Hurricane Ian" in continued
+    assert "September 28 and 29, 2022" in continued
+    assert "weather stations close to the subject property" in continued
+
+    attribution = weather_attribution_text(meta)
+    assert "Visual Crossing Corporation" in attribution
+    assert "2022" in attribution
+    assert "https://www.visualcrossing.com/" in attribution

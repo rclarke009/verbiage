@@ -181,6 +181,14 @@ export interface DrivePhotoFolderRef {
   label: string
 }
 
+export interface HistoricalAerialItem {
+  year: number
+  path?: string | null
+  include?: boolean
+  preview?: string
+  image_url?: string | null
+}
+
 export interface ClaimPropertyMetadata {
   report_type?: string
   address?: string
@@ -219,10 +227,18 @@ export interface ClaimPropertyMetadata {
   property_map_satellite_path?: string
   property_map_roadmap_path?: string
   property_map_fetched_at?: string
+  historical_aerials_fetch_key?: string
+  historical_aerials_fetched_at?: string
+  historical_aerials_comment?: string
+  historical_aerials_resolved_address?: string
+  historical_aerials_latitude?: string
+  historical_aerials_longitude?: string
+  historical_aerials_dol_year?: string
+  historical_aerials?: HistoricalAerialItem[]
   drive_photo_folder_id?: string
   drive_photo_folder_label?: string
   drive_photo_folders?: DrivePhotoFolderRef[]
-  [key: string]: string | DrivePhotoFolderRef[] | undefined
+  [key: string]: string | DrivePhotoFolderRef[] | HistoricalAerialItem[] | undefined
 }
 
 /** Alias used by claim forms and Drive folder helpers. */
@@ -276,6 +292,17 @@ export interface PropertyMapResponse {
   property_map_roadmap_path?: string | null
   satellite_preview: string
   roadmap_preview: string
+  attribution: string[]
+}
+
+export interface HistoricalAerialsResponse {
+  resolved_address: string
+  latitude: number | null
+  longitude: number | null
+  fetch_key: string
+  dol_year: number
+  aerials: HistoricalAerialItem[]
+  comment: string
   attribution: string[]
 }
 

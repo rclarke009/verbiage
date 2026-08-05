@@ -22,6 +22,10 @@ import {
 import { useClaimPdfPreview } from '../../hooks/useClaimPdfPreview'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
+import {
+  useHistoricalAerials,
+  clearHistoricalAerialsMetadata,
+} from '../../hooks/useHistoricalAerials'
 import { usePropertyMap, clearPropertyMapMetadata } from '../../hooks/usePropertyMap'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
@@ -144,6 +148,28 @@ export function ReportWriterTab() {
       updateDraft(prev => ({
         ...prev,
         property_metadata: clearPropertyMapMetadata(prev.property_metadata ?? {}),
+      })),
+  })
+
+  const historicalAerials = useHistoricalAerials({
+    claimId: activeId,
+    address: fullAddress,
+    stormDate: draft.property_metadata?.storm_date ?? '',
+    stormDateIso: draft.property_metadata?.storm_date_iso ?? '',
+    metadata: draft.property_metadata ?? {},
+    onMetadataPatch: patch =>
+      updateDraft(prev => {
+        const nextMeta = { ...prev.property_metadata }
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === '' || v === undefined) delete nextMeta[k]
+          else nextMeta[k] = v as (typeof nextMeta)[string]
+        }
+        return { ...prev, property_metadata: nextMeta }
+      }),
+    onHistoricalAerialsClear: () =>
+      updateDraft(prev => ({
+        ...prev,
+        property_metadata: clearHistoricalAerialsMetadata(prev.property_metadata ?? {}),
       })),
   })
 
@@ -425,6 +451,13 @@ export function ReportWriterTab() {
                   propertyMapPreview={propertyMap.preview}
                   onRefreshPropertyMap={propertyMap.refresh}
                   onCachedImagesUnavailable={propertyMap.markCachedImagesUnavailable}
+                  historicalAerialsLoading={historicalAerials.loading}
+                  historicalAerialsError={historicalAerials.error}
+                  historicalAerialsPreview={historicalAerials.preview}
+                  onRefreshHistoricalAerials={historicalAerials.refresh}
+                  onHistoricalAerialsCachedUnavailable={historicalAerials.markCachedImagesUnavailable}
+                  onHistoricalAerialIncludeChange={historicalAerials.setInclude}
+                  onHistoricalAerialCommentChange={historicalAerials.setComment}
                   canGenerate={canGenerate}
                   generating={generating}
                   onGenerate={() => void handleGenerate()}

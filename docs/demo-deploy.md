@@ -80,7 +80,7 @@ Non-secret defaults (from [`render.yaml`](../render.yaml) or set manually):
 - `DEMO_MODE=1`
 - `DEMO_ANONYMOUS=1` (skip sign-in; Search uses IP-based rate limits)
 - `DEMO_OPEN_SIGNUP=0` (optional; only if you want account signup instead)
-- `DEMO_ASK_LIMIT=10`
+- `DEMO_ASK_LIMIT=20`
 - `DEMO_ASK_WINDOW_SECONDS=3600`
 - `DEMO_SIGNUP_LIMIT=5`
 - `RERANK_ENABLED=0`
@@ -115,7 +115,7 @@ On deploy, demo mode also auto-seeds when the database is empty or has fewer `ev
 1. Open demo URL → Search tab loads immediately (no sign-in when `DEMO_ANONYMOUS=1`).
 2. **Search**: ask *“What roof damage was found at 100 Harbor Example Road in Sampletown?”* → grounded answer + citations.
 3. **Report Writer** / **Documents** / **Drive** → upsell message, no API data.
-4. Ask 11 times within an hour → rate-limit message on the 11th.
+4. Ask 21 times within an hour → rate-limit message on the 21st.
 5. Confirm prod URL still works (no `DEMO_MODE` on prod service).
 
 ---
@@ -125,7 +125,7 @@ On deploy, demo mode also auto-seeds when the database is empty or has fewer `ev
 | Feature | Demo |
 |---------|------|
 | Sign in | Skipped when `DEMO_ANONYMOUS=1` |
-| Search (`/ask`) | 10 requests per visitor IP per hour |
+| Search (`/ask`) | 20 requests per visitor IP per hour |
 | Other tabs | Visible; show “available in full version” gate |
 | Backend | 403 on ingest, documents, drive, report-writer |
 | Data | Synthetic eval corpus only |

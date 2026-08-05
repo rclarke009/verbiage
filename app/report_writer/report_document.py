@@ -14,12 +14,18 @@ from app.report_writer.boilerplate import (
     include_engineering_letter,
     observations_text,
     purpose_text,
+    weather_attribution_text,
+    weather_continued_text,
     weather_text,
 )
 from app.geocode.address_format import report_address_lines
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
 from app.report_writer.damage_detection import count_photo_stats, photo_review_summary, select_export_images
 from app.report_writer.image_utils import compress_image_bytes, image_emu_size
+from app.report_writer.historical_aerials import (
+    _ATTRIBUTION as _HISTORICAL_AERIALS_ATTRIBUTION,
+    included_historical_aerials,
+)
 from app.report_writer.property_maps import read_property_map_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
@@ -78,12 +84,17 @@ class ReportDocument:
     purpose_text: str
     observations_text: str
     weather_text: str
+    weather_continued_text: str
+    weather_attribution_text: str
     engineering_letter_paragraphs: list[str]
     sections: list[ReportSection] = field(default_factory=list)
     photos: list[ReportPhoto] = field(default_factory=list)
     property_satellite: ReportPhoto | None = None
     property_roadmap: ReportPhoto | None = None
     property_map_attribution: str = "Map data © Google"
+    historical_aerials: list[ReportPhoto] = field(default_factory=list)
+    historical_aerials_comment: str = ""
+    historical_aerials_attribution: str = _HISTORICAL_AERIALS_ATTRIBUTION
 
 
 def _photo_caption(vision: dict | None) -> str:
@@ -103,6 +114,24 @@ def _load_property_map_photo(meta: dict, variant: str, caption: str) -> ReportPh
     data, ext = compress_image_bytes(raw, max_dimension=1000, quality=80)
     cx, cy = image_emu_size(data, width_inches=3.2, max_height_inches=3.0)
     return ReportPhoto(data=data, caption=caption, file_extension=ext, cx=cx, cy=cy)
+
+
+def _load_historical_aerial_photos(meta: dict) -> list[ReportPhoto]:
+    photos: list[ReportPhoto] = []
+    for item in included_historical_aerials(meta):
+        path = (item.get("path") or "").strip()
+        if not path:
+            continue
+        try:
+            raw = read_claim_image_bytes(path)
+        except OSError:
+            continue
+        data, ext = compress_image_bytes(raw, max_dimension=1000, quality=80)
+        cx, cy = image_emu_size(data, width_inches=3.2, max_height_inches=3.0)
+        year = item.get("year")
+        caption = f"NAIP aerial imagery — {year}." if year else "NAIP aerial imagery."
+        photos.append(ReportPhoto(data=data, caption=caption, file_extension=ext, cx=cx, cy=cy))
+    return photos
 
 
 def build_report_document(
@@ -168,6 +197,8 @@ def build_report_document(
 
     property_satellite = _load_property_map_photo(meta, "satellite", "Satellite view of property location.")
     property_roadmap = _load_property_map_photo(meta, "roadmap", "Property location within Florida.")
+    historical_aerials = _load_historical_aerial_photos(meta)
+    historical_comment = (meta.get("historical_aerials_comment") or "").strip()
 
     return ReportDocument(
         title=title,
@@ -183,9 +214,15 @@ def build_report_document(
         purpose_text=purpose_text(meta),
         observations_text=obs,
         weather_text=weather_text(meta),
-        engineering_letter_paragraphs=engineering_letter_paragraphs(meta, line1 or address_raw, conclusion),
+        weather_continued_text=weather_continued_text(meta),
+        weather_attribution_text=weather_attribution_text(meta),
+        engineering_letter_paragraphs=engineering_letter_paragraphs(
+            meta, line1 or full_address, conclusion
+        ),
         sections=doc_sections,
         photos=photos,
         property_satellite=property_satellite,
         property_roadmap=property_roadmap,
+        historical_aerials=historical_aerials,
+        historical_aerials_comment=historical_comment if historical_aerials else "",
     )

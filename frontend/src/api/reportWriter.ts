@@ -9,6 +9,7 @@ import type {
   SectionContent,
   WeatherOptionsResponse,
   AddressSuggestion,
+  HistoricalAerialsResponse,
   PropertyMapResponse,
 } from '../types'
 
@@ -114,6 +115,18 @@ export async function fetchPropertyMap(address: string, claimId?: string): Promi
   const res = await apiFetch(`${BASE}/property-map?${q}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<PropertyMapResponse>
+}
+
+export async function fetchHistoricalAerials(
+  address: string,
+  date: string,
+  claimId?: string,
+): Promise<HistoricalAerialsResponse> {
+  const q = new URLSearchParams({ address, date })
+  if (claimId) q.set('claim_id', claimId)
+  const res = await apiFetch(`${BASE}/historical-aerials?${q}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<HistoricalAerialsResponse>
 }
 
 export async function matchDrivePhotoFolder(address: string) {

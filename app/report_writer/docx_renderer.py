@@ -184,7 +184,11 @@ class DocxReportRenderer:
         body += xml_paragraph(doc.observations_text, spacing_after=240)
         body += xml_paragraph("WEATHER HISTORY:", bold=True, color="5BA3D6", spacing_after=0)
         body += xml_paragraph(doc.weather_text, spacing_after=240)
+        body += xml_paragraph("WEATHER HISTORY CONTINUED", bold=True, color="5BA3D6", spacing_after=0)
+        body += xml_paragraph(doc.weather_continued_text, spacing_after=240)
+        body += xml_paragraph(doc.weather_attribution_text, spacing_after=240)
         body += self._property_location_xml(doc)
+        body += self._historical_aerials_xml(doc)
         body += page_break()
 
         for section in doc.sections:
@@ -229,6 +233,28 @@ class DocxReportRenderer:
             xml += xml_photo_table(entries, columns=cols)
             xml += xml_spacer(before=120, after=60)
             xml += xml_paragraph(doc.property_map_attribution, spacing_after=0)
+        return xml
+
+    def _historical_aerials_xml(self, doc: ReportDocument) -> str:
+        if not doc.historical_aerials:
+            return ""
+        xml = page_break()
+        xml += xml_large_bold("HISTORICAL AERIAL IMAGERY")
+        xml += xml_spacer(after=120)
+        if doc.historical_aerials_comment:
+            xml += xml_paragraph(doc.historical_aerials_comment, spacing_after=120)
+        idx = 0
+        while idx < len(doc.historical_aerials):
+            group = doc.historical_aerials[idx : idx + 2]
+            entries = []
+            for photo in group:
+                ref = self._add_image(photo.data, "aerial", cx=photo.cx, cy=photo.cy, compress=False)
+                entries.append((ref.rel_id, ref.doc_pr_id, photo.caption, ref.cx, ref.cy))
+            cols = 2 if len(group) > 1 else 1
+            xml += xml_photo_table(entries, columns=cols)
+            xml += xml_spacer(before=120, after=60)
+            idx += 2
+        xml += xml_paragraph(doc.historical_aerials_attribution, spacing_after=0)
         return xml
 
     def _engineering_letter_xml(self, doc: ReportDocument) -> str:
