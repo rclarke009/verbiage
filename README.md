@@ -4,27 +4,45 @@
 
 **FastAPI + PostgreSQL (pgvector) + Hybrid Search** with a strong emphasis on reliability, grounding, and practical usability for field inspection workflows.
 
-**Live app:** [rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com) (sign-in required) · deployed on Render. More background in [overview.md](overview.md).
+---
+
+## Try it
+
+**Live demo — no login:** [verbiage-demo-2.onrender.com](https://verbiage-demo-2.onrender.com)
+
+Free-tier hosting, so the first request wakes the service — give it about 30 seconds
+to spin up. Prefer not to wait? The examples below show the same behavior, including
+the refusal path.
 
 ---
 
-## Demo (no login required)
+## How it answers
 
-The production app requires sign-in, so the examples below show typical **Ask** behavior from the faithfulness eval corpus ([tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml)). Answers are grounded in retrieved report text and include **source citations** (document title + excerpt). Off-corpus questions are **refused** before any LLM call when retrieval scores are too low.
+Answers are grounded in retrieved report text and include **source citations**
+(document title + excerpt). Off-corpus questions are **refused before any LLM call**
+when retrieval scores fall below threshold — the system declines rather than guesses.
 
-**Answerable question** — retrieval finds relevant storm-report language:
+Examples below are drawn from the faithfulness eval corpus
+([`tests/eval/gold_questions.yaml`](tests/eval/gold_questions.yaml)).
+
+**Answerable** — retrieval finds relevant storm-report language:
 
 > **Q:** What roof damage was found at 100 Harbor Example Road in Sampletown?
 >
-> **A:** *(Suggested overview / detailed-image verbiage drawn from matching inspection reports, with cited source chunks — e.g. shingle damage, wind-related observations.)*
+> **A:** <img width="931" height="700" alt="Screenshot 2026-08-05 at 6 19 35 PM" src="https://github.com/user-attachments/assets/18c28868-dba9-44c7-90a6-50e2d6eeea57" />
 
 **Refusal** — nothing relevant in the shared library:
 
-> **Q:** What hail damage was found on roofs in Wyoming?
->
-> **A:** *I don't have relevant context in the document library to answer that question.*
+> **A:** *I don't have relevant context to answer that question.* <img width="930" height="394" alt="Screenshot 2026-08-05 at 6 22 44 PM" src="https://github.com/user-attachments/assets/368f9d92-fa8c-49ad-b885-eccb62305e54" />
 
-Optional polish: add UI screenshots under [`docs/screenshots/`](docs/screenshots/) and embed them here — **not required**; the text examples above are enough for a portfolio README.
+
+---
+
+## Internal deployment
+
+The production app at
+[rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com)
+requires sign-in. More background in [overview.md](overview.md).
 
 ---
 
