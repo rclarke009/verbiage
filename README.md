@@ -63,6 +63,7 @@ requires sign-in. More background in [overview.md](overview.md).
 
 - **Multi-source ingestion**: PDF upload, text paste, and **Google Drive** sync (Docs, PDF, DOCX via read-only Drive)
 - **Adaptive retrieval (**`auto`**, default)**: Each query is routed per-shape — short exact-term/identifier lookups go to lexical full-text search, everything else to **hybrid retrieval (RRF)**, which combines vector embeddings (semantic) + lexical full-text search fused with Reciprocal Rank Fusion via the `FusedHit` dataclass. `vector`, `lexical`, and `hybrid` remain selectable explicitly
+- **Query normalize + rewrite-once corrective**: Embed/retrieve use `normalize_retrieval_query` so instructional fluff does not dilute the relevance gate; on LLM soft refuse, a narrow domain phrase rewrite may trigger **one** extra retrieve+generate (`app/corrective.py`)
 - **Cross-encoder reranking (optional,** `RERANK_ENABLED`**)**: Retrieval pulls a wider candidate pool, then a cross-encoder (`ms-marco-MiniLM-L-6-v2`) reranks it down to the final top-k — sharpening the context before the prompt. Warmed on startup, loaded lazily, and a no-op when disabled (kept off in tests/CI to avoid the model load)
 - **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
 - **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information"), plus a **pre-LLM relevance gate** — off-corpus questions are refused before any LLM call when the best chunk's cosine similarity falls below `RAG_MIN_RELEVANCE_SCORE` (deterministic, zero-spend refusals)
@@ -107,14 +108,18 @@ Embeddings and LLM: **OpenAI** when `OPENAI_API_KEY` is set, otherwise **Ollama*
 flowchart TD
     A[Ingest: PDF/Drive/Text] --> B[Chunk + Store full_text]
     B --> C[Embeddings → pgvector]
-    D[User Query] --> E[Hybrid Retrieval: Vector + Lexical]
+    D[User Query] --> N[normalize_retrieval_query]
+    N --> E[Hybrid Retrieval: Vector + Lexical]
     E --> F["Reciprocal Rank Fusion (FusedHit)"]
     F --> J{Relevance gate: cosine ≥ threshold?}
-    J -- No --> K[Refuse: Not enough information]
+    J -- No --> K[Hard refuse: Not enough information]
     J -- Yes --> L[Cross-encoder rerank → top-k]
     L --> G[Build Grounded Prompt with Context]
     G --> H[LLM Generation]
-    H --> I[Response + Citations + Validation]
+    H --> Soft{Soft refuse + rewrite map?}
+    Soft -- No --> I[Response + Citations + Validation]
+    Soft -- Yes --> Retry[One rewrite retrieve + LLM]
+    Retry --> I
 ```
 
 
@@ -122,7 +127,7 @@ flowchart TD
 1. Document uploaded, pasted, or exported from Drive
 2. Text extracted → `full_text` saved → chunked (paragraph-first default) → embedded
 3. Vectors stored in pgvector; retrieval filtered by active embedding model
-4. User question → hybrid retrieval (vector + lexical) → RRF fusion → relevance gate (cosine) → optional cross-encoder rerank → top-k chunks → grounded LLM response with citations
+4. User question → `normalize_retrieval_query` → hybrid retrieval (vector + lexical) → RRF fusion → relevance gate (cosine) → optional cross-encoder rerank → top-k chunks → grounded LLM response with citations; soft refuse may trigger one rewrite-and-retrieve
 
 
 
@@ -325,7 +330,8 @@ This app is a **team shared library**, not per-user document isolation:
 
 - **Adaptive** `auto` **routing (default)**: Each query is routed by shape — short exact-term/identifier lookups (`WY-2024`, quoted phrases) to lexical, everything else to hybrid. Hybrid was chosen after testing showed it outperforms pure vector search on specific storm-report queries (hail, shingles, wind speeds, locations, etc.); RRF fuses the vector and lexical lists without needing comparable score scales. Contractions/possessives (`what's`, `owner's`) are not treated as quoting, so natural-language questions stay on hybrid. When a query is routed to lexical because of a quoted phrase, only the quoted phrase is searched (not the verbose wrapper, whose terms would AND to no match), and if the adaptive lexical route returns nothing it falls back to hybrid — so `auto` never does worse than the hybrid default. `vector`/`lexical`/`hybrid` can still be requested explicitly.
 - **Reranking after fusion**: RRF is great at *recall* but order is rank-based, so a cross-encoder reranks a wider candidate pool by true query–document relevance before prompt assembly. Kept optional (`RERANK_ENABLED`) and lazy-loaded so tests/CI never pay the ~100MB model cost.
-- **Gate on cosine, before the LLM**: The relevance gate evaluates the cosine component regardless of retrieval mode — RRF and `ts_rank` magnitudes aren't comparable across queries, so cosine is the only signal that says anything about *absolute* relevance. Refusing below the threshold avoids both hallucinations and wasted LLM spend on off-corpus questions.
+- **Gate on cosine, before the LLM**: The relevance gate evaluates the cosine component regardless of retrieval mode — RRF and `ts_rank` magnitudes aren't comparable across queries, so cosine is the only signal that says anything about *absolute* relevance. Refusing below the threshold avoids both hallucinations and wasted LLM spend on off-corpus questions. `normalize_retrieval_query` strips instructional fluff from the embed/lexical string so in-corpus topics are less likely to fail the gate by accident.
+- **Rewrite-once after soft refuse**: Hard gate fails never rewrite. If the model returns the soft-refuse canary and a small domain phrase map matches, Ask runs one extra retrieve+generate (original question still in the prompt). Bounded corrective recovery without an unbounded agent loop — see [docs/agentic-rag-vs-static.md](docs/agentic-rag-vs-static.md).
 - **Grounding strategy**: Explicit system prompt + source injection + validation step to maintain reliability in production.
 - **Durable ingest queue**: A lesson learned from real ingest testing — synchronous ingestion of large batches caused 502s, so ingestion moved to a Postgres-backed job queue with a background worker and pollable batch status.
 - **Canonical** `full_text`: Lets chunking/embedding strategies evolve via reindex instead of re-upload.

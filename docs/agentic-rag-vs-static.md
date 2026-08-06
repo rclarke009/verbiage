@@ -10,32 +10,29 @@ Design notes on what makes retrieval *agentic* vs *static*, and how that maps to
 
 ---
 
-## Static RAG (what most systems — including Verbiage Ask today — do)
+## Where Verbiage Ask sits today
+
+Ask is **mostly single-pass**, with one **bounded corrective step** after a soft refuse:
 
 ```
-query → embed → retrieve top-k → (optional rerank) → LLM → answer
-                      ↑
-              one pass, fixed plan
-```
-
-Characteristics:
-
-- Pipeline shape is fixed at request time
-- Failures are terminal (empty / low score → refuse) or silent (weak chunks → hallucinate)
-- “Adaptive” here usually means **routing once** (lexical vs hybrid), not looping
-
-**Verbiage today (Ask):**
-
-```
-question → resolve_auto_mode → hybrid|lexical|vector
-        → relevance gate (cosine)
-        → optional cross-encoder rerank
-        → LLM with citations  OR  refuse
+question
+  → normalize_retrieval_query (strip instructional fluff; keep topic for embed/lexical)
+  → resolve_auto_mode → hybrid|lexical|vector
+  → relevance gate (cosine)
+  → optional cross-encoder rerank
+  → LLM with citations
+       ├─ normal answer → done
+       ├─ hard refuse (gate/empty) → done (no rewrite)
+       └─ soft refuse (“No source documents…”)
+            → rewrite_query_for_retry (domain phrase map) — if None, keep soft refuse
+            → normalize → embed → retrieve → gate → LLM once more (original question in prompt)
 ```
 
 Plus a special non-loop route: `nearby_storm` (structured geo lookup, no LLM).
 
-That is **strong single-pass RAG**. It is not yet agentic.
+**Code:** [`app/main.py`](../app/main.py) (`_run_ask_rag_with_corrective`), [`app/corrective.py`](../app/corrective.py), [`app/retrieval.py`](../app/retrieval.py) (`normalize_retrieval_query`).
+
+That is **not** a full agentic loop (no multi-tool planner, no unbounded retries). It *is* a small decide → act → stop corrective: soft refuse can trigger **exactly one** rewrite-and-retrieve when the phrase map matches (e.g. intact roof tiles / no storm-created opening).
 
 ---
 
@@ -45,7 +42,7 @@ Not “uses an agent framework.” Agentic retrieval means the system can **chan
 
 | Pattern | What it adds | One-line idea |
 |---------|--------------|---------------|
-| **Query rewrite / decompose** | Second retrieval with a better question | Gate failed? Rephrase and try once |
+| **Query rewrite / decompose** | Second retrieval with a better question | Soft refuse? Rephrase and try once |
 | **Corrective RAG (CRAG)** | Grade docs; if bad → rewrite / fallback | Retrieval is evaluated, not trusted |
 | **Self-RAG** | Reflect on answer + evidence | Generate, then check support / retry |
 | **Adaptive RAG** (paper sense) | Route by *complexity*: no retrieval / single-shot / multi-hop | Don’t always pay for the full stack |
@@ -70,8 +67,10 @@ Interview soundbite: *“Adaptive is which path; corrective is whether to loop; 
 | `retrieval_mode: "auto"` | Adaptive RAG (Jeong et al.) | **No** |
 | Rule: short/quoted → lexical, else hybrid | Classifier: no-retrieval / single / iterative | Related idea, much narrower |
 | Cosine relevance gate | CRAG document grader | Same *job*, different *signal* (score vs content judge) |
+| Soft-refuse rewrite-once | Corrective rewrite | Same *family*; Verbiage triggers after LLM soft refuse, not after a doc grader |
 
 Verbiage’s `auto` router is **one-shot strategy selection**.  
+`normalize_retrieval_query` is **topic cleanup** before embed/lexical (prompt still uses the original question) — not a retrieval loop.  
 Agentic Adaptive RAG is **strategy + optional multi-step retrieval based on assessed need**.
 
 ---
@@ -81,23 +80,24 @@ Agentic Adaptive RAG is **strategy + optional multi-step retrieval based on asse
 ```
 Got chunks that actually answer the question?
   ├─ Yes → answer (cite)
-  ├─ Maybe / wrong shape → rewrite query OR switch tool → retrieve again
-  └─ Clearly off-corpus → refuse (stop)
+  ├─ Gate says no → hard refuse (stop; no rewrite)
+  ├─ Soft refuse + rewrite map hits → retrieve once more → answer or keep soft refuse
+  └─ Soft refuse + no rewrite map → soft refuse (stop)
 ```
 
-Stop conditions matter. Without them you get infinite rewrite loops and burn tokens. Verbiage’s product stance (refuse when evidence is weak) is a *feature* — agentic work should preserve that, not bypass it.
+Stop conditions matter. Without them you get infinite rewrite loops and burn tokens. Verbiage’s product stance (refuse when evidence is weak) is a *feature* — corrective work preserves a hard stop: **at most one** rewrite, and only for a small domain phrase map.
 
 ---
 
-## Possible Verbiage extensions
+## Shipped vs possible next steps
 
-| Extension | Agentic idea it implements |
-|-----------|----------------------------|
-| Reformulate on gate fail | Corrective rewrite, one retry |
-| Multi-tool via MCP | Agent-as-retriever (hybrid / nearby_storm / metadata) |
-| Sufficiency judge + stop | Core loop: decide → act → reassess → stop |
-
-These are design options relative to the current single-pass Ask path — not a committed roadmap.
+| Status | Capability | Agentic idea |
+|--------|------------|--------------|
+| **Shipped** | Soft-refuse rewrite-once (`rewrite_query_for_retry`) | Corrective rewrite, one retry |
+| **Shipped** | `normalize_retrieval_query` before embed/retrieve | Topic cleanup so fluff does not tank the gate |
+| **Possible** | Multi-tool via MCP | Agent-as-retriever (hybrid / nearby_storm / metadata) |
+| **Possible** | Sufficiency judge before generate (skip first LLM on weak context) | Decide → act without paying for a soft-refuse LLM call |
+| **Possible** | Broader rewrite map / LLM rewrite | Same loop, less hand-tuned phrases |
 
 ---
 
@@ -120,7 +120,7 @@ For each source, the useful extract is: *What decision is made? After which step
 
 ## Distinctions worth keeping clear
 
-1. Verbiage’s cosine gate is a **one-shot** yes/no before generate; it does not rewrite or try another tool — so it is not a full agentic loop.
-2. A rewrite-once loop can fix a **false refuse** (answer exists in the corpus, original wording missed it).
-3. The same loop can **create** risk if an off-corpus query is rewritten into something that matches *something* and the system answers instead of refusing.
+1. Verbiage’s cosine gate is a **one-shot** yes/no before generate; hard gate fails do **not** rewrite.
+2. Rewrite-once runs only after an LLM **soft refuse**, and only when `rewrite_query_for_retry` returns a phrase — it can recover some false soft refuses (answer in corpus, original wording missed it).
+3. The same loop can **create** risk if an off-corpus query is rewritten into something that matches *something* and the system answers instead of refusing — hence the narrow phrase map and single retry.
 4. Verbiage `auto` picks lexical vs hybrid once by query shape; Adaptive RAG (paper) chooses whether/how many retrieval steps by complexity (and may loop).

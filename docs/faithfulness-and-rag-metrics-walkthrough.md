@@ -261,15 +261,19 @@ End-to-end can **hide** a stage regression: cheap/fast requests average the pain
 
 ```
 Query
+  → normalize_retrieval_query (topic for embed/lexical; prompt keeps original)
   → retrieve (vector / lexical / hybrid+RRF)
   → optional rerank
-  → relevance gate (max cosine ≥ 0.5?) ──no──► refuse
+  → relevance gate (max cosine ≥ 0.5?) ──no──► hard refuse
   → generate answer + citations
+       └─ soft refuse + rewrite map hit? → one more retrieve+generate
   → (eval) split claims → NliJudge vs retrieved context → faithfulness
 ```
+
+The faithfulness eval runner mirrors Ask’s normalize + rewrite-once path ([`tests/eval/runner.py`](../tests/eval/runner.py)). Design notes: [agentic-rag-vs-static.md](agentic-rag-vs-static.md).
 
 **Live drift:** gate-pass, cosine, lexical hit-rate, stage latency, embedding version, index size.
 
 **Gold regression:** faithfulness 1.0, refusal 1.0 on should-refuse, false-refusal ~0, plus claim-level fails.
 
-Code pointers: [`tests/eval/judges.py`](../tests/eval/judges.py) (NliJudge), [`tests/eval/test_faithfulness.py`](../tests/eval/test_faithfulness.py), [`app/config.py`](../app/config.py) (`RAG_MIN_RELEVANCE_SCORE`), [`setup_and_testing.md`](../setup_and_testing.md) (how to run `make eval`).
+Code pointers: [`tests/eval/judges.py`](../tests/eval/judges.py) (NliJudge), [`tests/eval/test_faithfulness.py`](../tests/eval/test_faithfulness.py), [`app/config.py`](../app/config.py) (`RAG_MIN_RELEVANCE_SCORE`), [`app/corrective.py`](../app/corrective.py), [`setup_and_testing.md`](../setup_and_testing.md) (how to run `make eval`).

@@ -13,24 +13,29 @@ We did **not** replace Prometheus. Histograms like `rag_phase_seconds` stay the 
 
 ## The RAG pipeline (what we trace)
 
-Both `/ask` and `/ask/stream` follow the same phases — see `_retrieve_for_ask` and the ask handlers in [`app/main.py`](../app/main.py):
+Both `/ask` and `/ask/stream` follow the same phases — see `_retrieve_for_ask` and `_run_ask_rag_with_corrective` in [`app/main.py`](../app/main.py):
 
 ```mermaid
 flowchart TD
     HTTP["HTTP span (auto)"] --> Route{resolve_ask_route}
     Route -->|nearby_storm| Storm[No LLM path]
-    Route -->|rag| Embed[rag.embed]
+    Route -->|rag| Norm[normalize_retrieval_query]
+    Norm --> Embed[rag.embed]
     Embed --> Retrieve[rag.retrieve]
     Retrieve --> Rerank[rag.rerank optional]
-    Rerank --> Gate{best cosine < 0.5?}
+    Rerank --> Gate{best cosine < threshold?}
     Gate -->|yes| HardRefuse[hard refuse rag.refused=true]
     Gate -->|no| LLM[rag.llm]
-    LLM --> SoftRefuse[soft refuse in model text]
+    LLM --> Soft{soft refuse?}
+    Soft -->|no| Done[answer]
+    Soft -->|yes + rewrite map hit| Retry[second embed+retrieve+llm]
+    Soft -->|yes + no rewrite| SoftDone[keep soft refuse]
+    Retry --> DoneRetry[answer or keep soft refuse]
     Embed -.->|child| HttpxEmbed[httpx POST embed API]
     LLM -.->|child| HttpxLLM[httpx POST chat API]
 ```
 
-**Why these boundaries?** They match the existing `record_rag_phase_seconds("embed"|"retrieve"|"llm", ...)` calls. Same seams = metrics and traces stay comparable.
+**Why these boundaries?** They match the existing `record_rag_phase_seconds("embed"|"retrieve"|"llm", ...)` calls. Same seams = metrics and traces stay comparable. A rewrite-once retry repeats embed / retrieve / llm under the same HTTP parent and sets `rag.rewrite_once` on that root span.
 
 ## Design decisions
 
@@ -69,8 +74,11 @@ We attach **outcome metadata**, not content:
 | `rag.top_cosine` | Best cosine when available (gate signal) |
 | `rag.gate_blocked` | Relevance gate cleared chunks |
 | `rag.refused` | **Hard** refusal only — fixed no-context reply before any LLM call |
+| `rag.rewrite_once` | Soft refuse triggered one corrective retrieve (`true` only when rewrite ran) |
+| `rag.rewrite_query` | Rewritten retrieval string (truncated); set only with `rag.rewrite_once` |
+| `rag.original_query` | Original user question (truncated); set only with `rag.rewrite_once` |
 
-**Never on spans:** question text, chunk content, doc IDs — PII risk and cardinality explosion in Tempo.
+**Default rule:** do not put question text, chunk content, or doc IDs on spans — PII risk and cardinality explosion in Tempo. Rewrite attributes are a deliberate exception (truncated, only on corrective retries) for debugging false soft refuses.
 
 ### 5. Collector in front of Tempo
 
@@ -94,7 +102,9 @@ When tracing is on, log records get `trace_id` and `span_id` fields. Future step
 | File | Role |
 |------|------|
 | [`app/monitoring/tracing.py`](../app/monitoring/tracing.py) | SDK setup, `rag_phase_span`, attribute helpers |
-| [`app/main.py`](../app/main.py) | `init_tracing` at import time; spans on ask paths |
+| [`app/main.py`](../app/main.py) | `init_tracing` at import time; spans on ask paths; rewrite-once corrective |
+| [`app/corrective.py`](../app/corrective.py) | Soft-refuse detection + `rewrite_query_for_retry` |
+| [`app/retrieval.py`](../app/retrieval.py) | `normalize_retrieval_query` (topic for embed/lexical) |
 | [`app/monitoring/metrics.py`](../app/monitoring/metrics.py) | Unchanged Prometheus helpers (kept alongside traces) |
 | [`observability/docker-compose.yml`](../observability/docker-compose.yml) | Collector + Tempo + existing Prometheus/Grafana |
 | [`observability/otel-collector-config.yaml`](../observability/otel-collector-config.yaml) | OTLP in → Tempo out |
@@ -116,7 +126,7 @@ For env vars, Grafana Cloud OTLP, and an incident playbook without a code push, 
 3. `cd observability && docker compose up -d`
 4. Ask a question in the app.
 5. Grafana → **Explore** → datasource **Tempo** → **Search** → use a query that excludes metrics noise (see below). Set time range to **Last 15 minutes**.
-6. Open a trace: you should see `POST /ask` → `rag.embed` → httpx child → `rag.retrieve` → optional `rag.rerank` → `rag.llm` → httpx child.
+6. Open a trace: you should see `POST /ask` → `rag.embed` → httpx child → `rag.retrieve` → optional `rag.rerank` → `rag.llm` → httpx child. A rewrite-once retry adds a second embed/retrieve/llm block under the same HTTP parent (`rag.rewrite_once=true` on the root).
 
 ## Reading a trace (what you are seeing)
 
@@ -144,17 +154,20 @@ POST /ask/stream                    3.4s   ← HTTP parent (FastAPI auto-instrum
 
 **Key insight:** If `rag.llm` is much longer than its httpx **POST** child, most LLM time is token streaming and SSE delivery, not the initial HTTP round-trip.
 
-### Two kinds of "refusal" (different trace shapes)
+### Two kinds of "refusal" (and optional rewrite)
 
-Verbiage can decline to answer in two ways. Traces look different — do not conflate them.
+Verbiage can decline to answer in two ways. Soft refuse may also trigger **one** corrective retrieve when [`rewrite_query_for_retry`](../app/corrective.py) returns a domain phrase. Traces look different — do not conflate them.
 
-| | **Hard refusal** (relevance gate) | **Soft refusal** (LLM) |
-|---|-----------------------------------|------------------------|
-| **When** | Empty chunks or best cosine &lt; `RAG_MIN_RELEVANCE_SCORE` (0.5) | Chunks pass the gate but prompt instructs model to reject irrelevant context |
-| **UI message** | *"I don't have relevant context to answer that question."* | *"No source documents contain that information."* |
-| **`rag.llm` span** | **Absent** — no LLM call, no `chat/completions` in logs | **Present** — LLM runs (~0.5–1s even for a short answer) |
-| **`rag.refused` attribute** | `true` on root HTTP span | **Not set** |
-| **Prometheus** | `rag_no_context_response_total` increments | Normal LLM phase metrics |
+| | **Hard refusal** (relevance gate) | **Soft refusal** (LLM) | **Soft refuse + rewrite-once** |
+|---|-----------------------------------|------------------------|-------------------------------|
+| **When** | Empty chunks or best cosine &lt; `RAG_MIN_RELEVANCE_SCORE` (0.5) | Chunks pass the gate but model returns the soft-refuse canary | Soft refuse **and** phrase map matches (e.g. intact tiles / storm-created opening) |
+| **UI message** | *"I don't have relevant context to answer that question."* | *"No source documents contain that information."* (if rewrite skipped or second pass still soft) | May become a grounded answer after the second LLM |
+| **`rag.llm` span** | **Absent** | **Present** (one) | **Two** LLM phases (first soft, second retry) |
+| **`rag.refused` attribute** | `true` on root HTTP span | **Not set** | **Not set** (unless second retrieve hard-gates; first soft answer is kept) |
+| **Rewrite attrs** | — | — | `rag.rewrite_once=true`, truncated `rag.original_query` / `rag.rewrite_query` |
+| **Prometheus** | `rag_no_context_response_total` increments | Normal LLM phase metrics | Extra embed/retrieve/llm phase samples |
+
+Embed and retrieve always use [`normalize_retrieval_query`](../app/retrieval.py) so instructional wrappers do not dilute cosine below the gate; the LLM prompt still receives the **original** user question.
 
 **Hard refusal trace** (gate blocks before LLM — e.g. off-topic question like *"What is the recipe for chocolate chip cookies?"*):
 
@@ -165,7 +178,7 @@ POST /ask/stream     ~1–2s
 └── (no rag.llm)     ← rag.refused=true on root span
 ```
 
-**Soft refusal trace** (retrieval passes gate, model rejects context — e.g. *"Summarize the earthquake and seismic foundation damage reported in the inspections."* on a storm-only library):
+**Soft refusal, no rewrite** (retrieval passes gate, model rejects context, phrase map misses — e.g. *"Summarize the earthquake and seismic foundation damage reported in the inspections."* on a storm-only library):
 
 ```
 POST /ask/stream     ~3–5s
@@ -176,7 +189,17 @@ POST /ask/stream     ~3–5s
 └── http send × N
 ```
 
-Soft refusals are easy to mistake for hard refusals in the UI but **`span.rag.refused=true` will not match** — search by time range and confirm absence of `rag.llm`, or filter `{ ... && name="rag.llm" && duration < 1s }` for quick LLM rejections.
+**Soft refuse + rewrite-once** (phrase map hits — second pass under the same HTTP parent):
+
+```
+POST /ask/stream
+├── rag.embed / rag.retrieve / rag.llm   ← first pass → soft refuse
+├── rag.embed / rag.retrieve / rag.llm   ← retry with rewritten query
+└── http send × N
+     root attrs: rag.rewrite_once=true
+```
+
+Soft refusals are easy to mistake for hard refusals in the UI but **`span.rag.refused=true` will not match** — search by time range and confirm absence of `rag.llm`, or filter `{ ... && name="rag.llm" && duration < 1s }` for quick LLM rejections. Corrective retries: `{ ... && span.rag.rewrite_once=true }`.
 
 **Nearby-storm trace** (structured lookup, no LLM):
 
@@ -219,6 +242,7 @@ Attributes are set in [`app/monitoring/tracing.py`](../app/monitoring/tracing.py
 | Goal | Query |
 |------|-------|
 | Hard refusals only (`rag.refused` set) | `{ resource.service.name="verbiage" && span.rag.refused=true }` |
+| Soft-refuse rewrite-once retries | `{ resource.service.name="verbiage" && span.rag.rewrite_once=true }` |
 | Relevance gate blocked chunks | `{ resource.service.name="verbiage" && span.rag.gate_blocked=true }` |
 | Short LLM phase (incl. soft refusals) | `{ resource.service.name="verbiage" && name="rag.llm" && duration < 1s }` |
 | Stream endpoint | `{ resource.service.name="verbiage" && span.rag.endpoint="stream" }` |
@@ -262,7 +286,8 @@ Gold questions live in [`tests/eval/gold_questions.yaml`](../tests/eval/gold_que
 |------------------|--------------------------|-------------|------------|
 | Any normal storm question | Full answer with citations | embed → retrieve → llm (long) | Grounded answer |
 | *"What is the recipe for chocolate chip cookies?"* | Hard refusal | embed → retrieve → **no llm** | *I don't have relevant context…* |
-| *"Summarize the earthquake and seismic foundation damage…"* (`earthquake_foundation`) | **Soft** refusal (storm chunks may pass gate) | embed → retrieve → **llm** (short) | *No source documents contain…* |
+| *"Summarize the earthquake and seismic foundation damage…"* (`earthquake_foundation`) | **Soft** refusal (storm chunks may pass gate; rewrite map misses) | embed → retrieve → **llm** (short); no `rag.rewrite_once` | *No source documents contain…* |
+| Intact tiles / storm-created opening phrasing that soft-refuses then rewrites | May answer after retry | **two** embed/retrieve/llm blocks; `rag.rewrite_once=true` | Grounded or still soft refuse |
 | *"What hail damage was found on roofs in Wyoming?"* (`wyoming_hail`) | **May answer** if library has Wyoming reports | Full pipeline on prod; hard refusal only on eval corpus | Grounded or hard refuse |
 | Address-specific gold Q (e.g. Gulfview hail) | Answer if that report is indexed | Full pipeline; inspect `rag.chunk_count` / `rag.top_cosine` on retrieve | Grounded answer |
 | `nearby_ian_sampletown` | Needs curl — `query_mode: nearby_storm` + `claim_context` | `rag.route=nearby_storm`; no embed/llm | Structured distance list |
@@ -271,14 +296,15 @@ Gold questions live in [`tests/eval/gold_questions.yaml`](../tests/eval/gold_que
 
 1. **Baseline** — any storm-damage question you know works → full pipeline (~3–5s, long `rag.llm`).
 2. **Hard refusal** — *"What is the recipe for chocolate chip cookies?"* → confirm UI says *I don't have relevant context…*, trace has **no `rag.llm`**, search `{ ... && span.rag.refused=true }`.
-3. **Soft refusal** — earthquake/seismic gold question → confirm UI says *No source documents contain…*, trace **has `rag.llm`** (~1s), **`rag.refused` not set**.
+3. **Soft refusal (no rewrite)** — earthquake/seismic gold question → confirm UI says *No source documents contain…*, trace **has `rag.llm`** (~1s), **`rag.refused` not set**, **`rag.rewrite_once` not set**.
 4. **Compare retrieve attrs** — click `rag.retrieve` on step 2 vs 3: hard refusal shows `gate_blocked` / low `top_cosine`; soft shows chunks above gate.
-5. **Optional** — nearby-storm gold question via curl with payload from `gold_questions.yaml`.
+5. **Optional rewrite-once** — a soft-refuse question whose wording hits the phrase map in [`app/corrective.py`](../app/corrective.py) → search `{ ... && span.rag.rewrite_once=true }` and confirm two LLM phases.
+6. **Optional nearby-storm** — gold question via curl with payload from `gold_questions.yaml`.
 
 **What these examples will not show** (with current defaults):
 
 - `rag.rerank` — requires `RERANK_ENABLED=1`
-- `rag.retrieval_mode=lexical` — tour questions are natural language (3+ words) → auto routes to `hybrid`
+- `rag.retrieval_mode=lexical` — tour questions are natural language (3+ words) → auto routes to `hybrid` (unless normalize shortens a fluffy ask into a short topic)
 - Errors — examples expect success or clean refusal, not crashes
 
 ## Planned extensions

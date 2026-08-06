@@ -20,7 +20,7 @@ Works “forward” (drafting from scratch) or “backward” (rewriting rough n
 ## Architecture
 
 - **Ingest** — Extract text → store canonical `full_text` → paragraph-first chunking → embeddings in Postgres (`documents`, `chunks`, `embeddings` with pgvector). Drive and large batches go through a Postgres-backed job queue.
-- **Retrieval** — Adaptive routing (`auto`): short identifier/exact-term queries → lexical full-text; otherwise hybrid (vector + lexical) fused with Reciprocal Rank Fusion. Optional cross-encoder rerank; pre-LLM relevance gate refuses off-corpus questions before any generation spend.
+- **Retrieval** — Adaptive routing (`auto`): short identifier/exact-term queries → lexical full-text; otherwise hybrid (vector + lexical) fused with Reciprocal Rank Fusion. Queries are normalized for embed/lexical before search. Optional cross-encoder rerank; pre-LLM relevance gate refuses off-corpus questions before any generation spend. Soft refuse may trigger one domain-phrase rewrite-and-retrieve.
 - **Ask / Report Writer** — Grounded LLM generation with citations and validation; same relevance gate on both paths. Auth via Supabase JWT (closed signup).
 
 Domain focus: storm damage reports and reusable inspection wording.

@@ -35,6 +35,14 @@ Config for embed/LLM lives in `app/config.py` (see `.env.example`). Ask groundin
 
 ---
 
+## Ask retrieval: normalize + rewrite-once
+
+**Normalize (`normalize_retrieval_query` in `app/retrieval.py`):** Embed and lexical search use a cleaned topic string (quoted phrases preferred; otherwise strip instructional prefixes / corpus fillers). The LLM prompt still gets the original user question. Keeps fluffy asks from diluting cosine below `RAG_MIN_RELEVANCE_SCORE`.
+
+**Rewrite-once (`app/corrective.py` + `_run_ask_rag_with_corrective` in `app/main.py`):** Hard gate / empty retrieve refuse without an LLM call and without rewrite. If the model soft-refuses (`No source documents contain that information.`) and `rewrite_query_for_retry` returns a domain phrase, Ask runs **one** extra embed → retrieve → generate. Response may include `retrieval_debug` when a retry ran. Design notes: [docs/agentic-rag-vs-static.md](docs/agentic-rag-vs-static.md); traces: [docs/otel-architecture.md](docs/otel-architecture.md).
+
+---
+
 ## Chunking strategy for reports
 
 **Decision:** Paragraph-first hybrid chunking (default strategy `paragraph`).
