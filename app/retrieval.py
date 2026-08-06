@@ -105,17 +105,23 @@ _QUOTE_CHARS = "\"\u201c\u201d'\u2018\u2019"
 # Polite openers that precede provide/give/show/find/tell (will/can you please…).
 _POLITE_OPENER = r"(?:(?:will|would|can|could)\s+you\s+)?(?:please\s+)?"
 
+# Nouns that request excerpts rather than naming a storm-damage topic.
+_REQUEST_NOUNS = r"quotes?|text|passages?|excerpts?|info(?:rmation)?|details?|examples?"
+
 # Instructional wrappers that dilute embeddings / AND-kill lexical search.
 # Conservative: do not strip "What … was found at …" gold-style questions.
 _INSTRUCTIONAL_PREFIX = re.compile(
     r"^(?:"
     rf"{_POLITE_OPENER}(?:provide|give|show|find)\s+"
-    r"(?:quotes?|text|passages?|excerpts?|info(?:rmation)?|details?|examples?)?\s*"
+    rf"(?:{_REQUEST_NOUNS})?\s*"
     r"(?:about|on|regarding|for|from(?:\s+a\s+report)?(?:\s+about)?)?\s*"
     r"|"
     rf"{_POLITE_OPENER}tell\s+me\s+(?:more\s+)?(?:about\s+)?"
     r"|"
-    r"looking\s+for\s+(?:quotes?|info(?:rmation)?|text|passages?)?\s*(?:about|on)?\s*"
+    rf"looking\s+for\s+(?:{_REQUEST_NOUNS})?\s*(?:about|on)?\s*"
+    r"|"
+    # Mid/shorthand: "quotes about hail damage" (no provide/give verb).
+    rf"(?:{_REQUEST_NOUNS})\s+(?:about|on|regarding|for)\s+"
     r"|"
     r"(?:any\s+)?(?:signs|evidence)\s+of\s+"
     r")",
@@ -128,14 +134,20 @@ _CORPUS_FILLER_SUFFIX = re.compile(
     re.IGNORECASE,
 )
 
+# Trailing request fillers: "hail damage quote please", "hail damage quotes".
+_REQUEST_FILLER_SUFFIX = re.compile(
+    rf"\s+(?:(?:{_REQUEST_NOUNS})(?:\s+please)?|please)\s*$",
+    re.IGNORECASE,
+)
+
 
 def normalize_retrieval_query(question: str) -> str:
     """Topic text for embed + lexical search (prompt still uses the original question).
 
     Prefer explicit quoted phrases; otherwise strip a small set of instructional
-    prefixes and trailing corpus fillers so hybrid cosine stays above the relevance
-    gate for in-corpus topics (and short topics can route to lexical via auto).
-    Returns the original string when stripping would empty it.
+    prefixes and trailing corpus / request fillers so hybrid cosine stays above the
+    relevance gate for in-corpus topics (and short topics can route to lexical via
+    auto). Returns the original string when stripping would empty it.
     """
     text = (question or "").strip()
     if not text:
@@ -146,6 +158,7 @@ def normalize_retrieval_query(question: str) -> str:
         return " ".join(phrases)
     stripped = _INSTRUCTIONAL_PREFIX.sub("", text, count=1)
     stripped = _CORPUS_FILLER_SUFFIX.sub("", stripped)
+    stripped = _REQUEST_FILLER_SUFFIX.sub("", stripped)
     stripped = re.sub(r"\s+", " ", stripped).strip()
     return stripped if stripped else text
 

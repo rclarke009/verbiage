@@ -242,6 +242,12 @@ def test_resolve_auto_mode_cases(question, expected):
         ("would you tell me about soffit damage", "soffit damage"),
         ("please provide quotes about hail damage from the reports", "hail damage"),
         ("hail damage in our documents", "hail damage"),
+        # suffix / mid shorthand (demo-style)
+        ("hail damage quote please", "hail damage"),
+        ("hail damage quotes", "hail damage"),
+        ("quotes about hail damage please", "hail damage"),
+        ("quote about hail damage", "hail damage"),
+        ("hail damage please", "hail damage"),
         # no wrapper / gold-style -> returned unchanged
         ("torn shingles", "torn shingles"),
         ("what's the hail damage in wyoming", "what's the hail damage in wyoming"),
@@ -260,9 +266,18 @@ def test_normalize_idempotent_on_topic_phrase():
     assert normalize_retrieval_query(normalize_retrieval_query("signs of shingle damage")) == "shingle damage"
 
 
-def test_fluffy_hail_ask_normalizes_to_lexical_auto_mode():
+@pytest.mark.parametrize(
+    "fluffy",
+    [
+        "will you please provide information on hail damage from our reports",
+        "hail damage quote please",
+        "hail damage quotes",
+        "quotes about hail damage please",
+        "quote about hail damage",
+    ],
+)
+def test_fluffy_hail_ask_normalizes_to_lexical_auto_mode(fluffy):
     """Polite wrappers must collapse to the same short topic path as 'hail damage'."""
-    fluffy = "will you please provide information on hail damage from our reports"
     topic = normalize_retrieval_query(fluffy)
     assert topic == "hail damage"
     assert resolve_auto_mode(topic) == "lexical"
