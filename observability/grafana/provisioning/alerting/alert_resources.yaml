@@ -10,7 +10,7 @@ contactPoints:
       - uid: verbiage_email_uid
         type: email
         settings:
-          addresses: rclarke009@gmail.com
+          addresses: you@example.com
           singleEmail: false
           subject: '{{ template "verbiage_alert.subject" . }}'
           message: '{{ template "verbiage_alert.message" . }}'

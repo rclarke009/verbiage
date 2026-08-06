@@ -16,7 +16,7 @@ _ADDRESS_LABEL = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# Single-line US FL street address ending in ZIP (e.g. "3440 NE CR 255, Lee, FL 32059").
+# Single-line US FL street address ending in ZIP (e.g. "1200 NE Example CR 100, Sampleville, FL 30070").
 _FL_STREET_ZIP_LINE = re.compile(
     r"^\s*(\d{1,6}\s+.+?,\s*[^,\n]+,\s*FL\s+\d{5}(?:-\d{4})?)\s*$",
     re.IGNORECASE | re.MULTILINE,

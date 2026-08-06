@@ -9,39 +9,39 @@ def test_extract_address_from_header():
 
 
 def test_extract_address_from_address_label_single_line():
-    """Hitchcock-style Residential Testing header with Address: on one line."""
+    """Residential Testing-style header with Address: on one line (CR route)."""
     text = (
         "Residential Testing \n"
-        "Prepared for: Jerald & Marilyn Hitchcock \n"
-        "Address: 3440 NE CR 255, Lee, FL 32059 \n"
+        "Prepared for: Jordan & Morgan Sample \n"
+        "Address: 1200 NE Example CR 100, Sampleville, FL 30070 \n"
         "  \n"
         "\n"
         "27 Jun 2024 E24-6-0018 \n"
-        "3440 NE CR 255, Lee, FL 32059 PAGE 2 OF 51 \n"
+        "1200 NE Example CR 100, Sampleville, FL 30070 PAGE 2 OF 51 \n"
     )
-    assert extract_address(text) == "3440 NE CR 255, Lee, FL 32059"
+    assert extract_address(text) == "1200 NE Example CR 100, Sampleville, FL 30070"
 
 
-def test_extract_address_from_address_label_multiline_live_oak():
-    """Live Oak-style header: street on Address: line, city/state/ZIP on next."""
+def test_extract_address_from_address_label_multiline_circle():
+    """Multiline header: street on Address: line, city/state/ZIP on next."""
     text = (
-        "Prepared for:  James Ogles \n"
-        "Address:   971 Pineview Cir SW \n"
-        "   Live Oak, FL 32064\n"
+        "Prepared for:  Alex Sampleton \n"
+        "Address:   400 Example Cir SW \n"
+        "   Sample Oaks, FL 30071\n"
         "ENGINEERING \n"
         "REPORT\n"
     )
-    assert extract_address(text) == "971 Pineview Cir SW, Live Oak, FL 32064"
+    assert extract_address(text) == "400 Example Cir SW, Sample Oaks, FL 30071"
 
 
 def test_extract_address_from_address_label_multiline_terrace():
     text = (
-        "Prepared for: Corynne Rina Kramer \n"
-        "Address: 15771 60th Terrace \n"
-        " Live Oak, FL 32060 \n"
+        "Prepared for: Casey Example \n"
+        "Address: 15000 Example Terrace \n"
+        " Sample Oaks, FL 30072 \n"
         "7 Aug 2025 E2025-07102 \n"
     )
-    assert extract_address(text) == "15771 60th Terrace, Live Oak, FL 32060"
+    assert extract_address(text) == "15000 Example Terrace, Sample Oaks, FL 30072"
 
 
 def test_extract_address_fl_street_zip_fallback():
@@ -82,13 +82,13 @@ def test_extract_document_metadata_address_only():
     assert meta["storm_id"] is None
 
 
-def test_extract_document_metadata_hitchcock_style():
+def test_extract_document_metadata_residential_testing_style():
     text = (
         "Residential Testing\n"
-        "Prepared for: Jerald & Marilyn Hitchcock\n"
-        "Address: 3440 NE CR 255, Lee, FL 32059\n"
+        "Prepared for: Jordan & Morgan Sample\n"
+        "Address: 1200 NE Example CR 100, Sampleville, FL 30070\n"
         "Damage following Hurricane Idalia in 2023.\n"
     )
     meta = extract_document_metadata(text)
-    assert meta["address"] == "3440 NE CR 255, Lee, FL 32059"
+    assert meta["address"] == "1200 NE Example CR 100, Sampleville, FL 30070"
     assert meta["storm_id"] == "idalia-2023"
