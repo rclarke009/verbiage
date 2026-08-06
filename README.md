@@ -26,7 +26,7 @@ The production app requires sign-in, so the examples below show typical **Ask** 
 >
 > **A:** *I don't have relevant context in the document library to answer that question.*
 
-Optional polish: add UI screenshots under `[docs/screenshots/](docs/screenshots/)` and embed them here — **not required**; the text examples above are enough for a portfolio README.
+Optional polish: add UI screenshots under `[docs/screenshots/](docs/screenshots/)` and embed them here.
 
 ---
 
@@ -51,7 +51,7 @@ Optional polish: add UI screenshots under `[docs/screenshots/](docs/screenshots/
 - **Smart chunking**: Paragraph-first with canonical `full_text` storage for easy re-indexing without re-upload
 - **Strong grounding & validation**: LLM responses include source citations + fallback logic ("Not enough information"), plus a **pre-LLM relevance gate** — off-corpus questions are refused before any LLM call when the best chunk's cosine similarity falls below `RAG_MIN_RELEVANCE_SCORE` (deterministic, zero-spend refusals)
 - **Production reliability**: Durable **Postgres-backed ingest job queue** with a background worker (batch enqueue + status polling), input validation, and structured logging
-- **Observability**: Optional Prometheus `/metrics`, including a low-quality-retrieval counter (`rag_retrieval_low_quality_total`) for alerting when top-1 similarity is weak; optional OpenTelemetry traces exported to Grafana Tempo (local learning stack in `observability/`)
+- **Observability**: Optional Prometheus `/metrics`, including a low-quality-retrieval counter (`rag_retrieval_low_quality_total`) for alerting when top-1 similarity is weak; optional OpenTelemetry traces exported to Grafana Tempo (local observability stack in `observability/`)
 - **Flexible LLM backend**: OpenAI (production) or Ollama (local/dev); PostgreSQL (Supabase) in production or SQLite for local dev
 - **Access control**: Supabase JWT on protected routes, with **closed signup** via invite code or email allowlist and a password-reset flow
 - **Shared library**: All signed-in users see the same document set; list, filter, delete
@@ -150,7 +150,7 @@ flowchart TD
 
 We chose **psycopg2** and a **sync DB layer** first because the app migrated from SQLite with minimal churn — same `conn`-per-request pattern, straightforward pgvector SQL, and one `ThreadedConnectionPool` against the Supabase pooler. We used **native async (**`httpx`**)** for LLM and embedding API calls from the start because that is where most `/ask` latency lives. As load grew on a **single uvicorn worker** (ingest worker in-process, reranker in memory), blocking work on the event loop caused real pain — first **Google Drive listing** (502s on large folders), then the **cross-encoder reranker**. We addressed those with `asyncio.to_thread` (and a dedicated Drive thread pool), not an asyncpg rewrite: same database, same pooler, lower risk. Remaining gaps — **Postgres retrieval, document chunking, PDF/DOCX extraction, and worker Drive downloads** — are offloaded the same way so concurrent `/ask` and ingest do not freeze health checks or SSE streams.
 
-Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md). Prompt engineering & grounding strategy: [build-prompts.md](build-prompts.md).
+Implementation notes (chunking, reindex, data sources): [code-notes.md](code-notes.md). Faithfulness eval and grounding metrics: [docs/faithfulness-and-rag-metrics-walkthrough.md](docs/faithfulness-and-rag-metrics-walkthrough.md).
 
 ---
 
@@ -326,8 +326,8 @@ This project demonstrates full-cycle applied AI engineering: business problem �
 - `/app/report_writer` — LangGraph workflow for structured claim drafts (nodes, SSE adapter, Postgres checkpointer)
 - `/frontend` — React + Vite SPA
 - `/tests` — Unit/integration suite + the opt-in faithfulness eval harness (`tests/eval/`)
-- [build-prompts.md](build-prompts.md) — Prompt engineering & grounding strategy
 - [code-notes.md](code-notes.md) — Chunking, retrieval, and technical decisions
+- [docs/faithfulness-and-rag-metrics-walkthrough.md](docs/faithfulness-and-rag-metrics-walkthrough.md) — Faithfulness eval and RAG drift metrics
 - [setup.md](setup.md) · [setup_and_testing.md](setup_and_testing.md) — Setup, testing, and curl examples
 
 ---

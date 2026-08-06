@@ -2,7 +2,7 @@
 
 Local Docker stack that scrapes Verbiage **`GET /metrics`** and receives **OpenTelemetry traces** via OTLP.
 
-**Learning guide:** see [docs/otel-learning.md](../docs/otel-learning.md) for why we chose this architecture, how spans map to the RAG pipeline, and design trade-offs.
+**Architecture notes:** see [docs/otel-architecture.md](../docs/otel-architecture.md) for why we chose this layout, how spans map to the RAG pipeline, and design trade-offs.
 
 ## Prerequisites
 

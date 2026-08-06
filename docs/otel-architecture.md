@@ -1,4 +1,4 @@
-# OpenTelemetry tracing — learning notes
+# OpenTelemetry tracing — architecture notes
 
 This doc explains **why** we instrumented the RAG pipeline the way we did, and how the pieces connect. Read it alongside the code in [`app/monitoring/tracing.py`](../app/monitoring/tracing.py) and the ask handlers in [`app/main.py`](../app/main.py).
 
@@ -41,7 +41,7 @@ Tests and production without a collector should pay **zero** export cost. Same p
 ### 2. Auto-instrument FastAPI + httpx; manual spans for RAG phases
 
 - **FastAPIInstrumentor** — creates the parent HTTP span (`POST /ask`) with route template labels. You don't maintain this by hand. Must be called at **import time** (right after `app = FastAPI(...)`), not in lifespan startup — otherwise middleware is registered too late and each `rag.*` span becomes its own orphan trace.
-- **HTTPXClientInstrumentor** — creates child spans for OpenAI/Ollama HTTP calls inside [`app/llm_client.py`](../app/llm_client.py) and embedders **without editing those files**. High learning value, minimal diff.
+- **HTTPXClientInstrumentor** — creates child spans for OpenAI/Ollama HTTP calls inside [`app/llm_client.py`](../app/llm_client.py) and embedders **without editing those files**. Keeps instrumentation out of those modules while still attributing outbound HTTP cost to the parent RAG span.
 - **`rag_phase_span()`** — manual spans for domain-specific phases Prometheus already names. Only RAG code knows about retrieve modes, relevance gates, and rerank.
 
 ### 3. Span names mirror Prometheus phase labels
@@ -281,7 +281,7 @@ Gold questions live in [`tests/eval/gold_questions.yaml`](../tests/eval/gold_que
 - `rag.retrieval_mode=lexical` — tour questions are natural language (3+ words) → auto routes to `hybrid`
 - Errors — examples expect success or clean refusal, not crashes
 
-## Phase 2 ideas (not implemented yet)
+## Planned extensions
 
 - **Ingest/indexing** spans in [`app/indexing.py`](../app/indexing.py) (`chunk`, `embed`, `persist`).
 - **Report Writer** LangGraph node spans in [`app/report_writer/`](../app/report_writer/).

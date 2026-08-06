@@ -1,6 +1,6 @@
-# Faithfulness & RAG metrics — plain-language walkthrough
+# Faithfulness & RAG metrics — reference
 
-This is a beginner guide to the Q&A set about **NliJudge**, **faithfulness**, **refusal gates**, and **RAG drift metrics** in Verbiage. Read it top to bottom once; later use the flashcard answers at the end of each section as a quiz.
+Internal reference for **NliJudge**, **faithfulness**, **refusal gates**, and **RAG drift metrics** in Verbiage. Sections build on each other; the summary table at the end is a quick lookup for the same Q→A set.
 
 ---
 
@@ -206,7 +206,7 @@ End-to-end can **hide** a stage regression: cheap/fast requests average the pain
 
 ---
 
-## Flashcard cheat sheet (same Q → A as your list)
+## Quick reference (Q → A)
 
 | Question | Answer |
 | --- | --- |

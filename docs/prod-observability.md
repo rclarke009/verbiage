@@ -2,7 +2,7 @@
 
 How to enable metrics and tracing on **rag-document-analysis-backend** without a code push. Both signals initialize at **process startup** — changing env vars in the Render dashboard requires a **restart** (Manual Deploy → Deploy latest commit, or Restart service). You do **not** need to merge new code unless you are changing the app itself.
 
-**Local stack:** [observability/README.md](../observability/README.md) · **Why traces look like this:** [otel-learning.md](otel-learning.md)
+**Local stack:** [observability/README.md](../observability/README.md) · **Why traces look like this:** [otel-architecture.md](otel-architecture.md)
 
 ---
 
@@ -121,7 +121,7 @@ That URL is **not** valid from Render — the collector runs on your machine.
 
 1. Hit `/ask` or `/ask/stream` on prod (or run a load test).
 2. Grafana Cloud → **Explore** → **Tempo** (or self-hosted Tempo locally).
-3. Search: `{resource.service.name="verbiage-prod"}` — see [otel-learning.md § TraceQL](otel-learning.md#useful-grafana-tempo-queries-traceql).
+3. Search: `{resource.service.name="verbiage-prod"}` — see [otel-architecture.md § TraceQL](otel-architecture.md#useful-grafana-tempo-queries-traceql).
 
 Expected waterfall: `POST /ask` → `rag.embed` → httpx child → `rag.retrieve` → `rag.llm` → httpx child.
 
@@ -139,7 +139,7 @@ Set `OTEL_ENABLED` to empty or `false`, restart. No code change.
 2. **If Tier A is on** — open Grafana, check HTTP 5xx rate, `rag_phase_seconds`, refusal counters for the incident window.
 3. **If Tier A is off** — set `METRICS_ENABLED=true`, `METRICS_TOKEN`, restart. Metrics appear **from restart forward** only; you cannot backfill the incident window.
 4. **Need one request explained** — enable Tier B (`OTEL_ENABLED=true` + OTLP endpoint), restart, reproduce the failure (or wait for traffic), search Tempo. Traces exist **only after** tracing was initialized.
-5. **Reproduce locally** — copy prod `.env` patterns, enable OTEL, run `observability/docker compose up -d`, replay the question. [`make eval` does not produce HTTP traces](otel-learning.md) — use the UI or `/ask/stream`.
+5. **Reproduce locally** — copy prod `.env` patterns, enable OTEL, run `observability/docker compose up -d`, replay the question. [`make eval` does not produce HTTP traces](otel-architecture.md) — use the UI or `/ask/stream`.
 
 **No git push required** for steps 3–4 — only Render env vars + restart.
 
@@ -177,7 +177,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <...>   # if required by your bac
 No. Restart the same deployed image after env changes.
 
 **Will `--reload` locally pick up `.env` changes for OTEL?**  
-No. Tracing initializes at import time; restart uvicorn after changing any `OTEL_*` var ([otel-learning.md](otel-learning.md)).
+No. Tracing initializes at import time; restart uvicorn after changing any `OTEL_*` var ([otel-architecture.md](otel-architecture.md)).
 
 **Can I see traces for requests that already failed?**  
 No. Spans are exported in real time; there is no retroactive trace store when `OTEL_ENABLED` was off.

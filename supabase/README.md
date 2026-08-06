@@ -1,28 +1,24 @@
-# Verbiage — Supabase (Phase 1)
+# Verbiage — Supabase schema
 
-Phase 1 creates the database schema on Supabase: pgvector + `documents`, `chunks`, `embeddings`.
+Database schema on Supabase: pgvector + `documents`, `chunks`, `embeddings`.
 
-## You need to do (I can’t connect to Supabase)
+## Setup
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com) → New project.  
-   Save: **Project URL**, **Database password**, and (optional) **anon** / **service_role** keys from Project Settings → API.
+   Save: **Project URL**, **Database password**, and **anon** / **service_role** keys from Project Settings → API.
 
-2. **Run the schema SQL** in the Supabase **SQL Editor**:
+2. **Apply the schema** in the Supabase **SQL Editor**:
    - Open your project → **SQL Editor** → New query.
    - Paste the contents of `migrations/20250302000000_phase1_schema.sql`.
    - Run it.
 
-3. **Get your Postgres connection string** for Phase 2:  
-   Project Settings → **Database** → Connection string (URI). Use the **pooler** URI (port 6543) for short-lived connections from the FastAPI app.
+   Or with the [Supabase CLI](https://supabase.com/docs/guides/cli) after `supabase link`:
 
-After that, Phase 1 is done: pgvector enabled, tables and indexes (including HNSW for vector search) are created.
+   ```bash
+   supabase db push
+   ```
 
-## Optional: Supabase CLI
+3. **Postgres connection string** for the FastAPI app:  
+   Project Settings → **Database** → Connection string (URI). Prefer the **pooler** URI (port 6543) for short-lived connections. Set `DATABASE_URL` in `.env` (see root [README.md](../README.md) and [setup.md](../setup.md)).
 
-If you use the [Supabase CLI](https://supabase.com/docs/guides/cli) and link this project (`supabase link`), you can apply the migration with:
-
-```bash
-supabase db push
-```
-
-(or run the migration file manually from the CLI).
+That enables pgvector plus tables and indexes (including HNSW for vector search).

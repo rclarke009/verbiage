@@ -8,31 +8,33 @@ AI-powered verbiage for storm damage reports. Ingest past reports, then get over
 
 ## What It Does
 
-- **Ingest** — Store hundreds or thousands of storm damage reports (text + metadata). Chunk, embed, and index for retrieval.
-- **List documents** — See what’s already ingested: titles, doc_id, optional first N characters (snippet) so users know what’s in the system.
-- **Ask** — Describe the current case (symptom, damage type, etc.). The app retrieves similar past report text and uses the LLM to suggest **overview** and **detailed image** verbiage.
+- **Ingest** — Store storm damage reports (PDF, DOCX, text paste, or Google Drive). Chunk, embed, and index for retrieval; durable job queue for batch uploads.
+- **Shared library** — List, filter, and manage ingested documents so the team sees one collaborative corpus.
+- **Ask** — Describe the current case (symptom, damage type, location, etc.). The app retrieves similar past report text and returns grounded **overview** and **detailed image** verbiage with source citations — or refuses when retrieval is too weak.
+- **Report Writer** — LangGraph workflow that drafts structured report sections from field notes, claim photos, and similar past reports (SSE streaming; optional human-in-the-loop).
 
 Works “forward” (drafting from scratch) or “backward” (rewriting rough notes)—either way, AI turns rough input into report-ready verbiage.
 
 ---
 
-## Architecture (Phase 3 Style)
+## Architecture
 
-- **POST /ingest** — Accept a report (e.g. `doc_id`, `title`, `source`, `text`). Chunk, embed chunks, store in Postgres (documents, chunks, embeddings with pgvector).
-- **GET /documents** — Return a list of ingested documents (e.g. `doc_id`, `title`, `source`, `created_at`, `num_chunks`, and optional `snippet` = first N characters) so users can see what has been loaded.
-- **POST /ask** — Accept a question or prompt (e.g. “This report has [symptom]. Give me overview and detailed image verbiage.”). Embed query → top-k similarity search (pgvector in Postgres) → LLM with retrieved chunks as context → return suggested verbiage.
+- **Ingest** — Extract text → store canonical `full_text` → paragraph-first chunking → embeddings in Postgres (`documents`, `chunks`, `embeddings` with pgvector). Drive and large batches go through a Postgres-backed job queue.
+- **Retrieval** — Adaptive routing (`auto`): short identifier/exact-term queries → lexical full-text; otherwise hybrid (vector + lexical) fused with Reciprocal Rank Fusion. Optional cross-encoder rerank; pre-LLM relevance gate refuses off-corpus questions before any generation spend.
+- **Ask / Report Writer** — Grounded LLM generation with citations and validation; same relevance gate on both paths. Auth via Supabase JWT (closed signup).
 
-Same RAG flow as the learning project; domain = storm damage reports and reusable wording.
+Domain focus: storm damage reports and reusable inspection wording.
 
 ---
 
-## Tech (Initial)
+## Tech
 
-- FastAPI, Pydantic, async LLM + embedding client
-- Postgres + pgvector for chunk/embedding storage and in-DB similarity search
-- Chunking (e.g. by chars/sentences); optional in-memory cosine fallback for tests
-- **Data sources:** Ingest from PDF and .docx only (see `code-notes.md` for rationale and implementation).
-- **Models (local, for client-name privacy):** **Llama 3.1 8B** via Ollama for text/RAG (POST /ask); **LLaVA** (Ollama) in the next phase for image → report.
+- **Backend:** FastAPI, Pydantic v2, async LLM + embedding clients
+- **Store / search:** PostgreSQL + pgvector (Supabase in production); hybrid retrieval + RRF; optional cross-encoder rerank
+- **Frontend:** React + Vite SPA (TanStack Query)
+- **Auth:** Supabase JWT; invite code or email allowlist
+- **Data sources:** PDF and `.docx` (upload or Drive); text paste (see `code-notes.md`)
+- **Models:** OpenAI in production; Ollama (e.g. Llama 3.1 8B) for local/dev. Vision analysis for claim photos is in use today; broader image→report generation remains a natural extension.
 
 ---
 
@@ -40,10 +42,4 @@ Same RAG flow as the learning project; domain = storm damage reports and reusabl
 
 **Production app URL:** [https://rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com) (sign-in required)
 
----
-
-## Roadmap
-
-1. **Phase 3 clone** — Ingest + RAG (POST /ingest, POST /ask) for report text; verbiage-focused prompts. LLM: **Llama 3.1 8B** (Ollama, local).
-2. **Phase 4** — Cache, observability, API key auth. Keep Llama 3.1 8B for text; add **LLaVA** (Ollama) for “look at this job’s images and write report text.”
-3. **Later** — Optional: image-based damage comparison (vision/embeddings) as a separate feature; LLaVA remains the target vision model.
+More detail: [README.md](README.md).
