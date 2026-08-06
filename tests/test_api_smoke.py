@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main
 from app.models import IngestResponse, RetrievedChunk
+from app.monitoring.ask_run_log import RetrieveOutcome
 from tests.conftest_api import (
     api_client,
     clear_api_overrides,
@@ -172,7 +173,7 @@ def test_ask_refusal_when_no_context():
     async def ask_retry(request, async_fn):
         prime_app_state(request.app)
         with patch.object(main, "HttpEmbedder", return_value=mock_embedder):
-            with patch.object(main, "_retrieve_for_ask", new=AsyncMock(return_value=[])):
+            with patch.object(main, "_retrieve_for_ask", new=AsyncMock(return_value=RetrieveOutcome(chunks=[]))):
                 return await async_fn(MagicMock())
 
     try:
@@ -185,6 +186,7 @@ def test_ask_refusal_when_no_context():
     data = resp.json()
     assert "don't have relevant context" in data["answer"]
     assert data["top_chunks"] == []
+    assert data["ask_run"]["decision"] == "hard_refuse"
 
 
 def test_ask_returns_llm_answer_with_chunks():
@@ -197,7 +199,15 @@ def test_ask_returns_llm_answer_with_chunks():
         prime_app_state(request.app)
         with patch.object(main, "HttpEmbedder", return_value=mock_embedder):
             with patch.object(
-                main, "_retrieve_for_ask", new=AsyncMock(return_value=[SAMPLE_CHUNK])
+                main,
+                "_retrieve_for_ask",
+                new=AsyncMock(
+                    return_value=RetrieveOutcome(
+                        chunks=[SAMPLE_CHUNK],
+                        top_cosine=0.9,
+                        retrieval_mode="hybrid",
+                    )
+                ),
             ):
                 with patch.object(
                     main.llm_client,
@@ -217,6 +227,8 @@ def test_ask_returns_llm_answer_with_chunks():
     assert data["answer"] == "Shingle damage noted."
     assert len(data["top_chunks"]) == 1
     assert data["top_chunks"][0]["doc_id"] == "doc-1"
+    assert data["ask_run"]["decision"] == "answer"
+    assert data["ask_run"]["models"]["embed"] == "test-embed"
 
 
 def test_ingest_text_success():

@@ -136,7 +136,8 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
     # reranker=None: the faithfulness gate scores the un-reranked pipeline (pool_k == top_k,
     # exactly the current retrieval) so the eval stays reproducible and never loads the
     # ~100MB cross-encoder. Pass a Reranker() here instead to measure rerank impact.
-    top_chunks = await _retrieve_for_ask(conn, retrieval_req, vec, embedder.model, "eval", None)
+    top_outcome = await _retrieve_for_ask(conn, retrieval_req, vec, embedder.model, "eval", None)
+    top_chunks = top_outcome.chunks
 
     prompt = _ask_prompt_from_chunks(question, top_chunks)
     if prompt is None:
@@ -163,9 +164,10 @@ async def run_question(conn, q: dict, embedder: CachedEmbedder | None = None) ->
             retry_q = normalize_retrieval_query(rewritten)
             retry_req = req.model_copy(update={"question": retry_q})
             retry_vec = (await embedder.embed_many([retry_q]))[0]
-            retry_chunks = await _retrieve_for_ask(
+            retry_outcome = await _retrieve_for_ask(
                 conn, retry_req, retry_vec, embedder.model, "eval", None,
             )
+            retry_chunks = retry_outcome.chunks
             retry_prompt = _ask_prompt_from_chunks(question, retry_chunks)
             if retry_prompt is not None:
                 answer = await llm_client.answer_with_context(retry_prompt, temperature=0.0)

@@ -47,7 +47,7 @@ _httpx_instrumented = False
 
 
 class TraceContextFilter(logging.Filter):
-    """Inject trace_id/span_id into log records for correlation in Grafana Loki (future)."""
+    """Inject trace_id/span_id into log records for correlation with Tempo / future Loki."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         span = trace.get_current_span()
@@ -59,6 +59,14 @@ class TraceContextFilter(logging.Filter):
             record.trace_id = ""
             record.span_id = ""
         return True
+
+
+def install_trace_context_filter() -> None:
+    """Attach TraceContextFilter to root and app loggers (safe when OTEL is off — empty ids)."""
+    for name in (None, "app"):
+        log = logging.getLogger(name)
+        if not any(isinstance(f, TraceContextFilter) for f in log.filters):
+            log.addFilter(TraceContextFilter())
 
 
 def init_tracing(app: FastAPI) -> TracerProvider | None:
@@ -74,6 +82,8 @@ def init_tracing(app: FastAPI) -> TracerProvider | None:
     lifespan shutdown to flush spans on exit.
     """
     global _tracer_provider, _fastapi_instrumented, _httpx_instrumented
+
+    install_trace_context_filter()
 
     if not tracing_enabled():
         logger.info("OpenTelemetry tracing disabled (OTEL_ENABLED not set)")
@@ -95,10 +105,6 @@ def init_tracing(app: FastAPI) -> TracerProvider | None:
     if not _httpx_instrumented:
         HTTPXClientInstrumentor().instrument()
         _httpx_instrumented = True
-
-    root = logging.getLogger()
-    if not any(isinstance(f, TraceContextFilter) for f in root.filters):
-        root.addFilter(TraceContextFilter())
 
     logger.info(
         "OpenTelemetry tracing enabled (service=%s, endpoint=%s)",

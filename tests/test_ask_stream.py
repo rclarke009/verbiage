@@ -54,11 +54,12 @@ def test_ask_stream_emits_error_frame_when_prepare_fails():
 def test_ask_stream_emits_refusal_token_when_no_context():
     """No relevant chunks -> sources then a token refusal, no error."""
     client = _client()
-    # do_prepare returns (kind, answer, top_chunks, retrieval_debug)
+    # do_prepare returns (kind, answer, top_chunks, retrieval_debug, ask_run)
     prepared = (
         "rag",
         "I don't have relevant context to answer that question.",
         [],
+        None,
         None,
     )
     try:
@@ -82,7 +83,7 @@ def test_ask_stream_includes_retrieval_debug_when_rewrite_ran():
         original_query="Which tile-roof properties had intact roof tiles?",
         rewritten_query="intact roof tiles. No storm-created opening was identified",
     )
-    prepared = ("rag", "412 Example Drive had intact tiles.", [], debug)
+    prepared = ("rag", "412 Example Drive had intact tiles.", [], debug, None)
     try:
         with patch.object(
             main, "with_db_conn_retry", new=AsyncMock(return_value=prepared)

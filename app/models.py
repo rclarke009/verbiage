@@ -122,6 +122,80 @@ class RetrievalDebug(BaseModel):
     rewritten_query: str = Field(..., description="Query used for the corrective retrieve")
 
 
+class AskRunGate(BaseModel):
+    blocked: bool = False
+    top_cosine: float | None = None
+    threshold: float | None = None
+
+
+class AskRunModels(BaseModel):
+    embed: str | None = None
+    llm: str | None = None
+    provider: str | None = None
+
+
+class AskRunPromptMeta(BaseModel):
+    sha256: str
+    chars: int
+
+
+class AskRunChunkRef(BaseModel):
+    chunk_id: str
+    doc_id: str
+    score: float
+    title: str | None = None
+    source: str | None = None
+    snippet: str | None = Field(
+        default=None,
+        description="Present only in verbose ask-run logs, not on default API summaries",
+    )
+
+
+class AskRunRewrite(BaseModel):
+    retried: bool = True
+    rewritten_query: str | None = None
+
+
+class AskRunLatency(BaseModel):
+    embed: float | None = None
+    retrieve: float | None = None
+    rerank: float | None = None
+    llm: float | None = None
+    total: float | None = None
+
+
+class AskRunSummary(BaseModel):
+    """One-run story for diagnosis: correlate with Tempo via trace_id."""
+
+    ask_run_id: str
+    trace_id: str | None = None
+    endpoint: str | None = None
+    route: str | None = None
+    decision: Literal[
+        "answer",
+        "hard_refuse",
+        "soft_refuse",
+        "nearby_storm",
+        "error",
+    ]
+    retrieval_mode: str | None = None
+    auto_routed: bool | None = None
+    gate: AskRunGate | None = None
+    models: AskRunModels | None = None
+    prompt: AskRunPromptMeta | None = None
+    chunks: list[AskRunChunkRef] = Field(default_factory=list)
+    rewrite: AskRunRewrite | None = None
+    latency_ms: AskRunLatency | None = None
+    answer_chars: int | None = None
+    refused_hard: bool = False
+    soft_refuse: bool = False
+    normalized_query_len: int | None = None
+    question_preview: str | None = None
+    user_id_hash: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
 class AskResponse(BaseModel):
     answer: str = Field(...,description="Answer from system")
     top_chunks: list[RetrievedChunk] = Field(..., description="top _ chunks")
@@ -129,6 +203,10 @@ class AskResponse(BaseModel):
     retrieval_debug: RetrievalDebug | None = Field(
         default=None,
         description="Present when soft-refuse triggered one rewrite-and-retrieve retry",
+    )
+    ask_run: AskRunSummary | None = Field(
+        default=None,
+        description="Structured per-request summary for diagnosis (also logged as event=ask_run)",
     )
 
 

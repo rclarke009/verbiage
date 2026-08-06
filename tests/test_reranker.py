@@ -149,7 +149,7 @@ def test_retrieve_for_ask_no_reranker_uses_topk_pool(monkeypatch):
     out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", None))
 
     assert calls["vector"][2] == 5  # 3rd positional arg is the pool size -> no widening
-    assert [c.chunk_id for c in out] == ["v"]
+    assert [c.chunk_id for c in out.chunks] == ["v"]
 
 
 def test_retrieve_for_ask_widens_pool_and_reranks_vector(monkeypatch):
@@ -164,7 +164,7 @@ def test_retrieve_for_ask_widens_pool_and_reranks_vector(monkeypatch):
 
     assert calls["vector"][2] == 20  # max(top_k*4, 20) == 20
     assert fake.calls == 1
-    assert len(out) == 5  # reranked pool trimmed back to top_k
+    assert len(out.chunks) == 5  # reranked pool trimmed back to top_k
 
 
 def test_retrieve_for_ask_gate_blocks_before_rerank(monkeypatch):
@@ -177,7 +177,7 @@ def test_retrieve_for_ask_gate_blocks_before_rerank(monkeypatch):
     req = AskRequest(question="q", retrieval_mode="vector", top_k=5)
     out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", fake))
 
-    assert out == []
+    assert out.chunks == []
     assert fake.calls == 0
 
 
@@ -194,4 +194,4 @@ def test_retrieve_for_ask_lexical_is_reranked(monkeypatch):
     assert calls["lexical"][2] == 20  # lexical pool widened too (no cosine, never gated)
     assert fake.calls == 1
     # reversed [l3, l2, l1] trimmed to 2 -> [l3, l2]
-    assert [c.chunk_id for c in out] == ["l3", "l2"]
+    assert [c.chunk_id for c in out.chunks] == ["l3", "l2"]

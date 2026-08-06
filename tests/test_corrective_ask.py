@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.corrective import SOFT_REFUSE_CANARY
 from app.main import _run_ask_rag_with_corrective
 from app.models import AskRequest, RetrievedChunk
+from app.monitoring.ask_run_log import RetrieveOutcome
 
 
 def _chunk(doc_id: str, text: str) -> RetrievedChunk:
@@ -16,6 +17,16 @@ def _chunk(doc_id: str, text: str) -> RetrievedChunk:
         content_snippet=text,
         document_title=doc_id,
         source="demo",
+    )
+
+
+def _outcome(chunks: list[RetrievedChunk]) -> RetrieveOutcome:
+    return RetrieveOutcome(
+        chunks=chunks,
+        top_cosine=0.9 if chunks else None,
+        gate_blocked=False,
+        retrieval_mode="hybrid",
+        auto_routed=True,
     )
 
 
@@ -38,8 +49,8 @@ def test_soft_refuse_triggers_rewrite_and_second_retrieve():
 
     async def fake_retrieve(conn, ask_request, query_vec, embedding_model, rag_endpoint, reranker):
         if ask_request.question == q:
-            return first
-        return second
+            return _outcome(first)
+        return _outcome(second)
 
     async def _run():
         with (
@@ -70,6 +81,10 @@ def test_soft_refuse_triggers_rewrite_and_second_retrieve():
     assert "intact roof tiles" in result.retrieval_debug.rewritten_query.lower()
     assert result.top_chunks[0].doc_id == "412_example_drive_samplecity"
     assert "intact roof tiles" in result.answer.lower()
+    assert result.ask_run is not None
+    assert result.ask_run.decision == "answer"
+    assert result.ask_run.rewrite is not None
+    assert result.ask_run.rewrite.retried is True
     assert rate_limiter.acquire.await_count == 2
     assert embedder.embed_many.await_count == 2
 
@@ -85,7 +100,7 @@ def test_non_refuse_skips_rewrite():
 
     async def _run():
         with (
-            patch("app.main._retrieve_for_ask", new=AsyncMock(return_value=chunks)),
+            patch("app.main._retrieve_for_ask", new=AsyncMock(return_value=_outcome(chunks))),
             patch(
                 "app.main.llm_client.answer_with_context",
                 new=AsyncMock(return_value="Hail damaged the shingles."),
@@ -109,5 +124,7 @@ def test_non_refuse_skips_rewrite():
     result = asyncio.run(_run())
 
     assert result.retrieval_debug is None
+    assert result.ask_run is not None
+    assert result.ask_run.decision == "answer"
     assert rate_limiter.acquire.await_count == 1
     assert embedder.embed_many.await_count == 1

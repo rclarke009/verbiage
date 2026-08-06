@@ -95,7 +95,7 @@ The app talks to the **collector**, not Tempo directly. Collectors batch, retry,
 
 ### 7. Log correlation (TraceContextFilter)
 
-When tracing is on, log records get `trace_id` and `span_id` fields. Future step: ship logs to Loki and jump from a trace to matching log lines in Grafana.
+When tracing is on, log records get `trace_id` and `span_id` fields (printed in the log format). Each `/ask` also emits a structured JSON line (`event=ask_run`) and returns the same summary on `AskResponse.ask_run` / SSE — see **[ask-run-diagnosis.md](ask-run-diagnosis.md)**. Shipping those lines to Loki for click-through from Tempo remains a future step.
 
 ## Code map
 
@@ -122,7 +122,7 @@ For env vars, Grafana Cloud OTLP, and an incident playbook without a code push, 
    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
    METRICS_ENABLED=true   # optional but nice to compare both signals
    ```
-2. Restart the API (e.g. `uvicorn app.main:app --reload --port 8002`). Restart again after changing any `OTEL_*` var — tracing initializes at import time; editing `.env` alone does not trigger `--reload`.
+2. Restart the API (e.g. `uvicorn app.main:app --reload --port 8000`). Restart again after changing any `OTEL_*` var — tracing initializes at import time; editing `.env` alone does not trigger `--reload`.
 3. `cd observability && docker compose up -d`
 4. Ask a question in the app.
 5. Grafana → **Explore** → datasource **Tempo** → **Search** → use a query that excludes metrics noise (see below). Set time range to **Last 15 minutes**.

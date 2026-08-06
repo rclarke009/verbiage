@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import app.demo as demo_module
 import app.main as main
 from app.errors import LLMRateLimitedError
+from app.monitoring.ask_run_log import RetrieveOutcome
 from tests.conftest_api import api_client, clear_api_overrides, prime_app_state, run_async_db_fn
 
 
@@ -91,7 +92,7 @@ def test_ask_allowed_in_demo():
                         embed_cls.return_value.embed_many = AsyncMock(return_value=[[0.1] * 768])
                         embed_cls.return_value.model = "test-embed"
                         with patch.object(main, "_retrieve_for_ask", new_callable=AsyncMock) as retrieve:
-                            retrieve.return_value = []
+                            retrieve.return_value = RetrieveOutcome(chunks=[])
                             resp = client.post("/ask", json={"question": "roof damage?"})
     finally:
         clear_api_overrides()
@@ -143,7 +144,7 @@ def test_anonymous_ask_allowed_in_demo_without_auth():
                             embed_cls.return_value.embed_many = AsyncMock(return_value=[[0.1] * 768])
                             embed_cls.return_value.model = "test-embed"
                             with patch.object(main, "_retrieve_for_ask", new_callable=AsyncMock) as retrieve:
-                                retrieve.return_value = []
+                                retrieve.return_value = RetrieveOutcome(chunks=[])
                                 resp = client.post("/ask", json={"question": "roof damage?"})
     finally:
         clear_api_overrides()

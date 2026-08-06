@@ -105,7 +105,7 @@ function AppInner() {
   }
 
   return (
-    <div style={{ maxWidth: 920, margin: '0 auto', padding: '20px 24px', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ width: '100%', maxWidth: 920, margin: '0 auto', padding: '20px 24px', fontFamily: 'system-ui, sans-serif' }}>
       <header
         style={{
           display: 'flex',

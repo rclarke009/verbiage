@@ -44,6 +44,7 @@ from app.db import (
 from app.models import (
     AskRequest,
     AskResponse,
+    AskRunSummary,
     RetrievalDebug,
     RetrievedChunk,
     ChunkingOptions,
@@ -139,27 +140,53 @@ from app.monitoring.metrics import (
 )
 from app.monitoring.tracing import (
     init_tracing,
+    install_trace_context_filter,
     rag_phase_span,
     set_refused_attribute,
     set_retrieval_attributes,
     set_route_attribute,
     shutdown_tracing,
 )
+from app.monitoring.ask_run_log import (
+    AskRunBuilder,
+    RetrieveOutcome,
+    finalize_ask_run,
+    emit_ask_run,
+)
 from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+_LOG_FMT = "%(asctime)s [%(levelname)s] %(name)s trace=%(trace_id)s span=%(span_id)s: %(message)s"
+
+
+class _SafeTraceFormatter(logging.Formatter):
+    """Ensure trace_id/span_id exist so format never KeyErrors when filter missed a record."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "trace_id"):
+            record.trace_id = ""
+        if not hasattr(record, "span_id"):
+            record.span_id = ""
+        return super().format(record)
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format=_LOG_FMT,
 )
+# Replace default formatters with trace-aware ones (basicConfig may have already attached handlers).
+for _h in logging.root.handlers:
+    _h.setFormatter(_SafeTraceFormatter(_LOG_FMT))
+install_trace_context_filter()
+
 logger = logging.getLogger(__name__)
 
-# Rotating file log for app (rate limits, errors). Path: verbiage/logs/verbiage.log
+# Rotating file log for app (rate limits, errors, ask_run JSON). Path: verbiage/logs/verbiage.log
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _FILE_LOG = _LOG_DIR / "verbiage.log"
 _file_handler = RotatingFileHandler(_FILE_LOG, maxBytes=500_000, backupCount=3)
-_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+_file_handler.setFormatter(_SafeTraceFormatter(_LOG_FMT))
 logging.getLogger("app").addHandler(_file_handler)
 logger.info("App log file: %s", _FILE_LOG)
 
@@ -1013,19 +1040,27 @@ async def _rerank_chunks(
 async def _nearby_storm_ask(
     conn,
     ask_request: AskRequest,
+    *,
+    ask_run: AskRunBuilder | None = None,
 ) -> AskResponse:
     """Structured same-storm distance lookup without LLM."""
+    t0 = time.perf_counter()
+    builder = ask_run or AskRunBuilder(endpoint="sync", route="nearby_storm")
+    builder.route = "nearby_storm"
+    builder.question = ask_request.question
     answer, top_chunks = await retrieve_nearby_storm_chunks(conn, ask_request)
     if answer is None:
         record_no_context_response("sync")
-        return AskResponse(
-            answer=(
-                "I don't have enough location or storm context to find nearby properties. "
-                "Provide claim_context with storm_id and an address or coordinates."
-            ),
-            top_chunks=[],
+        answer = (
+            "I don't have enough location or storm context to find nearby properties. "
+            "Provide claim_context with storm_id and an address or coordinates."
         )
-    return AskResponse(answer=answer, top_chunks=top_chunks)
+        top_chunks = []
+    builder.chunks = top_chunks
+    builder.answer = answer
+    builder.decision = "nearby_storm"
+    summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
+    return AskResponse(answer=answer, top_chunks=top_chunks, ask_run=summary)
 
 
 async def _retrieve_for_ask(
@@ -1035,18 +1070,19 @@ async def _retrieve_for_ask(
     embedding_model: str | None,
     rag_endpoint: str,
     reranker,                      # <-- new: request.app.state.reranker
-) -> list[RetrievedChunk]:
+) -> RetrieveOutcome:
     """Retrieve chunks per ask_request.retrieval_mode and record mode-appropriate metrics.
 
-    Shared by /ask and /ask/stream so the two paths can't drift. Returns the
-    RetrievedChunks used to build the prompt; for hybrid the .score is the RRF score
-    while the cosine/ts_rank components are reported to their own metrics.
+    Shared by /ask and /ask/stream so the two paths can't drift. Returns a
+    RetrieveOutcome (chunks + gate/mode metadata); for hybrid the chunk .score is the
+    RRF score while the cosine/ts_rank components are reported to their own metrics.
 
     Applies a shared cosine relevance gate (_relevance_gate_blocks): when the best
     cosine similarity is below RAG_MIN_RELEVANCE_SCORE the result is dropped to [], so
     the existing zero-chunk path in _ask_prompt_from_chunks turns it into a refusal.
     Pure lexical lookups have no cosine and are never gated.
     """
+    rerank_ms: float | None = None
     with rag_phase_span("retrieve", endpoint=rag_endpoint) as retrieve_span:
         top_k = ask_request.top_k
         pool_k = max(top_k * 4, 20) if reranker is not None else top_k
@@ -1118,13 +1154,30 @@ async def _retrieve_for_ask(
 
         if candidates and reranker is not None and len(candidates) > 1:
             with rag_phase_span("rerank", endpoint=rag_endpoint) as rerank_span:
+                t_rerank = time.perf_counter()
                 ranked = await _rerank_chunks(
                     ask_request.question, candidates, top_k, reranker,
                 )
+                rerank_ms = (time.perf_counter() - t_rerank) * 1000.0
                 if rerank_span is not None:
                     rerank_span.set_attribute("rag.chunk_count", len(ranked))
-                return ranked
-        return await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
+                return RetrieveOutcome(
+                    chunks=ranked,
+                    top_cosine=top_cosine,
+                    gate_blocked=gate_blocked,
+                    retrieval_mode=resolved_mode,
+                    auto_routed=auto_routed,
+                    rerank_ms=rerank_ms,
+                )
+        ranked = await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
+        return RetrieveOutcome(
+            chunks=ranked,
+            top_cosine=top_cosine,
+            gate_blocked=gate_blocked,
+            retrieval_mode=resolved_mode,
+            auto_routed=auto_routed,
+            rerank_ms=rerank_ms,
+        )
 
 
 def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
@@ -1151,6 +1204,7 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
 def _sse_sources_event(
     top_chunks: list[RetrievedChunk],
     retrieval_debug: RetrievalDebug | None = None,
+    ask_run: AskRunSummary | None = None,
 ) -> str:
     payload: dict = {
         "sources": _sources_payload_for_sse(top_chunks),
@@ -1158,6 +1212,8 @@ def _sse_sources_event(
     }
     if retrieval_debug is not None:
         payload["retrieval_debug"] = retrieval_debug.model_dump()
+    if ask_run is not None:
+        payload["ask_run"] = ask_run.model_dump(mode="json", exclude_none=True)
     return f"event: sources\ndata: {json.dumps(payload)}\n\n"
 
 
@@ -1177,6 +1233,7 @@ async def _run_ask_rag_with_corrective(
     rag_endpoint: str,
     reranker,
     rate_limiter,
+    ask_run: AskRunBuilder | None = None,
 ) -> AskResponse:
     """Retrieve → generate; on soft refuse, rewrite query once and try again.
 
@@ -1185,57 +1242,91 @@ async def _run_ask_rag_with_corrective(
     Embed + retrieve use a normalized topic string so instructional fluff does not
     dilute cosine below the relevance gate.
     """
+    t0 = time.perf_counter()
+    builder = ask_run or AskRunBuilder(endpoint=rag_endpoint, route="rag")
+    builder.endpoint = rag_endpoint
+    builder.route = "rag"
+    builder.question = ask_request.question
+    builder.embed_model = embedder.model
+
     original_question = ask_request.question
     retrieval_q = normalize_retrieval_query(original_question)
+    builder.normalized_query = retrieval_q
     retrieval_request = ask_request.model_copy(update={"question": retrieval_q})
     logger.info("ask: embedding query (1 text)")
     t_embed = time.perf_counter()
     with rag_phase_span("embed", endpoint=rag_endpoint):
         query_vectors = await embedder.embed_many([retrieval_q])
-    record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
+    embed_elapsed = time.perf_counter() - t_embed
+    builder.embed_ms = (builder.embed_ms or 0.0) + embed_elapsed * 1000.0
+    record_rag_phase_seconds("embed", rag_endpoint, embed_elapsed)
     query_vec = query_vectors[0]
 
     t_retrieve = time.perf_counter()
-    top_chunks = await _retrieve_for_ask(
+    outcome = await _retrieve_for_ask(
         conn, retrieval_request, query_vec, embedder.model, rag_endpoint, reranker,
     )
-    record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+    retrieve_elapsed = time.perf_counter() - t_retrieve
+    builder.apply_retrieve(outcome, elapsed_ms=retrieve_elapsed * 1000.0)
+    record_rag_phase_seconds("retrieve", rag_endpoint, retrieve_elapsed)
+    top_chunks = outcome.chunks
 
     prompt = _ask_prompt_from_chunks(original_question, top_chunks)
     if prompt is None:
         record_no_context_response(rag_endpoint)
         set_refused_attribute(trace.get_current_span(), True)
+        builder.answer = "I don't have relevant context to answer that question."
+        builder.decision = "hard_refuse"
+        builder.prompt_text = None
+        summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
         return AskResponse(
-            answer="I don't have relevant context to answer that question.",
+            answer=builder.answer,
             top_chunks=[],
+            ask_run=summary,
         )
 
+    builder.prompt_text = prompt
     await rate_limiter.acquire()
     t_llm = time.perf_counter()
     with rag_phase_span("llm", endpoint=rag_endpoint):
         answer = await llm_client.answer_with_context(prompt)
-    record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
+    llm_elapsed = time.perf_counter() - t_llm
+    builder.llm_ms = (builder.llm_ms or 0.0) + llm_elapsed * 1000.0
+    record_rag_phase_seconds("llm", rag_endpoint, llm_elapsed)
 
     if not is_soft_refuse(answer):
-        return AskResponse(answer=answer, top_chunks=top_chunks)
+        builder.answer = answer
+        builder.decision = "answer"
+        summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
+        return AskResponse(answer=answer, top_chunks=top_chunks, ask_run=summary)
 
     rewritten = rewrite_query_for_retry(original_question)
     if not rewritten:
-        return AskResponse(answer=answer, top_chunks=top_chunks)
+        builder.answer = answer
+        builder.decision = "soft_refuse"
+        summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
+        return AskResponse(answer=answer, top_chunks=top_chunks, ask_run=summary)
 
     logger.info("ask: soft refuse — rewrite-once retry")
     _note_rewrite_once(original_question, rewritten)
+    builder.rewrite_retried = True
+    builder.rewritten_query = rewritten
     retry_q = normalize_retrieval_query(rewritten)
     retry_request = ask_request.model_copy(update={"question": retry_q})
     t_embed = time.perf_counter()
     with rag_phase_span("embed", endpoint=rag_endpoint):
         retry_vectors = await embedder.embed_many([retry_q])
-    record_rag_phase_seconds("embed", rag_endpoint, time.perf_counter() - t_embed)
+    embed_elapsed = time.perf_counter() - t_embed
+    builder.embed_ms = (builder.embed_ms or 0.0) + embed_elapsed * 1000.0
+    record_rag_phase_seconds("embed", rag_endpoint, embed_elapsed)
     t_retrieve = time.perf_counter()
-    retry_chunks = await _retrieve_for_ask(
+    retry_outcome = await _retrieve_for_ask(
         conn, retry_request, retry_vectors[0], embedder.model, rag_endpoint, reranker,
     )
-    record_rag_phase_seconds("retrieve", rag_endpoint, time.perf_counter() - t_retrieve)
+    retrieve_elapsed = time.perf_counter() - t_retrieve
+    builder.apply_retrieve(retry_outcome, elapsed_ms=retrieve_elapsed * 1000.0)
+    record_rag_phase_seconds("retrieve", rag_endpoint, retrieve_elapsed)
+    retry_chunks = retry_outcome.chunks
     retry_prompt = _ask_prompt_from_chunks(original_question, retry_chunks)
     debug = RetrievalDebug(
         retried=True,
@@ -1244,14 +1335,35 @@ async def _run_ask_rag_with_corrective(
     )
     if retry_prompt is None:
         # Keep first soft refuse; still surface that we retried retrieval.
-        return AskResponse(answer=answer, top_chunks=top_chunks, retrieval_debug=debug)
+        builder.answer = answer
+        builder.chunks = top_chunks
+        builder.decision = "soft_refuse"
+        summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
+        return AskResponse(
+            answer=answer,
+            top_chunks=top_chunks,
+            retrieval_debug=debug,
+            ask_run=summary,
+        )
 
+    builder.prompt_text = retry_prompt
     await rate_limiter.acquire()
     t_llm = time.perf_counter()
     with rag_phase_span("llm", endpoint=rag_endpoint):
         answer = await llm_client.answer_with_context(retry_prompt)
-    record_rag_phase_seconds("llm", rag_endpoint, time.perf_counter() - t_llm)
-    return AskResponse(answer=answer, top_chunks=retry_chunks, retrieval_debug=debug)
+    llm_elapsed = time.perf_counter() - t_llm
+    builder.llm_ms = (builder.llm_ms or 0.0) + llm_elapsed * 1000.0
+    record_rag_phase_seconds("llm", rag_endpoint, llm_elapsed)
+    builder.answer = answer
+    builder.chunks = retry_chunks
+    builder.decision = "soft_refuse" if is_soft_refuse(answer) else "answer"
+    summary = finalize_ask_run(builder, t0=t0, now=time.perf_counter())
+    return AskResponse(
+        answer=answer,
+        top_chunks=retry_chunks,
+        retrieval_debug=debug,
+        ask_run=summary,
+    )
 
 
 @app.post("/ask", response_model=AskResponse)
@@ -1264,6 +1376,7 @@ async def ask(
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "sync"
+    ask_run = AskRunBuilder(endpoint=rag_endpoint, user_id=user_id)
 
     async def do_ask(conn):
         rate_limiter = request.app.state.rate_limiter
@@ -1273,8 +1386,9 @@ async def ask(
             ask_request.claim_context,
         )
         set_route_attribute(trace.get_current_span(), route)
+        ask_run.route = route
         if route == "nearby_storm":
-            return await _nearby_storm_ask(conn, ask_request)
+            return await _nearby_storm_ask(conn, ask_request, ask_run=ask_run)
 
         return await _run_ask_rag_with_corrective(
             conn,
@@ -1283,6 +1397,7 @@ async def ask(
             rag_endpoint=rag_endpoint,
             reranker=request.app.state.reranker,
             rate_limiter=rate_limiter,
+            ask_run=ask_run,
         )
 
     return await with_db_conn_retry(request, do_ask)
@@ -1303,6 +1418,7 @@ async def ask_stream(
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "stream"
+    ask_run = AskRunBuilder(endpoint=rag_endpoint, user_id=user_id)
 
     async def do_prepare(conn):
         route = resolve_ask_route(
@@ -1311,7 +1427,10 @@ async def ask_stream(
             ask_request.claim_context,
         )
         set_route_attribute(trace.get_current_span(), route)
+        ask_run.route = route
         if route == "nearby_storm":
+            t0 = time.perf_counter()
+            ask_run.question = ask_request.question
             answer, top_chunks = await retrieve_nearby_storm_chunks(conn, ask_request)
             if answer is None:
                 answer = (
@@ -1319,7 +1438,11 @@ async def ask_stream(
                     "Provide claim_context with storm_id and an address or coordinates."
                 )
                 top_chunks = []
-            return ("nearby", answer, top_chunks, None)
+            ask_run.chunks = top_chunks
+            ask_run.answer = answer
+            ask_run.decision = "nearby_storm"
+            summary = finalize_ask_run(ask_run, t0=t0, now=time.perf_counter())
+            return ("nearby", answer, top_chunks, None, summary)
 
         result = await _run_ask_rag_with_corrective(
             conn,
@@ -1328,25 +1451,35 @@ async def ask_stream(
             rag_endpoint=rag_endpoint,
             reranker=request.app.state.reranker,
             rate_limiter=request.app.state.rate_limiter,
+            ask_run=ask_run,
         )
-        return ("rag", result.answer, result.top_chunks, result.retrieval_debug)
+        return ("rag", result.answer, result.top_chunks, result.retrieval_debug, result.ask_run)
 
     async def event_iter():
         try:
             prepared = await with_db_conn_retry(request, do_prepare)
-        except Exception:
+        except Exception as exc:
             record_stream_retrieval_failed()
-            yield f"event: error\ndata: {json.dumps({'detail': 'retrieval_failed'})}\n\n"
+            ask_run.decision = "error"
+            ask_run.error_type = type(exc).__name__
+            ask_run.error_message = str(exc)[:300]
+            ask_run.question = ask_request.question
+            summary = emit_ask_run(ask_run)
+            err_payload = {
+                "detail": "retrieval_failed",
+                "ask_run": summary.model_dump(mode="json", exclude_none=True),
+            }
+            yield f"event: error\ndata: {json.dumps(err_payload)}\n\n"
             return
 
-        kind, answer, top_chunks, retrieval_debug = prepared
+        kind, answer, top_chunks, retrieval_debug, ask_run_summary = prepared
         if kind == "nearby" and not top_chunks:
             record_no_context_response(rag_endpoint)
         if kind == "rag" and not top_chunks:
             record_no_context_response(rag_endpoint)
             set_refused_attribute(trace.get_current_span(), True)
 
-        yield _sse_sources_event(top_chunks, retrieval_debug)
+        yield _sse_sources_event(top_chunks, retrieval_debug, ask_run_summary)
         yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
 
     return StreamingResponse(event_iter(), media_type="text/event-stream")

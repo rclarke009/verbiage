@@ -217,6 +217,11 @@ NOMINATIM_BASE_URL = os.getenv(
 # in deployment with RERANK_ENABLED=1.
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "").lower() in ("1", "true", "yes")
 
+# Per-/ask structured JSON log + AskResponse.ask_run summary (see app/monitoring/ask_run_log.py).
+ASK_RUN_LOG_ENABLED = os.getenv("ASK_RUN_LOG_ENABLED", "true").lower() in ("1", "true", "yes")
+# When true, JSON log includes truncated question + chunk snippet previews (PII-sensitive).
+ASK_RUN_LOG_VERBOSE = os.getenv("ASK_RUN_LOG_VERBOSE", "").lower() in ("1", "true", "yes")
+
 # Demo deployment (separate Render service + Supabase). All demo-only behavior requires DEMO_MODE=1.
 DEMO_MODE = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
 DEMO_OPEN_SIGNUP = os.getenv("DEMO_OPEN_SIGNUP", "").strip().lower() in ("1", "true", "yes")
