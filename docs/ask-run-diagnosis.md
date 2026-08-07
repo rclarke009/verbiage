@@ -5,6 +5,7 @@ One reconstructable story per request: **what happened**, **from what**, **with 
 | Signal | Where |
 |--------|--------|
 | Structured run summary | `AskResponse.ask_run` / SSE `sources.ask_run` + JSON log `event=ask_run` |
+| Recent runs (no repro) | In-memory ring buffer → `GET /debug/ask-runs` |
 | Phase waterfall | Tempo spans (`rag.embed` → `rag.retrieve` → `rag.llm`) |
 | Aggregates | Prometheus / Grafana (`rag_phase_seconds`, refusal counters) |
 
@@ -17,6 +18,8 @@ In `.env` (defaults are fine for local):
 ```bash
 ASK_RUN_LOG_ENABLED=true          # default
 # ASK_RUN_LOG_VERBOSE=1           # truncated question + snippet previews in the log line
+ASK_RUN_BUFFER_ENABLED=true       # default; set false on prod if you do not want PII in memory
+# ASK_RUN_BUFFER_SIZE=50
 METRICS_ENABLED=true
 OTEL_ENABLED=true
 OTEL_SERVICE_NAME=verbiage
@@ -35,6 +38,20 @@ curl -s http://127.0.0.1:8000/ask \
   -d '{"question":"YOUR QUESTION"}' | jq '.ask_run, .top_chunks'
 ```
 
+**Request-scoped verbose** (same fields as `ASK_RUN_LOG_VERBOSE`, for this request only):
+
+```bash
+curl -s 'http://127.0.0.1:8000/ask?debug=1' \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"YOUR QUESTION"}' | jq '.ask_run.question_preview'
+
+# or header:
+curl -s http://127.0.0.1:8000/ask \
+  -H 'Content-Type: application/json' \
+  -H 'X-Verbiage-Debug: 1' \
+  -d '{"question":"YOUR QUESTION"}'
+```
+
 Or ask in the UI and inspect the `/ask` or `/ask/stream` network payload (`ask_run` on the SSE `sources` event).
 
 Grep the log:
@@ -44,6 +61,20 @@ grep '"event":"ask_run"' logs/verbiage.log | tail -1 | jq .
 ```
 
 Paste `ask_run.trace_id` into Grafana Explore → Tempo → **Trace ID**.
+
+## “It did something weird five minutes ago”
+
+No need to recreate the question if the ring buffer is on:
+
+```bash
+# Newest-first index
+curl -s 'http://127.0.0.1:8000/debug/ask-runs?limit=20' | jq .
+
+# Full buffered trace (snippets + answer preview)
+curl -s "http://127.0.0.1:8000/debug/ask-runs/$ASK_RUN_ID" | jq .
+```
+
+Each buffered record includes the compact `ask_run` summary plus `question_preview`, `answer_preview`, chunk snippets, and optional `rewritten_query`. Use `trace_id` from the record for Tempo. Endpoints return **404** when `ASK_RUN_BUFFER_ENABLED=false`.
 
 ## Decision tree (good / bad / ugly)
 
@@ -63,11 +94,11 @@ ask_run.decision
 | Wrong answer with citations | `decision=answer` + `chunks` / `top_chunks` content | Full healthy waterfall |
 | Crash / SSE `retrieval_failed` | `decision=error`, `error_type` | `status=error` spans |
 
-**Silent quality failure** = healthy timings and `decision=answer`, but wrong text. Distinguish retrieval miss (wrong chunk ids/docs) vs generation (right chunks, bad synthesis) using `chunks` + `top_chunks` snippets.
+**Silent quality failure** = healthy timings and `decision=answer`, but wrong text. Distinguish retrieval miss (wrong chunk ids/docs) vs generation (right chunks, bad synthesis) using `chunks` + `top_chunks` snippets — or pull the buffered record if you no longer have the HTTP response.
 
 **Audit fields (always):** `ask_run_id`, `models.embed` / `models.llm` / `provider`, `prompt.sha256` + `prompt.chars`, chunk ids/scores/titles, `latency_ms`, gate threshold.
 
-**Verbose only:** `ASK_RUN_LOG_VERBOSE=1` adds truncated `question_preview` and chunk `snippet`s to the **log line** (not required on the API summary).
+**Verbose only** (`ASK_RUN_LOG_VERBOSE=1` or `?debug=1` / `X-Verbiage-Debug: 1`): truncated `question_preview` and chunk `snippet`s on the **log line** and (for debug/verbose) on `ask_run.question_preview` in the API summary.
 
 ## Known-good refused (seed / corpus)
 
@@ -79,6 +110,7 @@ If a grounded gold question hard-refuses:
 
 ## Related
 
+- [debugging-ask-bugs.md](debugging-ask-bugs.md) — Developer playbook: workflows, what to attach to a bug
 - [otel-architecture.md](otel-architecture.md) — span attributes and TraceQL
 - [prod-observability.md](prod-observability.md) — Render metrics/traces
 - Gold set: [`tests/eval/gold_questions.yaml`](../tests/eval/gold_questions.yaml)

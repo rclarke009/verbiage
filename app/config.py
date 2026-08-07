@@ -221,6 +221,10 @@ RERANK_ENABLED = os.getenv("RERANK_ENABLED", "").lower() in ("1", "true", "yes")
 ASK_RUN_LOG_ENABLED = os.getenv("ASK_RUN_LOG_ENABLED", "true").lower() in ("1", "true", "yes")
 # When true, JSON log includes truncated question + chunk snippet previews (PII-sensitive).
 ASK_RUN_LOG_VERBOSE = os.getenv("ASK_RUN_LOG_VERBOSE", "").lower() in ("1", "true", "yes")
+# In-memory ring buffer of recent ask runs for local diagnosis (GET /debug/ask-runs).
+# Default on for local; set false on prod if you do not want PII held in process memory.
+ASK_RUN_BUFFER_ENABLED = os.getenv("ASK_RUN_BUFFER_ENABLED", "true").lower() in ("1", "true", "yes")
+ASK_RUN_BUFFER_SIZE = max(1, int(os.getenv("ASK_RUN_BUFFER_SIZE", "50")))
 
 # Demo deployment (separate Render service + Supabase). All demo-only behavior requires DEMO_MODE=1.
 DEMO_MODE = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")

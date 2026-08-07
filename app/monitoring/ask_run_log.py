@@ -2,6 +2,9 @@
 
 Emits a single JSON line (event=ask_run) and builds AskRunSummary for the API/SSE.
 Tempo spans stay low-cardinality; rich citation detail lives here and on the response.
+
+Request-scoped debug: ``?debug=1`` or ``X-Verbiage-Debug: 1`` sets a ContextVar so
+verbose log fields apply for that request only (see ``ask_debug_enabled``).
 """
 
 from __future__ import annotations
@@ -10,10 +13,13 @@ import hashlib
 import json
 import logging
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 from opentelemetry import trace
+from starlette.requests import Request
 
 from app.config import (
     ASK_RUN_LOG_ENABLED,
@@ -37,6 +43,7 @@ from app.models import (
     AskRunSummary,
     RetrievedChunk,
 )
+from app.monitoring.ask_run_buffer import push_ask_run_trace
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +58,40 @@ AskDecision = Literal[
 HARD_REFUSE_CANARY = "I don't have relevant context to answer that question."
 _VERBOSE_SNIPPET_CHARS = 120
 _VERBOSE_QUESTION_CHARS = 200
+_ANSWER_PREVIEW_CHARS = 300
+
+# Per-request verbose capture (?debug=1 / X-Verbiage-Debug); not a process global.
+_ask_debug: ContextVar[bool] = ContextVar("ask_debug", default=False)
+
+
+def ask_debug_enabled() -> bool:
+    """True when process verbose is on or this request opted into debug."""
+    return ASK_RUN_LOG_VERBOSE or _ask_debug.get()
+
+
+def set_ask_debug(enabled: bool) -> None:
+    _ask_debug.set(bool(enabled))
+
+
+@contextmanager
+def ask_debug_scope(enabled: bool) -> Iterator[None]:
+    """Set request-scoped debug for the duration of the block."""
+    token = _ask_debug.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _ask_debug.reset(token)
+
+
+def request_wants_ask_debug(request: Request) -> bool:
+    """True if ``?debug=1|true|yes`` or ``X-Verbiage-Debug: 1|true|yes``."""
+    header = (request.headers.get("x-verbiage-debug") or "").strip().lower()
+    if header in ("1", "true", "yes"):
+        return True
+    raw = request.query_params.get("debug")
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes")
 
 
 @dataclass
@@ -193,7 +234,7 @@ def build_ask_run_summary(builder: AskRunBuilder) -> AskRunSummary:
     soft = is_soft_refuse(builder.answer or "")
     hard = decision == "hard_refuse"
     models = resolve_model_names(builder.embed_model)
-    verbose = ASK_RUN_LOG_VERBOSE
+    verbose = ask_debug_enabled()
     return AskRunSummary(
         ask_run_id=builder.ask_run_id,
         trace_id=current_trace_id(),
@@ -242,7 +283,7 @@ def ask_run_log_payload(summary: AskRunSummary, builder: AskRunBuilder) -> dict[
     """JSON-serializable dict for the log line (may include verbose extras)."""
     payload = summary.model_dump(mode="json", exclude_none=True)
     payload["event"] = "ask_run"
-    if ASK_RUN_LOG_VERBOSE:
+    if ask_debug_enabled():
         payload["chunks"] = [
             r.model_dump(mode="json", exclude_none=True)
             for r in chunk_refs(builder.chunks, verbose=True)
@@ -252,12 +293,36 @@ def ask_run_log_payload(summary: AskRunSummary, builder: AskRunBuilder) -> dict[
     return payload
 
 
+def build_buffer_record(summary: AskRunSummary, builder: AskRunBuilder) -> dict[str, Any]:
+    """Rich in-memory trace: compact summary plus question/answer/snippet previews."""
+    verbose_chunks = [
+        r.model_dump(mode="json", exclude_none=True)
+        for r in chunk_refs(builder.chunks, verbose=True)
+    ]
+    record: dict[str, Any] = {
+        "ask_run_id": summary.ask_run_id,
+        "trace_id": summary.trace_id,
+        "ask_run": summary.model_dump(mode="json", exclude_none=True),
+        "chunks": verbose_chunks,
+    }
+    if builder.question:
+        record["question_preview"] = builder.question[:_VERBOSE_QUESTION_CHARS]
+    if builder.answer is not None:
+        record["answer_preview"] = builder.answer[:_ANSWER_PREVIEW_CHARS]
+    if builder.rewritten_query:
+        record["rewritten_query"] = builder.rewritten_query
+    if builder.normalized_query:
+        record["normalized_query"] = builder.normalized_query[:_VERBOSE_QUESTION_CHARS]
+    return record
+
+
 def emit_ask_run(builder: AskRunBuilder) -> AskRunSummary:
-    """Build summary, optionally log one JSON line, return summary for the response."""
+    """Build summary, optionally log one JSON line, push ring buffer, return summary."""
     summary = build_ask_run_summary(builder)
     if ASK_RUN_LOG_ENABLED:
         payload = ask_run_log_payload(summary, builder)
         logger.info("%s", json.dumps(payload, separators=(",", ":"), default=str))
+    push_ask_run_trace(build_buffer_record(summary, builder))
     return summary
 
 

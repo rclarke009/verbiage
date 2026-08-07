@@ -105,6 +105,7 @@ from app.demo import (
 )
 from app.health import build_deep_response, build_ready_response_async
 from app.config import (
+    ASK_RUN_BUFFER_ENABLED,
     DATABASE_URL,
     DEMO_GATE_MESSAGE_TEMPLATE,
     report_writer_database_url,
@@ -147,11 +148,14 @@ from app.monitoring.tracing import (
     set_route_attribute,
     shutdown_tracing,
 )
+from app.monitoring.ask_run_buffer import get_ask_run_trace, list_ask_run_traces
 from app.monitoring.ask_run_log import (
     AskRunBuilder,
     RetrieveOutcome,
-    finalize_ask_run,
+    ask_debug_scope,
     emit_ask_run,
+    finalize_ask_run,
+    request_wants_ask_debug,
 )
 from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -1400,7 +1404,8 @@ async def ask(
             ask_run=ask_run,
         )
 
-    return await with_db_conn_retry(request, do_ask)
+    with ask_debug_scope(request_wants_ask_debug(request)):
+        return await with_db_conn_retry(request, do_ask)
 
 
 @app.post("/ask/stream")
@@ -1419,6 +1424,7 @@ async def ask_stream(
 
     rag_endpoint = "stream"
     ask_run = AskRunBuilder(endpoint=rag_endpoint, user_id=user_id)
+    debug = request_wants_ask_debug(request)
 
     async def do_prepare(conn):
         route = resolve_ask_route(
@@ -1456,33 +1462,71 @@ async def ask_stream(
         return ("rag", result.answer, result.top_chunks, result.retrieval_debug, result.ask_run)
 
     async def event_iter():
-        try:
-            prepared = await with_db_conn_retry(request, do_prepare)
-        except Exception as exc:
-            record_stream_retrieval_failed()
-            ask_run.decision = "error"
-            ask_run.error_type = type(exc).__name__
-            ask_run.error_message = str(exc)[:300]
-            ask_run.question = ask_request.question
-            summary = emit_ask_run(ask_run)
-            err_payload = {
-                "detail": "retrieval_failed",
-                "ask_run": summary.model_dump(mode="json", exclude_none=True),
-            }
-            yield f"event: error\ndata: {json.dumps(err_payload)}\n\n"
-            return
+        with ask_debug_scope(debug):
+            try:
+                prepared = await with_db_conn_retry(request, do_prepare)
+            except Exception as exc:
+                record_stream_retrieval_failed()
+                ask_run.decision = "error"
+                ask_run.error_type = type(exc).__name__
+                ask_run.error_message = str(exc)[:300]
+                ask_run.question = ask_request.question
+                summary = emit_ask_run(ask_run)
+                err_payload = {
+                    "detail": "retrieval_failed",
+                    "ask_run": summary.model_dump(mode="json", exclude_none=True),
+                }
+                yield f"event: error\ndata: {json.dumps(err_payload)}\n\n"
+                return
 
-        kind, answer, top_chunks, retrieval_debug, ask_run_summary = prepared
-        if kind == "nearby" and not top_chunks:
-            record_no_context_response(rag_endpoint)
-        if kind == "rag" and not top_chunks:
-            record_no_context_response(rag_endpoint)
-            set_refused_attribute(trace.get_current_span(), True)
+            kind, answer, top_chunks, retrieval_debug, ask_run_summary = prepared
+            if kind == "nearby" and not top_chunks:
+                record_no_context_response(rag_endpoint)
+            if kind == "rag" and not top_chunks:
+                record_no_context_response(rag_endpoint)
+                set_refused_attribute(trace.get_current_span(), True)
 
-        yield _sse_sources_event(top_chunks, retrieval_debug, ask_run_summary)
-        yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
+            yield _sse_sources_event(top_chunks, retrieval_debug, ask_run_summary)
+            yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
 
     return StreamingResponse(event_iter(), media_type="text/event-stream")
+
+
+def _require_ask_run_buffer() -> None:
+    if not ASK_RUN_BUFFER_ENABLED:
+        raise HTTPException(status_code=404, detail="Ask-run buffer disabled")
+
+
+@app.get("/debug/ask-runs")
+async def debug_list_ask_runs(limit: int = 20):
+    """Newest-first ring-buffer index (local diagnosis). 404 when buffer disabled."""
+    _require_ask_run_buffer()
+    cap = max(1, min(limit, 200))
+    items = list_ask_run_traces(limit=cap)
+    return {
+        "count": len(items),
+        "runs": [
+            {
+                "ask_run_id": r.get("ask_run_id"),
+                "trace_id": r.get("trace_id"),
+                "decision": (r.get("ask_run") or {}).get("decision"),
+                "question_preview": r.get("question_preview"),
+                "endpoint": (r.get("ask_run") or {}).get("endpoint"),
+                "route": (r.get("ask_run") or {}).get("route"),
+            }
+            for r in items
+        ],
+    }
+
+
+@app.get("/debug/ask-runs/{ask_run_id}")
+async def debug_get_ask_run(ask_run_id: str):
+    """Full buffered ask-run trace by id. 404 when missing or buffer disabled."""
+    _require_ask_run_buffer()
+    record = get_ask_run_trace(ask_run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Ask run not found in buffer")
+    return record
 
 
 @app.get("/documents", response_model=DocumentsListResponse)

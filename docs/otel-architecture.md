@@ -95,7 +95,7 @@ The app talks to the **collector**, not Tempo directly. Collectors batch, retry,
 
 ### 7. Log correlation (TraceContextFilter)
 
-When tracing is on, log records get `trace_id` and `span_id` fields (printed in the log format). Each `/ask` also emits a structured JSON line (`event=ask_run`) and returns the same summary on `AskResponse.ask_run` / SSE — see **[ask-run-diagnosis.md](ask-run-diagnosis.md)**. Shipping those lines to Loki for click-through from Tempo remains a future step.
+When tracing is on, log records get `trace_id` and `span_id` fields (printed in the log format). Each `/ask` also emits a structured JSON line (`event=ask_run`) and returns the same summary on `AskResponse.ask_run` / SSE — see **[ask-run-diagnosis.md](ask-run-diagnosis.md)** (field reference) and **[debugging-ask-bugs.md](debugging-ask-bugs.md)** (developer playbook). Shipping those lines to Loki for click-through from Tempo remains a future step.
 
 ## Code map
 

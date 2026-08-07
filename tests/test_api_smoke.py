@@ -231,6 +231,90 @@ def test_ask_returns_llm_answer_with_chunks():
     assert data["ask_run"]["models"]["embed"] == "test-embed"
 
 
+def test_ask_debug_query_sets_question_preview():
+    client = api_client()
+    mock_embedder = MagicMock()
+    mock_embedder.embed_many = AsyncMock(return_value=[[0.1] * 768])
+    mock_embedder.model = "test-embed"
+
+    async def ask_retry(request, async_fn):
+        prime_app_state(request.app)
+        with patch.object(main, "HttpEmbedder", return_value=mock_embedder):
+            with patch.object(
+                main,
+                "_retrieve_for_ask",
+                new=AsyncMock(
+                    return_value=RetrieveOutcome(
+                        chunks=[SAMPLE_CHUNK],
+                        top_cosine=0.9,
+                        retrieval_mode="hybrid",
+                    )
+                ),
+            ):
+                with patch.object(
+                    main.llm_client,
+                    "answer_with_context",
+                    new=AsyncMock(return_value="Shingle damage noted."),
+                ):
+                    return await async_fn(MagicMock())
+
+    try:
+        with patch.object(main, "with_db_conn_retry", new=AsyncMock(side_effect=ask_retry)):
+            resp = client.post(
+                "/ask?debug=1",
+                json={"question": "roof damage details please", "top_k": 5},
+            )
+    finally:
+        clear_api_overrides()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ask_run"]["question_preview"]
+    assert "roof damage" in data["ask_run"]["question_preview"]
+
+
+def test_debug_ask_runs_endpoints(monkeypatch):
+    from app.monitoring.ask_run_buffer import reset_buffer
+    from app.monitoring.ask_run_log import AskRunBuilder, emit_ask_run
+
+    monkeypatch.setattr(main, "ASK_RUN_BUFFER_ENABLED", True)
+    monkeypatch.setattr("app.monitoring.ask_run_buffer.ASK_RUN_BUFFER_ENABLED", True)
+    reset_buffer(maxlen=10)
+    emit_ask_run(
+        AskRunBuilder(
+            ask_run_id="buf-1",
+            answer="Buffered answer text",
+            chunks=[SAMPLE_CHUNK],
+            question="What about the roof?",
+            decision="answer",
+        )
+    )
+
+    client = TestClient(main.app)
+    listed = client.get("/debug/ask-runs?limit=5")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["count"] >= 1
+    assert any(r["ask_run_id"] == "buf-1" for r in body["runs"])
+
+    detail = client.get("/debug/ask-runs/buf-1")
+    assert detail.status_code == 200
+    rec = detail.json()
+    assert rec["ask_run_id"] == "buf-1"
+    assert rec["answer_preview"].startswith("Buffered")
+    assert rec["chunks"][0]["snippet"]
+
+    missing = client.get("/debug/ask-runs/does-not-exist")
+    assert missing.status_code == 404
+
+
+def test_debug_ask_runs_404_when_buffer_disabled(monkeypatch):
+    monkeypatch.setattr(main, "ASK_RUN_BUFFER_ENABLED", False)
+    client = TestClient(main.app)
+    assert client.get("/debug/ask-runs").status_code == 404
+    assert client.get("/debug/ask-runs/any").status_code == 404
+
+
 def test_ingest_text_success():
     client = api_client()
     try:
