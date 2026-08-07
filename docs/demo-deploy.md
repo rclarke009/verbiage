@@ -38,8 +38,8 @@ No intentional prod change when `DEMO_MODE` is **unset** on `rag-document-analys
 2. **Project Settings → API**: copy `SUPABASE_URL`, anon key, JWT secret, service role key.
 3. **Authentication → Providers**: Email enabled; **disable** “Allow new users to sign up” (signup goes through the app backend).
 4. **Authentication → URL Configuration** (after you know the Render URL):
-   - Site URL: `https://verbiage-demo.onrender.com` (or your custom domain)
-   - Redirect URLs: `https://verbiage-demo.onrender.com/**`
+   - Site URL: `https://rag-document-analysis-backend.onrender.com` (or your custom domain)
+   - Redirect URLs: `https://rag-document-analysis-backend.onrender.com/**`
 
 ---
 
@@ -72,7 +72,7 @@ Render → **verbiage-demo** → **Environment**:
 | `SUPABASE_JWT_SECRET` | Demo JWT secret |
 | `SUPABASE_SERVICE_ROLE_KEY` | Demo service role |
 | `OPENAI_API_KEY` | Your key (set billing alerts in OpenAI) |
-| `PUBLIC_APP_URL` | `https://<demo-host>.onrender.com` |
+| `PUBLIC_APP_URL` | `https://rag-document-analysis-backend.onrender.com` |
 | `PROD_SUPABASE_PROJECT_REF` | Prod Supabase project ref (blocklist; startup fails if `DATABASE_URL` matches) |
 
 Non-secret defaults (from [`render.yaml`](../render.yaml) or set manually):

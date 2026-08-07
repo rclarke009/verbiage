@@ -90,7 +90,7 @@ Align **Confirm email** with server behavior: the app creates users with **`emai
 The Verbiage UI sends password recovery emails via Supabase (`resetPasswordForEmail` with `redirectTo` set to your app origin + `/`). Supabase only redirects to URLs you allow.
 
 1. In the dashboard, go to **Authentication** → **URL Configuration**.
-2. Set **Site URL** to the primary URL where users open the app (production: `https://rag-document-analysis-backend.onrender.com`, or `http://localhost:8000` for local dev).
+2. Set **Site URL** to the primary URL where users open the app (deployed demo: `https://rag-document-analysis-backend.onrender.com`, or `http://localhost:8000` for local dev).
 3. Under **Redirect URLs**, add every origin (and wildcard if you use the dashboard’s pattern support) where users might land after clicking the email link, for example:
    - `http://localhost:8000/**` (adjust port if needed)
    - `https://rag-document-analysis-backend.onrender.com/**`
