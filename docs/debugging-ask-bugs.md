@@ -2,7 +2,7 @@
 
 This guide is for developers triaging incorrect, refused, or flaky Ask answers. It covers the tools we use day to day, when to reach for each one, and what to attach when you open a bug or PR.
 
-For field-level reference (decision values, env flags, Tempo attributes), see [ask-run-diagnosis.md](ask-run-diagnosis.md) and [otel-architecture.md](otel-architecture.md).
+Field reference (decisions, env flags, audit fields): [ask-run-diagnosis.md](ask-run-diagnosis.md). Span model and TraceQL: [otel-architecture.md](otel-architecture.md).
 
 ## What you have available
 
@@ -12,7 +12,7 @@ For field-level reference (decision values, env flags, Tempo attributes), see [a
 | **JSON log line** (`event=ask_run`) | Correlating with server logs / Trace ID | `grep '"event":"ask_run"' logs/verbiage.log` |
 | **Request-scoped debug** (`?debug=1` or `X-Verbiage-Debug: 1`) | Extra detail (question preview, chunk snippets) on one request only | Add to a single curl or replay; no process restart |
 | **Ring buffer** (`GET /debug/ask-runs`) | “It was wrong a few minutes ago” without a full repro | List recent runs, then fetch by `ask_run_id` |
-| **Tempo traces** | Latency / missing stages / errors in the pipeline | Paste `trace_id` from `ask_run` into Grafana Explore |
+| **Tempo traces** | Latency / missing stages / errors in the pipeline | Grafana [http://localhost:3000](http://localhost:3000) → Explore → Tempo; paste `ask_run.trace_id` (see [end-to-end](#end-to-end-reproduce-with-ask_run--tempo-trace)) |
 | **Prometheus / Grafana** | Trends and regressions (refusals, phase latency) | Local stack or prod dashboards — not for a single answer’s content |
 
 **Design rule:** Tempo spans stay low-cardinality (no full questions or chunk bodies). Citation and content detail live on `ask_run`, the HTTP response, the log line (when verbose/debug), and the ring buffer.
@@ -27,19 +27,55 @@ For field-level reference (decision values, env flags, Tempo attributes), see [a
    ASK_RUN_BUFFER_ENABLED=true   # default; disable on prod if process-memory PII is a concern
    ```
 
-3. For traces (optional but recommended when debugging timing or crashes):
+3. **Tracing (Tempo)** — optional for content bugs; recommended for timing, missing stages, or crashes. Two parts must both be up: the API exporting spans, and the Docker stack receiving them.
+
+   Put these in `.env` (preferred) or export them in the same shell before starting uvicorn:
 
    ```bash
    OTEL_ENABLED=true
+   OTEL_SERVICE_NAME=verbiage
    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-   cd observability && docker compose up -d
    ```
 
-   Restart uvicorn after changing `OTEL_*`.
+   Start the observability stack, then restart the API (tracing initializes at import time; editing `.env` alone does not pick up `OTEL_*`):
+
+   ```bash
+   cd observability && docker compose up -d
+   # then restart uvicorn, e.g.:
+   # uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+   ```
+
+   **How to know tracing is on**
+
+   - Uvicorn startup should log:
+     `OpenTelemetry tracing enabled (service=verbiage, endpoint=http://localhost:4318)`
+   - If you see `OpenTelemetry tracing disabled (OTEL_ENABLED not set)`, it is off.
+   - After an `/ask`, `ask_run.trace_id` should be a non-null hex string. `null` / missing means tracing was not initialized for that process.
+
+   Shell exports only last for that process. If you restarted uvicorn later without `.env` (or re-exporting), tracing is probably off again.
 
 ## Workflow A — You can reproduce the question now
 
 Use this when you still have the question (or a close variant) and can hit `/ask` again.
+
+### End-to-end: reproduce with `ask_run` + Tempo trace
+
+Use this when you want one complete pass: structured run summary **and** the Tempo waterfall.
+
+1. **Enable tracing** (see [Local prerequisites](#local-prerequisites) §3): `OTEL_*` in `.env`, `cd observability && docker compose up -d`, restart uvicorn. Confirm the startup line says tracing **enabled**.
+2. **Ask the question** (UI or curl below). Capture `ask_run` from the JSON response, Network tab, or SSE `sources` event.
+3. **Confirm** `ask_run.trace_id` is present. If it is null, stop — tracing is off or the API was not restarted after enabling OTEL.
+4. **Open Tempo in Grafana** (there is no separate Tempo UI):
+   1. Browser: [http://localhost:3000](http://localhost:3000) — login **admin** / **admin**
+   2. Left nav → **Explore**
+   3. Datasource → **Tempo**
+   4. Paste `ask_run.trace_id` into **Trace ID**, *or* use **Search** with `{resource.service.name="verbiage"}` and time range **Last 15 minutes**
+   5. Open the trace: expect `POST /ask` (or `/ask/stream`) → `rag.embed` → `rag.retrieve` → optional `rag.rerank` → `rag.llm`
+5. **Classify** with `ask_run.decision` (table below), then attach `ask_run_id` + `trace_id` + `ask_run` JSON to the bug.
+
+If Grafana is down or compose is not running, the API can still log “tracing enabled” but nothing will appear in Tempo.
+
+### Capture and classify
 
 1. **Capture the structured run**
 
@@ -51,7 +87,7 @@ Use this when you still have the question (or a close variant) and can hit `/ask
      | jq '{ask_run, top_chunks: [.top_chunks[] | {chunk_id, doc_id, score, title: .document_title}]}'
    ```
 
-   Or ask in the UI and copy `ask_run` from the Network response / SSE `sources` event.
+   Or ask in the UI and copy `ask_run` from the Network response / SSE `sources` event. Same summary also appears as a JSON log line with `event=ask_run`.
 
 2. **Add verbose detail for this request only** (snippets + question preview in logs and on `ask_run.question_preview`):
 
@@ -73,7 +109,7 @@ Use this when you still have the question (or a close variant) and can hit `/ask
    | `nearby_storm` | Geo route, not LLM RAG | Claim / storm context inputs |
    | `error` | Exception path | `error_type`, stack in app logs |
 
-4. **Open the Tempo waterfall** (if OTEL is on): copy `ask_run.trace_id` → Grafana Explore → Tempo → Trace ID. Confirm which phases ran (`rag.embed` → `rag.retrieve` → optional `rag.rerank` → `rag.llm`) and whether spans are marked error.
+4. **Open the Tempo waterfall** — follow [End-to-end: reproduce with ask_run + Tempo trace](#end-to-end-reproduce-with-ask_run--tempo-trace) steps 4–5. Confirm which phases ran and whether spans are marked error.
 
 5. **File the bug** with the checklist at the end of this doc.
 
@@ -144,7 +180,7 @@ Redact or avoid pasting full prompts and PII into public tickets when possible; 
 
 ## Related docs
 
-- [ask-run-diagnosis.md](ask-run-diagnosis.md) — Field reference, decision tree, env flags
+- [ask-run-diagnosis.md](ask-run-diagnosis.md) — Field reference: decisions, env flags, Tempo shapes
 - [otel-architecture.md](otel-architecture.md) — Span model and TraceQL
 - [prod-observability.md](prod-observability.md) — Render metrics and traces
 - [faithfulness-and-rag-metrics-walkthrough.md](faithfulness-and-rag-metrics-walkthrough.md) — Eval / grounding metrics (quality over time, not a single request)

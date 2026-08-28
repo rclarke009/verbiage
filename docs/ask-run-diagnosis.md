@@ -1,6 +1,8 @@
-# Diagnosing a bad Ask answer (ask_run + Tempo)
+# Ask run field reference
 
-One reconstructable story per request: **what happened**, **from what**, **with what model**.
+Compact reference for `ask_run` fields, env flags, and Tempo shapes. For step-by-step triage (curl, ring buffer, reproduce with a Tempo trace, what to attach to a bug), use **[debugging-ask-bugs.md](debugging-ask-bugs.md)** — especially **Workflow A → End-to-end: reproduce with ask_run + Tempo trace**.
+
+One reconstructable story per request: **what happened**, **from what**, **with what model**. Tempo stays **low-cardinality** (no chunk ids or full question on spans). Citation detail lives on `ask_run` and `top_chunks`.
 
 | Signal | Where |
 |--------|--------|
@@ -9,74 +11,21 @@ One reconstructable story per request: **what happened**, **from what**, **with 
 | Phase waterfall | Tempo spans (`rag.embed` → `rag.retrieve` → `rag.llm`) |
 | Aggregates | Prometheus / Grafana (`rag_phase_seconds`, refusal counters) |
 
-Tempo stays **low-cardinality** (no chunk ids or full question on spans). Citation detail lives on `ask_run` and `top_chunks`.
+## Env flags
 
-## Enable
+| Variable | Default | Role |
+|----------|---------|------|
+| `ASK_RUN_LOG_ENABLED` | `true` | Emit JSON `event=ask_run` + response/SSE summary |
+| `ASK_RUN_LOG_VERBOSE` | `false` | Truncated question + snippet previews on the **log line** (process-wide) |
+| `ASK_RUN_BUFFER_ENABLED` | `true` | Keep last N rich runs in memory; disable on prod if PII in process memory is unwanted |
+| `ASK_RUN_BUFFER_SIZE` | `50` | Ring buffer capacity |
+| `METRICS_ENABLED` / `OTEL_*` | — | Prometheus + Tempo; see [otel-architecture.md](otel-architecture.md) |
 
-In `.env` (defaults are fine for local):
+Request-scoped verbose (same fields as `ASK_RUN_LOG_VERBOSE`, one request only): `?debug=1` or header `X-Verbiage-Debug: 1`. Prefer over process-wide verbose in shared environments.
 
-```bash
-ASK_RUN_LOG_ENABLED=true          # default
-# ASK_RUN_LOG_VERBOSE=1           # truncated question + snippet previews in the log line
-ASK_RUN_BUFFER_ENABLED=true       # default; set false on prod if you do not want PII in memory
-# ASK_RUN_BUFFER_SIZE=50
-METRICS_ENABLED=true
-OTEL_ENABLED=true
-OTEL_SERVICE_NAME=verbiage
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
+API default port **:8000**. Observability stack: `cd observability && docker compose up -d`. Restart uvicorn after changing `OTEL_*`.
 
-Restart uvicorn after changing `OTEL_*`. API on **:8000**. Observability stack: `cd observability && docker compose up -d`.
-
-Log lines land in stdout and [`logs/verbiage.log`](../logs/verbiage.log). Format includes `trace=` / `span=` when tracing is on.
-
-## Capture one run
-
-```bash
-curl -s http://127.0.0.1:8000/ask \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"YOUR QUESTION"}' | jq '.ask_run, .top_chunks'
-```
-
-**Request-scoped verbose** (same fields as `ASK_RUN_LOG_VERBOSE`, for this request only):
-
-```bash
-curl -s 'http://127.0.0.1:8000/ask?debug=1' \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"YOUR QUESTION"}' | jq '.ask_run.question_preview'
-
-# or header:
-curl -s http://127.0.0.1:8000/ask \
-  -H 'Content-Type: application/json' \
-  -H 'X-Verbiage-Debug: 1' \
-  -d '{"question":"YOUR QUESTION"}'
-```
-
-Or ask in the UI and inspect the `/ask` or `/ask/stream` network payload (`ask_run` on the SSE `sources` event).
-
-Grep the log:
-
-```bash
-grep '"event":"ask_run"' logs/verbiage.log | tail -1 | jq .
-```
-
-Paste `ask_run.trace_id` into Grafana Explore → Tempo → **Trace ID**.
-
-## “It did something weird five minutes ago”
-
-No need to recreate the question if the ring buffer is on:
-
-```bash
-# Newest-first index
-curl -s 'http://127.0.0.1:8000/debug/ask-runs?limit=20' | jq .
-
-# Full buffered trace (snippets + answer preview)
-curl -s "http://127.0.0.1:8000/debug/ask-runs/$ASK_RUN_ID" | jq .
-```
-
-Each buffered record includes the compact `ask_run` summary plus `question_preview`, `answer_preview`, chunk snippets, and optional `rewritten_query`. Use `trace_id` from the record for Tempo. Endpoints return **404** when `ASK_RUN_BUFFER_ENABLED=false`.
-
-## Decision tree (good / bad / ugly)
+## `ask_run.decision`
 
 ```text
 ask_run.decision
@@ -94,11 +43,15 @@ ask_run.decision
 | Wrong answer with citations | `decision=answer` + `chunks` / `top_chunks` content | Full healthy waterfall |
 | Crash / SSE `retrieval_failed` | `decision=error`, `error_type` | `status=error` spans |
 
-**Silent quality failure** = healthy timings and `decision=answer`, but wrong text. Distinguish retrieval miss (wrong chunk ids/docs) vs generation (right chunks, bad synthesis) using `chunks` + `top_chunks` snippets — or pull the buffered record if you no longer have the HTTP response.
+**Silent quality failure** = healthy timings and `decision=answer`, but wrong text. Distinguish retrieval miss (wrong chunk ids/docs) vs generation (right chunks, bad synthesis) using `chunks` + `top_chunks` snippets — or the buffered record if you no longer have the HTTP response.
 
-**Audit fields (always):** `ask_run_id`, `models.embed` / `models.llm` / `provider`, `prompt.sha256` + `prompt.chars`, chunk ids/scores/titles, `latency_ms`, gate threshold.
+## Audit fields
 
-**Verbose only** (`ASK_RUN_LOG_VERBOSE=1` or `?debug=1` / `X-Verbiage-Debug: 1`): truncated `question_preview` and chunk `snippet`s on the **log line** and (for debug/verbose) on `ask_run.question_preview` in the API summary.
+**Always:** `ask_run_id`, `trace_id` (when OTEL on), `models.embed` / `models.llm` / `provider`, `prompt.sha256` + `prompt.chars`, chunk ids/scores/titles, `latency_ms`, gate threshold.
+
+**Verbose / debug only:** truncated `question_preview` and chunk `snippet`s on the log line; `ask_run.question_preview` in the API summary when debug/verbose is on.
+
+**Buffered record** (`GET /debug/ask-runs/{id}`): compact `ask_run` plus `question_preview`, `answer_preview`, chunk snippets, optional `rewritten_query`. Returns **404** when `ASK_RUN_BUFFER_ENABLED=false`.
 
 ## Known-good refused (seed / corpus)
 
@@ -110,7 +63,7 @@ If a grounded gold question hard-refuses:
 
 ## Related
 
-- [debugging-ask-bugs.md](debugging-ask-bugs.md) — Developer playbook: workflows, what to attach to a bug
-- [otel-architecture.md](otel-architecture.md) — span attributes and TraceQL
+- [debugging-ask-bugs.md](debugging-ask-bugs.md) — How-to: workflows, curl, what to attach to a bug
+- [otel-architecture.md](otel-architecture.md) — Span attributes and TraceQL
 - [prod-observability.md](prod-observability.md) — Render metrics/traces
 - Gold set: [`tests/eval/gold_questions.yaml`](../tests/eval/gold_questions.yaml)
