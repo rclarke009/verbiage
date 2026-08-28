@@ -149,14 +149,7 @@ def get_ask_user(
     if demo_anonymous_enabled():
         token = credentials.credentials if credentials else None
         if token:
-            try:
-                payload = verify_supabase_token(token)
-                sub = payload.get("sub")
-                if sub:
-                    request.state.db_tenant = "prod"
-                    return sub
-            except jwt.InvalidTokenError:
-                pass
+            return get_current_user(request, credentials)
         request.state.db_tenant = "demo"
         return DEMO_GUEST_USER_ID
     user_id = get_current_user(request, credentials)

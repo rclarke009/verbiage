@@ -44,6 +44,11 @@ def is_demo_mode() -> bool:
     return DEMO_MODE
 
 
+def is_demo_only_service() -> bool:
+    """True on a demo-only process (no Drive, ingest, or Report Writer)."""
+    return DEMO_MODE and not dual_tenant_enabled()
+
+
 def demo_open_signup_enabled() -> bool:
     return DEMO_MODE and DEMO_OPEN_SIGNUP
 

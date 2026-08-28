@@ -118,7 +118,11 @@ export function DriveTab() {
   const apiFolderId = () => resolveDriveFolderForApi(folderInput, teamInboxId)
   const effectiveFolderId = apiFolderId()
 
-  const { data: folderContext, isLoading: folderLoading } = useQuery({
+  const {
+    data: folderContext,
+    isLoading: folderLoading,
+    error: folderError,
+  } = useQuery({
     queryKey: ['drive-folder', effectiveFolderId],
     queryFn: () => driveGetFolder(effectiveFolderId),
     enabled: !!effectiveFolderId,
@@ -280,9 +284,13 @@ export function DriveTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when folder resolves after init
   }, [folderInput, publicConfig, teamInboxId])
 
+  const folderErrMsg =
+    folderError instanceof Error ? folderError.message : folderError ? String(folderError) : ''
+  const displayErr = err || folderErrMsg
+
   useEffect(() => {
-    if (err && looksLikeAuthError(err)) setAuthHelpOpen(true)
-  }, [err])
+    if (displayErr && looksLikeAuthError(displayErr)) setAuthHelpOpen(true)
+  }, [displayErr])
 
   useEffect(() => {
     const stored = localStorage.getItem(DRIVE_STEPS_OPEN_STORAGE_KEY)
@@ -520,9 +528,9 @@ export function DriveTab() {
           {msg}
         </div>
       )}
-      {err && (
+      {displayErr && (
         <div style={{ ...banner, background: 'var(--app-danger-bg)', color: 'var(--app-danger)' }}>
-          {err}
+          {displayErr}
         </div>
       )}
 

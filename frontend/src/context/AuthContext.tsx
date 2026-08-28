@@ -108,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const client = createClient(cfg.supabase_url, cfg.supabase_anon_key)
         setSupabase(client)
+        setAuthTokenGetter(async () => (await client.auth.getSession()).data.session?.access_token ?? null)
 
         const {
           data: { subscription },

@@ -76,7 +76,11 @@ export function ReportWriterTab() {
     queryFn: listReportTypes,
   })
 
-  const { data: claims = [], isLoading: claimsLoading } = useQuery({
+  const {
+    data: claims = [],
+    isLoading: claimsLoading,
+    error: claimsError,
+  } = useQuery({
     queryKey: ['report-writer-claims'],
     queryFn: listClaims,
   })
@@ -324,6 +328,17 @@ export function ReportWriterTab() {
       />
 
       <div style={{ flex: 1, minWidth: 0 }}>
+        {(claimsError || reportTypesQuery.error || createMutation.error) && (
+          <p
+            role="alert"
+            style={{ color: 'var(--app-danger)', fontSize: 13, margin: '0 0 12px' }}
+          >
+            {(claimsError instanceof Error && claimsError.message) ||
+              (reportTypesQuery.error instanceof Error && reportTypesQuery.error.message) ||
+              (createMutation.error instanceof Error && createMutation.error.message) ||
+              'Could not load Report Writer.'}
+          </p>
+        )}
         {!activeId ? (
           <p style={{ color: 'var(--app-text-subtle)', fontSize: 14 }}>
             Create or select a claim to draft a report from field notes and similar past reports.

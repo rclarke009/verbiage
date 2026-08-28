@@ -58,6 +58,15 @@ def test_config_dual_tenant_includes_auth_and_guest_flags():
     assert "google_drive_default_folder_id" in data
 
 
+def test_is_demo_only_service_false_when_dual_tenant():
+    with patch.object(demo_module, "DEMO_MODE", True):
+        with patch.object(demo_module, "dual_tenant_enabled", return_value=True):
+            assert demo_module.is_demo_only_service() is False
+    with patch.object(demo_module, "DEMO_MODE", True):
+        with patch.object(demo_module, "dual_tenant_enabled", return_value=False):
+            assert demo_module.is_demo_only_service() is True
+
+
 def test_demo_open_signup_requires_demo_mode():
     with patch.object(demo_module, "DEMO_MODE", False):
         with patch.object(demo_module, "DEMO_OPEN_SIGNUP", True):
@@ -70,7 +79,7 @@ def test_demo_open_signup_requires_demo_mode():
 def test_ingest_forbidden_in_demo():
     client = api_client()
     try:
-        with patch.object(main, "is_demo_mode", return_value=True):
+        with patch.object(main, "is_demo_only_service", return_value=True):
             resp = client.post(
                 "/ingest",
                 json={
@@ -85,10 +94,19 @@ def test_ingest_forbidden_in_demo():
     assert resp.status_code == 403
 
 
+def test_block_in_demo_skips_dual_tenant():
+    with patch.object(main, "is_demo_only_service", return_value=False):
+        main.block_in_demo()
+    with patch.object(main, "is_demo_only_service", return_value=True):
+        with pytest.raises(Exception) as exc:
+            main.block_in_demo()
+    assert getattr(exc.value, "status_code", None) == 403
+
+
 def test_documents_forbidden_in_demo():
     client = api_client()
     try:
-        with patch.object(main, "is_demo_mode", return_value=True):
+        with patch.object(main, "is_demo_only_service", return_value=True):
             resp = client.get("/documents")
     finally:
         clear_api_overrides()
@@ -164,11 +182,24 @@ def test_anonymous_ask_allowed_in_demo_without_auth():
     assert resp.status_code == 200
 
 
-def test_demo_ask_quota_returns_429_on_ask():
+def test_ask_with_invalid_token_is_401_not_guest():
+    client = TestClient(main.app)
+    prime_app_state(main.app)
+    try:
+        with patch("app.auth.demo_anonymous_enabled", return_value=True):
+            with patch("app.auth._auth_configured", return_value=True):
+                resp = client.post(
+                    "/ask",
+                    json={"question": "roof damage?"},
+                    headers={"Authorization": "Bearer not-a-jwt"},
+                )
+    finally:
+        clear_api_overrides()
+    assert resp.status_code == 401
     client = api_client()
     prime_app_state(main.app)
     try:
-        with patch.object(main, "is_demo_mode", return_value=True):
+        with patch.object(main, "is_demo_only_service", return_value=True):
             with patch.object(main, "acquire_demo_ask_quota", new_callable=AsyncMock) as quota:
                 quota.side_effect = LLMRateLimitedError("Demo limit reached")
                 resp = client.post("/ask", json={"question": "roof damage?"})

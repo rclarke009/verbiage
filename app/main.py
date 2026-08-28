@@ -103,6 +103,7 @@ from app.demo import (
     demo_forbidden,
     demo_open_signup_enabled,
     is_demo_mode,
+    is_demo_only_service,
 )
 from app.health import build_deep_response, build_ready_response_async
 from app.config import (
@@ -299,9 +300,9 @@ async def lifespan(app):
         logger.info("Reranker disabled")
 
     ingest_task = None
-    ingest_worker_enabled = INGEST_WORKER_ENABLED and not is_demo_mode()
-    if is_demo_mode() and INGEST_WORKER_ENABLED:
-        logger.warning("Demo mode: forcing INGEST_WORKER_ENABLED=0")
+    ingest_worker_enabled = INGEST_WORKER_ENABLED and not is_demo_only_service()
+    if is_demo_only_service() and INGEST_WORKER_ENABLED:
+        logger.warning("Demo-only service: forcing INGEST_WORKER_ENABLED=0")
     if ingest_worker_enabled:
         ingest_task = asyncio.create_task(ingest_worker_loop(db_pool))
         logger.info("Ingest worker started")
@@ -311,7 +312,7 @@ async def lifespan(app):
     report_writer_cm = None
     app.state.report_writer_graph = None
     app.state.report_writer_regen_graph = None
-    if not is_demo_mode():
+    if not is_demo_only_service():
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
             from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
@@ -385,8 +386,8 @@ init_tracing(app)
 
 
 def block_in_demo() -> None:
-    """FastAPI dependency: reject routes unavailable in demo deployments."""
-    if is_demo_mode():
+    """FastAPI dependency: reject routes unavailable on a demo-only service."""
+    if is_demo_only_service():
         demo_forbidden()
 
 
@@ -1411,7 +1412,7 @@ async def ask(
     ask_request: AskRequest,
     user_id: str = Depends(get_ask_user),
 ):
-    if is_demo_mode() or user_id == DEMO_GUEST_USER_ID:
+    if is_demo_only_service() or user_id == DEMO_GUEST_USER_ID:
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "sync"
@@ -1454,7 +1455,7 @@ async def ask_stream(
     Corrective rewrite-once buffers the first LLM call; the client still receives
     sources (final chunks + optional retrieval_debug) then answer tokens.
     """
-    if is_demo_mode() or user_id == DEMO_GUEST_USER_ID:
+    if is_demo_only_service() or user_id == DEMO_GUEST_USER_ID:
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "stream"
@@ -1840,7 +1841,7 @@ async def auth_google_callback(
 
 from app.report_writer.router import router as report_writer_router
 
-if not is_demo_mode():
+if not is_demo_only_service():
     app.include_router(report_writer_router)
 
 

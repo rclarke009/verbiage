@@ -51,9 +51,9 @@ function AppInner() {
 
   const tabEnabled = (tabId: string) => {
     if (session) return true
-    if (!demoMode) return true
-    if (!enabledTabs) return tabId === 'chat' || tabId === 'preferences'
-    return enabledTabs.includes(tabId)
+    if (enabledTabs) return enabledTabs.includes(tabId)
+    if (demoMode) return tabId === 'chat' || tabId === 'preferences'
+    return true
   }
 
   const renderTab = (tabId: string, featureLabel: string, content: React.ReactNode) => {

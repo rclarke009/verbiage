@@ -20,8 +20,8 @@ function loadShowRetrievalDebug(): boolean {
 }
 
 export function ChatTab() {
-  const { publicConfig } = useAuth()
-  const demoMode = !!publicConfig?.demo_mode
+  const { publicConfig, session } = useAuth()
+  const guestDemo = !!publicConfig?.demo_mode && !session
   const { results, searching, search, removeResult, clearResults } = useReportSearch()
   const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages()
   const [showRetrievalDebug, setShowRetrievalDebug] = useState(loadShowRetrievalDebug)
@@ -41,7 +41,7 @@ export function ChatTab() {
           onSubmit={search}
           disabled={searching}
           placeholder={
-            demoMode
+            guestDemo
               ? 'Try: what causes shingle damage after hail? (Enter to search)'
               : undefined
           }
