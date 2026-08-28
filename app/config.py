@@ -19,12 +19,18 @@ load_dotenv()
 #   (This is not the project URL https://xxx.supabase.co — that's for the JS client.)
 #   Use pooler port 6543 for short-lived connections; use with psycopg2 or asyncpg.
 #   Supabase requires SSL: we add sslmode=require for pooler URLs if not already set.
-_raw_database_url = os.getenv("DATABASE_URL", "").strip().strip("'\"")
-if _raw_database_url:
-    _sep = "&" if "?" in _raw_database_url else "?"
-    if "pooler.supabase.com" in _raw_database_url and "sslmode=" not in _raw_database_url:
-        _raw_database_url = f"{_raw_database_url}{_sep}sslmode=require"
-DATABASE_URL = _raw_database_url
+def normalize_database_url(raw: str) -> str:
+    """Strip quotes and add sslmode=require for Supabase pooler URLs when missing."""
+    url = (raw or "").strip().strip("'\"")
+    if url and "pooler.supabase.com" in url and "sslmode=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sslmode=require"
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", ""))
+# Guest Search corpus (verbiage-demo). When set with DATABASE_URL (TrueDB), one process serves both.
+DEMO_DATABASE_URL = normalize_database_url(os.getenv("DEMO_DATABASE_URL", ""))
 
 
 def _parse_database_url(url: str) -> dict | None:
@@ -51,8 +57,14 @@ def _parse_database_url(url: str) -> dict | None:
     return kwargs
 
 
+def database_connection_kwargs_for(url: str) -> dict | None:
+    """Parsed psycopg2 kwargs for a Postgres URI, or None if the URI is empty/invalid."""
+    return _parse_database_url(url) if url else None
+
+
 # Parsed connection kwargs for psycopg2 (avoids DSN parse errors when password contains =, &, ?).
-DATABASE_CONNECTION_KWARGS = _parse_database_url(DATABASE_URL) if DATABASE_URL else None
+DATABASE_CONNECTION_KWARGS = database_connection_kwargs_for(DATABASE_URL)
+DEMO_DATABASE_CONNECTION_KWARGS = database_connection_kwargs_for(DEMO_DATABASE_URL)
 
 
 def report_writer_database_url() -> str:
@@ -226,7 +238,8 @@ ASK_RUN_LOG_VERBOSE = os.getenv("ASK_RUN_LOG_VERBOSE", "").lower() in ("1", "tru
 ASK_RUN_BUFFER_ENABLED = os.getenv("ASK_RUN_BUFFER_ENABLED", "true").lower() in ("1", "true", "yes")
 ASK_RUN_BUFFER_SIZE = max(1, int(os.getenv("ASK_RUN_BUFFER_SIZE", "50")))
 
-# Demo deployment (separate Render service + Supabase). All demo-only behavior requires DEMO_MODE=1.
+# Demo-only Render service: DEMO_MODE=1 is process-wide (no TrueDB, no Google).
+# Combined service: leave DEMO_MODE unset and set DEMO_DATABASE_URL instead.
 DEMO_MODE = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
 DEMO_OPEN_SIGNUP = os.getenv("DEMO_OPEN_SIGNUP", "").strip().lower() in ("1", "true", "yes")
 DEMO_ANONYMOUS = os.getenv("DEMO_ANONYMOUS", "").strip().lower() in ("1", "true", "yes")
@@ -238,7 +251,10 @@ DEMO_GATE_MESSAGE_TEMPLATE = os.getenv(
     "DEMO_GATE_MESSAGE_TEMPLATE",
     "{feature} is available in the full version. Contact us for details.",
 ).strip()
-# Optional blocklist: set on the demo Render service to the prod Supabase project ref
-# (the segment in postgres.<ref> or https://<ref>.supabase.co). Demo startup fails if
-# DATABASE_URL points at this ref.
+# Blocklist: demo DATABASE_URL / DEMO_DATABASE_URL must not be this TrueDB project ref.
 PROD_SUPABASE_PROJECT_REF = os.getenv("PROD_SUPABASE_PROJECT_REF", "").strip().lower()
+
+
+def dual_tenant_enabled() -> bool:
+    """True when this process has both TrueDB (DATABASE_URL) and a demo corpus URL."""
+    return bool(DATABASE_URL and DEMO_DATABASE_URL)

@@ -7,7 +7,7 @@ import os
 
 from psycopg2.extensions import connection as PgConnection
 
-from app.config import DEMO_MODE
+from app.config import DEMO_MODE, dual_tenant_enabled
 from app.demo_corpus.seed import corpus_docs, seed_corpus_sync
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ def maybe_seed_demo_corpus(conn: PgConnection) -> int | None:
 
     Returns the number of documents seeded, 0 when skipped, or None when not demo.
     """
-    if not DEMO_MODE:
+    if not DEMO_MODE and not dual_tenant_enabled():
         return None
     if not demo_corpus_needs_seed(conn):
         logger.info(

@@ -25,8 +25,9 @@ def reset_demo_state():
 
 def test_config_includes_demo_fields_when_demo_mode():
     with patch.object(main, "is_demo_mode", return_value=True):
-        with patch.object(main, "demo_anonymous_enabled", return_value=True):
-            resp = TestClient(main.app).get("/config")
+        with patch.object(main, "dual_tenant_enabled", return_value=False):
+            with patch.object(main, "demo_anonymous_enabled", return_value=True):
+                resp = TestClient(main.app).get("/config")
     assert resp.status_code == 200
     data = resp.json()
     assert data["demo_mode"] is True
@@ -38,9 +39,22 @@ def test_config_includes_demo_fields_when_demo_mode():
 
 def test_config_prod_includes_demo_mode_false():
     with patch.object(main, "is_demo_mode", return_value=False):
-        resp = TestClient(main.app).get("/config")
+        with patch.object(main, "dual_tenant_enabled", return_value=False):
+            resp = TestClient(main.app).get("/config")
     data = resp.json()
     assert data["demo_mode"] is False
+    assert "google_drive_default_folder_id" in data
+
+
+def test_config_dual_tenant_includes_auth_and_guest_flags():
+    with patch.object(main, "is_demo_mode", return_value=False):
+        with patch.object(main, "dual_tenant_enabled", return_value=True):
+            with patch.object(main, "demo_anonymous_enabled", return_value=True):
+                resp = TestClient(main.app).get("/config")
+    data = resp.json()
+    assert data["demo_mode"] is True
+    assert data["demo_anonymous"] is True
+    assert data["enabled_tabs"] == ["chat", "preferences"]
     assert "google_drive_default_folder_id" in data
 
 
@@ -136,16 +150,15 @@ def test_anonymous_ask_allowed_in_demo_without_auth():
     client = TestClient(main.app)
     prime_app_state(main.app)
     try:
-        with patch("app.auth.is_demo_mode", return_value=True):
-            with patch("app.auth.demo_anonymous_enabled", return_value=True):
-                with patch.object(main, "with_db_conn_retry", side_effect=run_async_db_fn):
-                    with patch.object(main, "resolve_ask_route", return_value="hybrid"):
-                        with patch("app.main.HttpEmbedder") as embed_cls:
-                            embed_cls.return_value.embed_many = AsyncMock(return_value=[[0.1] * 768])
-                            embed_cls.return_value.model = "test-embed"
-                            with patch.object(main, "_retrieve_for_ask", new_callable=AsyncMock) as retrieve:
-                                retrieve.return_value = RetrieveOutcome(chunks=[])
-                                resp = client.post("/ask", json={"question": "roof damage?"})
+        with patch("app.auth.demo_anonymous_enabled", return_value=True):
+            with patch.object(main, "with_db_conn_retry", side_effect=run_async_db_fn):
+                with patch.object(main, "resolve_ask_route", return_value="hybrid"):
+                    with patch("app.main.HttpEmbedder") as embed_cls:
+                        embed_cls.return_value.embed_many = AsyncMock(return_value=[[0.1] * 768])
+                        embed_cls.return_value.model = "test-embed"
+                        with patch.object(main, "_retrieve_for_ask", new_callable=AsyncMock) as retrieve:
+                            retrieve.return_value = RetrieveOutcome(chunks=[])
+                            resp = client.post("/ask", json={"question": "roof damage?"})
     finally:
         clear_api_overrides()
     assert resp.status_code == 200
@@ -163,6 +176,58 @@ def test_demo_ask_quota_returns_429_on_ask():
         clear_api_overrides()
     assert resp.status_code == 429
     assert "Demo limit" in resp.json()["detail"]
+
+
+def test_ingest_without_auth_is_401_not_demo_forbidden():
+    client = TestClient(main.app)
+    try:
+        with patch.object(main, "is_demo_mode", return_value=False):
+            resp = client.post(
+                "/ingest",
+                json={
+                    "doc_id": "x",
+                    "title": "t",
+                    "source": "upload",
+                    "text": "hello",
+                },
+            )
+    finally:
+        clear_api_overrides()
+    assert resp.status_code in (401, 503)
+
+
+def test_pool_for_request_guest_uses_demo_pool():
+    req = MagicMock()
+    req.state.db_tenant = "demo"
+    demo = object()
+    prod = object()
+    req.app.state.demo_db_pool = demo
+    req.app.state.db_pool = prod
+    assert main.pool_for_request(req) is demo
+    req.state.db_tenant = "prod"
+    assert main.pool_for_request(req) is prod
+
+
+def test_assert_demo_database_config_dual_tenant_allows_google():
+    from app.demo_database import assert_demo_database_config
+
+    demo_url = "postgresql://postgres.zhahqzozdngghmvbeaxx:secret@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
+    with patch("app.demo_database.dual_tenant_enabled", return_value=True):
+        with patch("app.demo_database.DEMO_DATABASE_URL", demo_url):
+            with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
+                with patch("app.demo_database.GOOGLE_REFRESH_TOKEN", "token"):
+                    assert_demo_database_config()
+
+
+def test_assert_demo_database_config_dual_tenant_blocks_prod_demo_url():
+    from app.demo_database import assert_demo_database_config
+
+    bad = "postgresql://postgres.dunxzvbxekxqrfnmtzmj:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+    with patch("app.demo_database.dual_tenant_enabled", return_value=True):
+        with patch("app.demo_database.DEMO_DATABASE_URL", bad):
+            with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
+                with pytest.raises(RuntimeError, match="DEMO_DATABASE_URL"):
+                    assert_demo_database_config()
 
 
 def test_extract_supabase_project_ref_from_database_url():

@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 
 from app.config import (
     DATABASE_URL,
+    DEMO_DATABASE_URL,
     DEMO_MODE,
     GOOGLE_REFRESH_TOKEN,
     PROD_SUPABASE_PROJECT_REF,
     SUPABASE_URL,
+    dual_tenant_enabled,
 )
 
 if TYPE_CHECKING:
@@ -40,7 +42,16 @@ def extract_supabase_project_ref_from_supabase_url(url: str) -> str | None:
 
 
 def assert_demo_database_config() -> None:
-    """Refuse demo startup when env vars point at prod or enable Drive ingest."""
+    """Refuse demo/dual-tenant startup when the demo URL points at TrueDB or Drive is on a demo-only process."""
+    if dual_tenant_enabled():
+        db_ref = extract_supabase_project_ref_from_database_url(DEMO_DATABASE_URL)
+        if PROD_SUPABASE_PROJECT_REF and db_ref and db_ref == PROD_SUPABASE_PROJECT_REF:
+            raise RuntimeError(
+                "Dual tenant: DEMO_DATABASE_URL points at the production Supabase project "
+                f"({db_ref}). Use the verbiage-demo project for DEMO_DATABASE_URL."
+            )
+        return
+
     if not DEMO_MODE:
         return
 
@@ -68,7 +79,7 @@ def assert_demo_database_config() -> None:
 
 def assert_demo_database_content(conn: PgConnection) -> None:
     """Refuse demo startup when the DB already holds non-synthetic documents."""
-    if not DEMO_MODE:
+    if not DEMO_MODE and not dual_tenant_enabled():
         return
 
     cur = conn.cursor()

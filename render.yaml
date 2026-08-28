@@ -7,6 +7,7 @@
 # Optional separate worker (extra ~$7/mo): see docs/render-worker-setup.md
 #
 # Sub-2GB instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
+# Dual tenant: DATABASE_URL=TrueDB, DEMO_DATABASE_URL=verbiage-demo. Do not set DEMO_MODE.
 # INGEST_WORKER_ENABLED=1 processes photo vision on this service (no second worker).
 # Liveness probe: /health (instant). Use /health/ready manually or in deep monitoring (Postgres).
 #
@@ -32,6 +33,12 @@ services:
         value: "1"
       - key: DATABASE_URL
         sync: false
+      - key: DEMO_DATABASE_URL
+        sync: false
+      - key: PROD_SUPABASE_PROJECT_REF
+        value: "dunxzvbxekxqrfnmtzmj"
+      - key: DEMO_ANONYMOUS
+        value: "1"
       - key: OPENAI_API_KEY
         sync: false
       - key: SUPABASE_URL

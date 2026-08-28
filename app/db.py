@@ -17,7 +17,7 @@ from psycopg2.extras import Json
 from psycopg2 import extensions
 from pgvector.psycopg2 import register_vector
 
-from app.config import DATABASE_CONNECTION_KWARGS, DATABASE_URL
+from app.config import DATABASE_URL, database_connection_kwargs_for
 
 if TYPE_CHECKING:
     from psycopg2.extensions import connection as PgConnection
@@ -62,15 +62,17 @@ def get_valid_conn(pool: Any) -> "PgConnection":
     return conn  # unreachable
 
 
-def create_db_pool():
-    """Postgres pool (1–10 connections). Matches app.main pool settings."""
-    if DATABASE_CONNECTION_KWARGS:
-        conn_kwargs = dict(DATABASE_CONNECTION_KWARGS)
+def create_db_pool(database_url: str | None = None, connection_kwargs: dict | None = None):
+    """Postgres pool (1–10 connections). Pass a URL for the demo corpus pool."""
+    url = DATABASE_URL if database_url is None else database_url
+    parsed = connection_kwargs if connection_kwargs is not None else database_connection_kwargs_for(url)
+    if parsed:
+        conn_kwargs = dict(parsed)
         if "pooler.supabase.com" in conn_kwargs.get("host", "") and conn_kwargs.get("port") == 6543:
             conn_kwargs["connection_factory"] = NoPrepareConnection
         return psycopg2_pool.ThreadedConnectionPool(1, 10, **conn_kwargs)
-    kwargs: dict[str, Any] = {"minconn": 1, "maxconn": 10, "dsn": DATABASE_URL}
-    if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
+    kwargs: dict[str, Any] = {"minconn": 1, "maxconn": 10, "dsn": url}
+    if url and "pooler.supabase.com" in url and ":6543" in url:
         kwargs["connection_factory"] = NoPrepareConnection
     return psycopg2_pool.ThreadedConnectionPool(**kwargs)
 

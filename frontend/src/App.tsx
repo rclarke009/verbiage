@@ -30,6 +30,7 @@ function AppInner() {
 
   const demoMode = !!publicConfig?.demo_mode
   const demoAnonymous = !!publicConfig?.demo_anonymous
+  const isGuest = !session && demoAnonymous
   const canUseApp = !!session || demoAnonymous
   const enabledTabs = publicConfig?.enabled_tabs
   const demoGateMessage =
@@ -49,6 +50,7 @@ function AppInner() {
   }, [])
 
   const tabEnabled = (tabId: string) => {
+    if (session) return true
     if (!demoMode) return true
     if (!enabledTabs) return tabId === 'chat' || tabId === 'preferences'
     return enabledTabs.includes(tabId)
@@ -119,17 +121,19 @@ function AppInner() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--app-primary)', margin: '0 0 6px 0' }}>TrueAI</h1>
           <p style={{ margin: 0, color: 'var(--app-text-muted)', fontSize: 13 }}>
-            {demoMode
-              ? demoAnonymous
-                ? 'Live demo on sample inspection reports'
-                : 'Demo on sample inspection reports'
-              : 'RAG on the shared report library'}
+            {session
+              ? 'RAG on the shared report library'
+              : demoMode
+                ? demoAnonymous
+                  ? 'Live demo on sample inspection reports'
+                  : 'Demo on sample inspection reports'
+                : 'RAG on the shared report library'}
           </p>
         </div>
-        {session && <LoginPanel />}
+        <LoginPanel />
       </header>
 
-      {demoMode && (
+      {isGuest && demoMode && (
         <p
           style={{
             margin: '0 0 12px',

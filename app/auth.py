@@ -14,7 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from app.config import SUPABASE_JWT_SECRET, SUPABASE_URL
-from app.demo import DEMO_GUEST_USER_ID, demo_anonymous_enabled, is_demo_mode
+from app.demo import DEMO_GUEST_USER_ID, demo_anonymous_enabled
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
@@ -134,6 +134,7 @@ def get_current_user(
             detail="Invalid token (no sub)",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    request.state.db_tenant = "prod"
     return sub
 
 
@@ -142,18 +143,22 @@ def get_ask_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
 ) -> str:
     """
-    FastAPI dependency for /ask routes. In demo anonymous mode, missing auth yields a guest id.
-    Otherwise requires a valid Supabase JWT (same as get_current_user).
+    FastAPI dependency for /ask routes. When guest Search is enabled, missing auth
+    yields a guest id (demo corpus). A valid TrueDB JWT uses the prod pool.
     """
-    if is_demo_mode() and demo_anonymous_enabled():
+    if demo_anonymous_enabled():
         token = credentials.credentials if credentials else None
         if token:
             try:
                 payload = verify_supabase_token(token)
                 sub = payload.get("sub")
                 if sub:
+                    request.state.db_tenant = "prod"
                     return sub
             except jwt.InvalidTokenError:
                 pass
+        request.state.db_tenant = "demo"
         return DEMO_GUEST_USER_ID
-    return get_current_user(request, credentials)
+    user_id = get_current_user(request, credentials)
+    request.state.db_tenant = "prod"
+    return user_id

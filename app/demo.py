@@ -22,6 +22,7 @@ from app.config import (
     DEMO_ANONYMOUS,
     DEMO_SIGNUP_LIMIT,
     DEMO_SIGNUP_WINDOW_SECONDS,
+    dual_tenant_enabled,
 )
 from app.errors import LLMRateLimitedError
 
@@ -48,7 +49,9 @@ def demo_open_signup_enabled() -> bool:
 
 
 def demo_anonymous_enabled() -> bool:
-    """Skip sign-in on demo; Ask uses IP-based rate limits. Requires DEMO_MODE=1."""
+    """Guests may Search without a JWT (demo-only service or dual-tenant)."""
+    if dual_tenant_enabled():
+        return True
     return DEMO_MODE and DEMO_ANONYMOUS
 
 

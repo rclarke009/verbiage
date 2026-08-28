@@ -95,6 +95,7 @@ from app.drive_client import (
 from app.pdf_extract import extract_text_from_pdf, sanitize_doc_id_from_filename
 from app.auth import get_ask_user, get_current_user
 from app.demo import (
+    DEMO_GUEST_USER_ID,
     acquire_demo_ask_quota,
     check_demo_signup_allowed,
     demo_anonymous_enabled,
@@ -107,8 +108,10 @@ from app.health import build_deep_response, build_ready_response_async
 from app.config import (
     ASK_RUN_BUFFER_ENABLED,
     DATABASE_URL,
+    DEMO_DATABASE_URL,
     DEMO_GATE_MESSAGE_TEMPLATE,
     report_writer_database_url,
+    dual_tenant_enabled,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_DRIVE_DEFAULT_FOLDER_ID,
@@ -212,48 +215,62 @@ async def _warm_reranker(app):
         # worse than falling back to the lazy load on the request path.
         app.state.reranker_ready = True
 
-@asynccontextmanager
-async def lifespan(app):
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL must be set for Postgres connection")
-    from app.demo_database import assert_demo_database_config, assert_demo_database_content
-
-    assert_demo_database_config()
-    # Retry pool creation: Supabase free-tier projects pause after inactivity and may drop the first connection.
+def _open_postgres_pool(url: str, *, check_demo_content: bool):
+    """Create a pool, run DDL, optionally assert eval_fixture-only documents."""
     last_error = None
     for attempt in range(1, 4):
         try:
-            db_pool = create_db_pool()
+            db_pool = create_db_pool(url)
             conn = db_pool.getconn()
             try:
                 create_db(conn)
-                assert_demo_database_content(conn)
+                if check_demo_content:
+                    from app.demo_database import assert_demo_database_content
+
+                    assert_demo_database_content(conn)
             finally:
                 db_pool.putconn(conn)
-            break
+            return db_pool
         except psycopg2.OperationalError as e:
             last_error = e
             logger.warning("Database connection attempt %s/3 failed: %s", attempt, e)
             if attempt < 3:
-                await asyncio.sleep(2)
-    else:
-        raise RuntimeError(
-            "Could not connect to the database after 3 attempts. "
-            "If using Supabase: ensure the project is not paused (open the project in the dashboard), "
-            "DATABASE_URL uses the Postgres URI from Project Settings → Database, and the password is correct."
-        ) from last_error
+                time.sleep(2)
+    raise RuntimeError(
+        "Could not connect to the database after 3 attempts. "
+        "If using Supabase: ensure the project is not paused (open the project in the dashboard), "
+        "DATABASE_URL uses the Postgres URI from Project Settings → Database, and the password is correct."
+    ) from last_error
 
+
+@asynccontextmanager
+async def lifespan(app):
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL must be set for Postgres connection")
+    from app.demo_database import assert_demo_database_config
+
+    assert_demo_database_config()
+    check_main_demo = is_demo_mode() and not dual_tenant_enabled()
+    db_pool = await asyncio.to_thread(_open_postgres_pool, DATABASE_URL, check_demo_content=check_main_demo)
     app.state.db_pool = db_pool
+    app.state.demo_db_pool = None
+    if dual_tenant_enabled():
+        if not DEMO_DATABASE_URL:
+            raise ValueError("DEMO_DATABASE_URL must be set for dual tenant")
+        app.state.demo_db_pool = await asyncio.to_thread(
+            _open_postgres_pool, DEMO_DATABASE_URL, check_demo_content=True
+        )
 
-    if is_demo_mode():
+    seed_pool = app.state.demo_db_pool if dual_tenant_enabled() else (db_pool if is_demo_mode() else None)
+    if seed_pool is not None:
         from app.demo_seed import maybe_seed_demo_corpus
 
         def _seed_demo() -> int | None:
-            conn = db_pool.getconn()
+            conn = seed_pool.getconn()
             try:
                 return maybe_seed_demo_corpus(conn)
             finally:
-                db_pool.putconn(conn)
+                seed_pool.putconn(conn)
 
         seeded = await asyncio.to_thread(_seed_demo)
         if seeded:
@@ -338,6 +355,9 @@ async def lifespan(app):
         except asyncio.CancelledError:
             pass
     await aclose_async_client()
+    demo_pool = getattr(app.state, "demo_db_pool", None)
+    if demo_pool is not None:
+        demo_pool.closeall()
     db_pool.closeall()
     logger.info("Work has stopped")
 
@@ -370,12 +390,22 @@ def block_in_demo() -> None:
         demo_forbidden()
 
 
+def pool_for_request(request: Request):
+    """Prod pool unless this request is a demo guest (dual-tenant)."""
+    tenant = getattr(request.state, "db_tenant", "prod")
+    if tenant == "demo":
+        demo_pool = getattr(request.app.state, "demo_db_pool", None)
+        if demo_pool is not None:
+            return demo_pool
+    return request.app.state.db_pool
+
+
 async def with_db_conn_retry(request: Request, async_fn):
     """
     Get a validated DB connection, run async_fn(conn). On connection-closed errors,
     discard the connection, get a new one, and retry once. Always returns the connection to the pool.
     """
-    pool = request.app.state.db_pool
+    pool = pool_for_request(request)
     conn = get_valid_conn(pool)
     try:
         return await async_fn(conn)
@@ -400,7 +430,7 @@ def with_db_conn_retry_sync(request: Request, sync_fn):
     Same as with_db_conn_retry but for sync route handlers. Get validated conn, run sync_fn(conn);
     on connection-closed errors, retry once with a fresh connection.
     """
-    pool = request.app.state.db_pool
+    pool = pool_for_request(request)
     conn = get_valid_conn(pool)
     try:
         return sync_fn(conn)
@@ -480,7 +510,7 @@ def _invite_code_matches(provided: str | None, expected: str) -> bool:
 @app.get("/config")
 def get_config():
     """Public: Supabase URL and anon key for frontend auth. No secrets."""
-    if is_demo_mode():
+    if is_demo_mode() and not dual_tenant_enabled():
         return {
             "supabase_url": SUPABASE_URL or "",
             "supabase_anon_key": SUPABASE_ANON_KEY or "",
@@ -491,7 +521,7 @@ def get_config():
             "enabled_tabs": demo_enabled_tabs(),
             "demo_gate_message": DEMO_GATE_MESSAGE_TEMPLATE,
         }
-    return {
+    payload = {
         "supabase_url": SUPABASE_URL or "",
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
         "signup_invite_enabled": bool(SIGNUP_INVITE_CODE),
@@ -500,8 +530,13 @@ def get_config():
         "google_drive_default_folder_label": GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL or "",
         "google_drive_jobs_root_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID) or "",
         "google_drive_jobs_root_folder_label": GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL or "",
-        "demo_mode": False,
+        "demo_mode": dual_tenant_enabled(),
+        "demo_anonymous": demo_anonymous_enabled() if dual_tenant_enabled() else False,
     }
+    if dual_tenant_enabled():
+        payload["enabled_tabs"] = demo_enabled_tabs()
+        payload["demo_gate_message"] = DEMO_GATE_MESSAGE_TEMPLATE
+    return payload
 
 
 @app.post("/auth/signup", response_model=SignupResponse)
@@ -1376,7 +1411,7 @@ async def ask(
     ask_request: AskRequest,
     user_id: str = Depends(get_ask_user),
 ):
-    if is_demo_mode():
+    if is_demo_mode() or user_id == DEMO_GUEST_USER_ID:
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "sync"
@@ -1419,7 +1454,7 @@ async def ask_stream(
     Corrective rewrite-once buffers the first LLM call; the client still receives
     sources (final chunks + optional retrieval_debug) then answer tokens.
     """
-    if is_demo_mode():
+    if is_demo_mode() or user_id == DEMO_GUEST_USER_ID:
         await acquire_demo_ask_quota(request, user_id)
 
     rag_endpoint = "stream"

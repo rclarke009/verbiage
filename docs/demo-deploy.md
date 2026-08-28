@@ -1,5 +1,15 @@
 # Demo deployment operator runbook
 
+Preferred (one Render bill): guests and signed-in users share
+**https://rag-document-analysis-backend.onrender.com/**.
+
+- **TrueDB** (`dunxzvbxekxqrfnmtzmj`) — `DATABASE_URL` + `SUPABASE_*` (the only login)
+- **verbiage-demo** (`zhahqzozdngghmvbeaxx`) — `DEMO_DATABASE_URL` (sample `eval_fixture` docs)
+- Do **not** set `DEMO_MODE` on that service. Guests Search without JWT; TrueDB JWTs use the real corpus.
+- After smoke tests, suspend the `trueai` web service.
+
+A **demo-only** second service (`DEMO_MODE=1`, no Google) remains documented below if you still need a isolated demo host.
+
 Public Ask-only demo on a **second Render web service** with a **separate Supabase project** and the synthetic eval corpus (`app/demo_corpus/`). Production is unchanged when prod env vars stay as they are today.
 
 ## Render terminology

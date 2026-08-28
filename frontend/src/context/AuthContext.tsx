@@ -89,12 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setPublicConfig(cfg)
 
-        if (cfg.demo_anonymous) {
-          setLoading(false)
-          return
-        }
-
         if (!cfg.supabase_url || !cfg.supabase_anon_key) {
+          if (cfg.demo_anonymous) {
+            setLoading(false)
+            return
+          }
           setError(
             'Supabase Auth is not configured on the server (/config missing credentials). Set SUPABASE_URL and SUPABASE_ANON_KEY.',
           )
