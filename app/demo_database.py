@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,8 @@ from app.config import (
 
 if TYPE_CHECKING:
     from psycopg2.extensions import connection as PgConnection
+
+logger = logging.getLogger(__name__)
 
 _DB_REF_RE = re.compile(
     r"(?:postgres\.([a-z0-9]+)|db\.([a-z0-9]+)\.supabase\.co)",
@@ -83,6 +86,37 @@ def assert_demo_database_config() -> None:
                 "Demo mode: DATABASE_URL and SUPABASE_URL refer to different Supabase "
                 f"projects (db={db_ref}, api={api_ref})."
             )
+
+
+def assert_live_database_content(conn: PgConnection) -> None:
+    """Refuse dual-tenant startup when DATABASE_URL is the synthetic sample corpus."""
+    if not dual_tenant_enabled():
+        return
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE source = 'eval_fixture')::int,
+                COUNT(*) FILTER (WHERE source IS DISTINCT FROM 'eval_fixture')::int
+            FROM documents
+            """
+        )
+        eval_n, other = cur.fetchone()
+        logger.info(
+            "Live database documents: total=%s eval_fixture=%s other=%s",
+            eval_n + other,
+            eval_n,
+            other,
+        )
+        if other == 0 and eval_n > 0:
+            raise RuntimeError(
+                "Dual tenant: DATABASE_URL contains only synthetic eval_fixture documents "
+                f"({eval_n}). Signed-in users would see the sample library. "
+                "Set DATABASE_URL to TrueDB and DEMO_DATABASE_URL to verbiage-demo."
+            )
+    finally:
+        cur.close()
 
 
 def assert_demo_database_content(conn: PgConnection) -> None:

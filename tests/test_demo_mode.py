@@ -366,3 +366,28 @@ def test_assert_demo_database_content_allows_eval_fixture_only():
 
     with patch("app.demo_database.DEMO_MODE", True):
         assert_demo_database_content(conn)
+
+
+def test_assert_live_database_content_blocks_eval_fixture_only():
+    from app.demo_database import assert_live_database_content
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchone.return_value = (12, 0)
+
+    with patch("app.demo_database.dual_tenant_enabled", return_value=True):
+        with pytest.raises(RuntimeError, match="DATABASE_URL"):
+            assert_live_database_content(conn)
+
+
+def test_assert_live_database_content_allows_real_docs():
+    from app.demo_database import assert_live_database_content
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value = cur
+    cur.fetchone.return_value = (0, 225)
+
+    with patch("app.demo_database.dual_tenant_enabled", return_value=True):
+        assert_live_database_content(conn)

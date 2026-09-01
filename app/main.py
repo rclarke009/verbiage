@@ -216,7 +216,7 @@ async def _warm_reranker(app):
         # worse than falling back to the lazy load on the request path.
         app.state.reranker_ready = True
 
-def _open_postgres_pool(url: str, *, check_demo_content: bool):
+def _open_postgres_pool(url: str, *, check_demo_content: bool, check_live_content: bool = False):
     """Create a pool, run DDL, optionally assert eval_fixture-only documents."""
     last_error = None
     for attempt in range(1, 4):
@@ -229,6 +229,10 @@ def _open_postgres_pool(url: str, *, check_demo_content: bool):
                     from app.demo_database import assert_demo_database_content
 
                     assert_demo_database_content(conn)
+                if check_live_content:
+                    from app.demo_database import assert_live_database_content
+
+                    assert_live_database_content(conn)
             finally:
                 db_pool.putconn(conn)
             return db_pool
@@ -252,7 +256,12 @@ async def lifespan(app):
 
     assert_demo_database_config()
     check_main_demo = is_demo_mode() and not dual_tenant_enabled()
-    db_pool = await asyncio.to_thread(_open_postgres_pool, DATABASE_URL, check_demo_content=check_main_demo)
+    db_pool = await asyncio.to_thread(
+        _open_postgres_pool,
+        DATABASE_URL,
+        check_demo_content=check_main_demo,
+        check_live_content=dual_tenant_enabled(),
+    )
     app.state.db_pool = db_pool
     app.state.demo_db_pool = None
     if dual_tenant_enabled():
