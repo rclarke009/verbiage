@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Source } from '../types'
-import { downloadableDocIds, uniqueSourcesByDoc } from './uniqueSources'
+import { downloadableDocIds, resolveSourceDocId, uniqueSourcesByDoc } from './uniqueSources'
 
 describe('uniqueSourcesByDoc', () => {
   it('collapses chunks from the same doc_id and keeps section labels', () => {
@@ -27,5 +27,34 @@ describe('uniqueSourcesByDoc', () => {
     expect(unique).toHaveLength(2)
     expect(unique.every(u => !u.downloadable)).toBe(true)
     expect(downloadableDocIds(unique)).toEqual([])
+  })
+
+  it('recovers Drive file ids from open URLs and chunk_id-style sections', () => {
+    const id = '1BwBQ2N7R_30uvDoJb_-xNL9RvXn6RCwR'
+    expect(
+      resolveSourceDocId({
+        filename: 'Borgese.pdf',
+        source_url: `https://drive.google.com/file/d/${id}/view`,
+      }),
+    ).toBe(id)
+    expect(resolveSourceDocId({ filename: 'Borgese.pdf', section: `${id}:3` })).toBe(id)
+
+    const unique = uniqueSourcesByDoc([
+      {
+        filename: 'Borgese.pdf',
+        source_url: `https://drive.google.com/file/d/${id}/view`,
+        section: id,
+        source_type: 'google_drive',
+      },
+      {
+        filename: 'Borgese.pdf',
+        source_url: `https://drive.google.com/file/d/${id}/view`,
+        section: `${id}:9`,
+        source_type: 'google_drive',
+      },
+    ])
+    expect(unique).toHaveLength(1)
+    expect(unique[0].downloadable).toBe(true)
+    expect(unique[0].sections).toEqual([])
   })
 })

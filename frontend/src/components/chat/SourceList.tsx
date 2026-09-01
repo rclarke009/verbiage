@@ -20,7 +20,7 @@ const btnStyle: CSSProperties = {
 }
 
 export function SourceList({ sources, chunksUsed, canDownload = false }: Props) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -65,7 +65,7 @@ export function SourceList({ sources, chunksUsed, canDownload = false }: Props) 
     }
   }
 
-  const showDownload = canDownload && downloadableIds.length > 0
+  const showDownload = canDownload
 
   return (
     <div style={{ marginTop: 8 }}>
@@ -111,7 +111,7 @@ export function SourceList({ sources, chunksUsed, canDownload = false }: Props) 
               <button
                 type="button"
                 style={btnStyle}
-                disabled={downloading}
+                disabled={downloading || downloadableIds.length === 0}
                 onClick={() => {
                   selectAll()
                   runDownload(unique.filter(u => u.downloadable).map(s => ({ docId: s.docId, filename: s.filename })))
@@ -119,6 +119,11 @@ export function SourceList({ sources, chunksUsed, canDownload = false }: Props) 
               >
                 Download all
               </button>
+              {downloadableIds.length === 0 && (
+                <span style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
+                  Original files are not available to download for these sources.
+                </span>
+              )}
               {error && (
                 <span style={{ fontSize: 12, color: 'var(--app-danger, #b42318)' }}>{error}</span>
               )}
