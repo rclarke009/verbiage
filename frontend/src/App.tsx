@@ -30,8 +30,8 @@ function AppInner() {
 
   const demoMode = !!publicConfig?.demo_mode
   const demoAnonymous = !!publicConfig?.demo_anonymous
-  const isGuest = !session && demoAnonymous
-  const canUseApp = !!session || demoAnonymous
+  const isGuest = !session && (demoAnonymous || demoMode)
+  const canUseApp = !!session || demoAnonymous || demoMode
   const enabledTabs = publicConfig?.enabled_tabs
   const demoGateMessage =
     publicConfig?.demo_gate_message ??
@@ -133,7 +133,7 @@ function AppInner() {
         <LoginPanel />
       </header>
 
-      {isGuest && demoMode && (
+      {isGuest && (
         <p
           style={{
             margin: '0 0 12px',

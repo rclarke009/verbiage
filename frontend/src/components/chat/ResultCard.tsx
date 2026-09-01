@@ -47,6 +47,30 @@ export function ResultCard({ result, onSave, onRemove, showRetrievalDebug = true
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-primary)', marginBottom: 8 }}>
           {result.query}
+          {result.corpus === 'demo' && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontWeight: 500,
+                fontSize: 11,
+                color: 'var(--app-text-muted)',
+              }}
+            >
+              Sample library
+            </span>
+          )}
+          {result.corpus === 'live' && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontWeight: 500,
+                fontSize: 11,
+                color: 'var(--app-text-muted)',
+              }}
+            >
+              Live library
+            </span>
+          )}
         </div>
         <button
           type="button"

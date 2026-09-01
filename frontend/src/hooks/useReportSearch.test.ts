@@ -99,6 +99,50 @@ describe('useReportSearch', () => {
     expect(r.retrievalDebug?.rewritten_query).toBe('intact roof tiles')
   })
 
+  it('does not carry guest results into a signed-in cache', async () => {
+    window.localStorage.setItem(
+      'verbiage-search-results:guest',
+      JSON.stringify([
+        {
+          id: 'guest-1',
+          query: 'harbor example',
+          answer: 'sample hail damage',
+          sources: [],
+          chunksUsed: 0,
+          streaming: false,
+        },
+      ]),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ userId }: { userId: string | null }) => useReportSearch(3, 'auto', userId),
+      { initialProps: { userId: null } },
+    )
+    expect(result.current.results).toHaveLength(1)
+    expect(result.current.results[0].query).toBe('harbor example')
+
+    act(() => {
+      rerender({ userId: 'user-123' })
+    })
+    expect(result.current.results).toHaveLength(0)
+  })
+
+  it('records corpus from the sources event', async () => {
+    mockFetch(
+      sseResponse([
+        'event: sources\ndata: {"sources": [], "chunks_used": 0, "corpus": "live"}\n\n',
+        'event: token\ndata: {"token": "ok"}\n\n',
+      ]),
+    )
+
+    const { result } = renderHook(() => useReportSearch(3, 'auto', 'user-123'))
+    await act(async () => {
+      await result.current.search('q1')
+    })
+
+    expect(result.current.results[0].corpus).toBe('live')
+  })
+
   it('parses an event whose type and data arrive in separate network reads', async () => {
     // currentEvent must persist across read() chunks, not reset per chunk.
     mockFetch(sseResponse(['event: token\n', 'data: {"token": "split"}\n\n']))

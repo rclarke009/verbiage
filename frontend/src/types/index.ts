@@ -25,6 +25,7 @@ export interface LookupResult {
   chunksUsed: number
   streaming: boolean
   retrievalDebug?: RetrievalDebug | null
+  corpus?: 'live' | 'demo' | null
 }
 
 /** Present when Ask ran soft-refuse → rewrite-once corrective retrieval. */

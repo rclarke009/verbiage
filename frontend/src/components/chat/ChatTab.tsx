@@ -21,9 +21,15 @@ function loadShowRetrievalDebug(): boolean {
 
 export function ChatTab() {
   const { publicConfig, session } = useAuth()
-  const guestDemo = !!publicConfig?.demo_mode && !session
-  const { results, searching, search, removeResult, clearResults } = useReportSearch()
-  const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages()
+  const guestDemo = !session && (!!publicConfig?.demo_mode || !!publicConfig?.demo_anonymous)
+  const { results, searching, search, removeResult, clearResults } = useReportSearch(
+    3,
+    'auto',
+    session?.user?.id ?? null,
+  )
+  const { passages, savePassage, removePassage, clearPassages } = useCollectedPassages(
+    session?.user?.id ?? null,
+  )
   const [showRetrievalDebug, setShowRetrievalDebug] = useState(loadShowRetrievalDebug)
 
   useEffect(() => {

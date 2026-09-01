@@ -44,11 +44,19 @@ def extract_supabase_project_ref_from_supabase_url(url: str) -> str | None:
 def assert_demo_database_config() -> None:
     """Refuse demo/dual-tenant startup when the demo URL points at TrueDB or Drive is on a demo-only process."""
     if dual_tenant_enabled():
-        db_ref = extract_supabase_project_ref_from_database_url(DEMO_DATABASE_URL)
-        if PROD_SUPABASE_PROJECT_REF and db_ref and db_ref == PROD_SUPABASE_PROJECT_REF:
+        demo_ref = extract_supabase_project_ref_from_database_url(DEMO_DATABASE_URL)
+        if PROD_SUPABASE_PROJECT_REF and demo_ref and demo_ref == PROD_SUPABASE_PROJECT_REF:
             raise RuntimeError(
                 "Dual tenant: DEMO_DATABASE_URL points at the production Supabase project "
-                f"({db_ref}). Use the verbiage-demo project for DEMO_DATABASE_URL."
+                f"({demo_ref}). Use the verbiage-demo project for DEMO_DATABASE_URL."
+            )
+        live_ref = extract_supabase_project_ref_from_database_url(DATABASE_URL)
+        if PROD_SUPABASE_PROJECT_REF and live_ref and live_ref != PROD_SUPABASE_PROJECT_REF:
+            raise RuntimeError(
+                "Dual tenant: DATABASE_URL does not point at the production Supabase project "
+                f"(expected {PROD_SUPABASE_PROJECT_REF}, got {live_ref}). "
+                "Signed-in users would search the demo corpus. "
+                "Set DATABASE_URL to TrueDB and DEMO_DATABASE_URL to verbiage-demo."
             )
         return
 

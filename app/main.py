@@ -531,7 +531,9 @@ def get_config():
         "google_drive_default_folder_label": GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL or "",
         "google_drive_jobs_root_folder_id": parse_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID) or "",
         "google_drive_jobs_root_folder_label": GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL or "",
-        "demo_mode": dual_tenant_enabled(),
+        # Dual-tenant is a live service that also allows guest Search. demo_mode
+        # stays false so a signed-in session is not treated as the sample corpus.
+        "demo_mode": False,
         "demo_anonymous": demo_anonymous_enabled() if dual_tenant_enabled() else False,
     }
     if dual_tenant_enabled():
@@ -1241,15 +1243,22 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
     return payload
 
 
+def _request_corpus(request: Request) -> str:
+    return "demo" if getattr(request.state, "db_tenant", "prod") == "demo" else "live"
+
+
 def _sse_sources_event(
     top_chunks: list[RetrievedChunk],
     retrieval_debug: RetrievalDebug | None = None,
     ask_run: AskRunSummary | None = None,
+    corpus: str | None = None,
 ) -> str:
     payload: dict = {
         "sources": _sources_payload_for_sse(top_chunks),
         "chunks_used": len(top_chunks),
     }
+    if corpus:
+        payload["corpus"] = corpus
     if retrieval_debug is not None:
         payload["retrieval_debug"] = retrieval_debug.model_dump()
     if ask_run is not None:
@@ -1522,7 +1531,12 @@ async def ask_stream(
                 record_no_context_response(rag_endpoint)
                 set_refused_attribute(trace.get_current_span(), True)
 
-            yield _sse_sources_event(top_chunks, retrieval_debug, ask_run_summary)
+            yield _sse_sources_event(
+                top_chunks,
+                retrieval_debug,
+                ask_run_summary,
+                corpus=_request_corpus(request),
+            )
             yield f"event: token\ndata: {json.dumps({'token': answer})}\n\n"
 
     return StreamingResponse(event_iter(), media_type="text/event-stream")

@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
@@ -79,6 +80,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const sessionRef = useRef<Session | null>(null)
+  sessionRef.current = session
 
   useEffect(() => {
     let cancelled = false
@@ -108,7 +111,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const client = createClient(cfg.supabase_url, cfg.supabase_anon_key)
         setSupabase(client)
-        setAuthTokenGetter(async () => (await client.auth.getSession()).data.session?.access_token ?? null)
 
         const {
           data: { subscription },
@@ -146,9 +148,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    setAuthTokenGetter(
-      supabase ? async () => (await supabase.auth.getSession()).data.session?.access_token ?? null : null,
-    )
+    if (!supabase) {
+      setAuthTokenGetter(null)
+      return
+    }
+    const client = supabase
+    setAuthTokenGetter(async () => {
+      const fromHook = sessionRef.current?.access_token
+      if (fromHook) return fromHook
+      return (await client.auth.getSession()).data.session?.access_token ?? null
+    })
     return () => setAuthTokenGetter(null)
   }, [supabase])
 

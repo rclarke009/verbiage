@@ -102,9 +102,7 @@ def get_current_user(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Supabase Auth not configured (set SUPABASE_URL and/or SUPABASE_JWT_SECRET)",
         )
-    token = None
-    if credentials:
-        token = credentials.credentials
+    token = _bearer_token(request, credentials)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -138,6 +136,19 @@ def get_current_user(
     return sub
 
 
+def _bearer_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str | None:
+    if credentials and credentials.credentials:
+        return credentials.credentials
+    header = (request.headers.get("authorization") or "").strip()
+    if header.lower().startswith("bearer "):
+        token = header[7:].strip()
+        return token or None
+    return None
+
+
 def get_ask_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
@@ -147,7 +158,7 @@ def get_ask_user(
     yields a guest id (demo corpus). A valid TrueDB JWT uses the prod pool.
     """
     if demo_anonymous_enabled():
-        token = credentials.credentials if credentials else None
+        token = _bearer_token(request, credentials)
         if token:
             return get_current_user(request, credentials)
         request.state.db_tenant = "demo"

@@ -1,9 +1,14 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { LookupResult, RetrievalDebug, Source } from '../types'
 
 import { apiOrigin, getAuthFetchInit } from '../lib/api'
 
 const RESULTS_STORAGE_KEY = 'verbiage-search-results'
+const LEGACY_RESULTS_STORAGE_KEY = 'verbiage-search-results'
+
+function resultsStorageKey(userId: string | null): string {
+  return userId ? `${RESULTS_STORAGE_KEY}:${userId}` : `${RESULTS_STORAGE_KEY}:guest`
+}
 
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -23,10 +28,14 @@ function parseRetrievalDebug(raw: unknown): RetrievalDebug | null {
   }
 }
 
-function loadStoredResults(): LookupResult[] {
+function loadStoredResults(storageKey: string): LookupResult[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(RESULTS_STORAGE_KEY)
+    const raw =
+      window.localStorage.getItem(storageKey) ??
+      (storageKey.endsWith(':guest')
+        ? window.localStorage.getItem(LEGACY_RESULTS_STORAGE_KEY)
+        : null)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -49,14 +58,33 @@ const STREAM_STALL_TIMEOUT_MS = 60000
  * conversation history is sent to the backend (it embeds only the query). Results
  * are kept newest-first so the UI reads as a stack of lookups, not a dialogue.
  */
-export function useReportSearch(topK = 3, retrievalMode: RetrievalMode = 'auto') {
-  const [results, setResults] = useState<LookupResult[]>(loadStoredResults)
+export function useReportSearch(
+  topK = 3,
+  retrievalMode: RetrievalMode = 'auto',
+  userId: string | null = null,
+) {
+  const storageKey = resultsStorageKey(userId)
+  const [results, setResults] = useState<LookupResult[]>(() => loadStoredResults(storageKey))
   const [searching, setSearching] = useState(false)
+  const persistReady = useRef(false)
+
+  useEffect(() => {
+    persistReady.current = false
+    setResults(loadStoredResults(storageKey))
+  }, [storageKey])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    window.localStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify(results))
-  }, [results])
+    if (!persistReady.current) {
+      persistReady.current = true
+      return
+    }
+    window.localStorage.setItem(storageKey, JSON.stringify(results))
+    if (userId) {
+      window.localStorage.removeItem(LEGACY_RESULTS_STORAGE_KEY)
+      window.localStorage.removeItem(`${RESULTS_STORAGE_KEY}:guest`)
+    }
+  }, [results, storageKey, userId])
 
   const search = useCallback(
     async (query: string) => {
@@ -144,12 +172,16 @@ export function useReportSearch(topK = 3, retrievalMode: RetrievalMode = 'auto')
                 if (currentEvent === 'token' && typeof data.token === 'string') {
                   patch(r => ({ ...r, answer: r.answer + data.token }))
                 } else if (currentEvent === 'sources') {
+                  const corpusRaw = data.corpus
+                  const corpus =
+                    corpusRaw === 'demo' || corpusRaw === 'live' ? corpusRaw : null
                   patch(r => ({
                     ...r,
                     sources: Array.isArray(data.sources) ? (data.sources as Source[]) : r.sources,
                     chunksUsed:
                       typeof data.chunks_used === 'number' ? data.chunks_used : r.chunksUsed,
                     retrievalDebug: parseRetrievalDebug(data.retrieval_debug),
+                    corpus,
                   }))
                 } else if (currentEvent === 'error') {
                   const detail = typeof data.detail === 'string' ? data.detail : ''
@@ -191,9 +223,13 @@ export function useReportSearch(topK = 3, retrievalMode: RetrievalMode = 'auto')
   const clearResults = useCallback(() => {
     setResults([])
     if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(RESULTS_STORAGE_KEY)
+      window.localStorage.removeItem(storageKey)
+      if (userId) {
+        window.localStorage.removeItem(LEGACY_RESULTS_STORAGE_KEY)
+        window.localStorage.removeItem(`${RESULTS_STORAGE_KEY}:guest`)
+      }
     }
-  }, [])
+  }, [storageKey, userId])
 
   return { results, searching, search, removeResult, clearResults }
 }

@@ -52,7 +52,7 @@ def test_config_dual_tenant_includes_auth_and_guest_flags():
             with patch.object(main, "demo_anonymous_enabled", return_value=True):
                 resp = TestClient(main.app).get("/config")
     data = resp.json()
-    assert data["demo_mode"] is True
+    assert data["demo_mode"] is False
     assert data["demo_anonymous"] is True
     assert data["enabled_tabs"] == ["chat", "preferences"]
     assert "google_drive_default_folder_id" in data
@@ -227,7 +227,38 @@ def test_ingest_without_auth_is_401_not_demo_forbidden():
     assert resp.status_code in (401, 503)
 
 
-def test_pool_for_request_guest_uses_demo_pool():
+def test_get_ask_user_with_bearer_sets_prod_tenant():
+    from fastapi import Request
+
+    from app.auth import get_ask_user
+
+    req = MagicMock(spec=Request)
+    req.state = MagicMock()
+    req.headers = {"authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.e30.x"}
+    creds = MagicMock()
+    creds.credentials = "eyJhbGciOiJIUzI1NiJ9.e30.x"
+
+    with patch("app.auth.demo_anonymous_enabled", return_value=True):
+        with patch("app.auth.get_current_user", return_value="user-1") as current:
+            user_id = get_ask_user(req, creds)
+    assert user_id == "user-1"
+    current.assert_called_once()
+
+
+def test_get_ask_user_without_bearer_is_guest():
+    from fastapi import Request
+
+    from app.auth import get_ask_user
+    from app.demo import DEMO_GUEST_USER_ID
+
+    req = MagicMock(spec=Request)
+    req.state = MagicMock()
+    req.headers = {}
+
+    with patch("app.auth.demo_anonymous_enabled", return_value=True):
+        user_id = get_ask_user(req, None)
+    assert user_id == DEMO_GUEST_USER_ID
+    assert req.state.db_tenant == "demo"
     req = MagicMock()
     req.state.db_tenant = "demo"
     demo = object()
@@ -243,22 +274,38 @@ def test_assert_demo_database_config_dual_tenant_allows_google():
     from app.demo_database import assert_demo_database_config
 
     demo_url = "postgresql://postgres.zhahqzozdngghmvbeaxx:secret@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
+    live_url = "postgresql://postgres.dunxzvbxekxqrfnmtzmj:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
     with patch("app.demo_database.dual_tenant_enabled", return_value=True):
         with patch("app.demo_database.DEMO_DATABASE_URL", demo_url):
-            with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
-                with patch("app.demo_database.GOOGLE_REFRESH_TOKEN", "token"):
-                    assert_demo_database_config()
+            with patch("app.demo_database.DATABASE_URL", live_url):
+                with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
+                    with patch("app.demo_database.GOOGLE_REFRESH_TOKEN", "token"):
+                        assert_demo_database_config()
 
 
 def test_assert_demo_database_config_dual_tenant_blocks_prod_demo_url():
     from app.demo_database import assert_demo_database_config
 
     bad = "postgresql://postgres.dunxzvbxekxqrfnmtzmj:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+    live_url = "postgresql://postgres.dunxzvbxekxqrfnmtzmj:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
     with patch("app.demo_database.dual_tenant_enabled", return_value=True):
         with patch("app.demo_database.DEMO_DATABASE_URL", bad):
-            with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
-                with pytest.raises(RuntimeError, match="DEMO_DATABASE_URL"):
-                    assert_demo_database_config()
+            with patch("app.demo_database.DATABASE_URL", live_url):
+                with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
+                    with pytest.raises(RuntimeError, match="DEMO_DATABASE_URL"):
+                        assert_demo_database_config()
+
+
+def test_assert_demo_database_config_dual_tenant_blocks_demo_as_live_url():
+    from app.demo_database import assert_demo_database_config
+
+    demo_url = "postgresql://postgres.zhahqzozdngghmvbeaxx:secret@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
+    with patch("app.demo_database.dual_tenant_enabled", return_value=True):
+        with patch("app.demo_database.DEMO_DATABASE_URL", demo_url):
+            with patch("app.demo_database.DATABASE_URL", demo_url):
+                with patch("app.demo_database.PROD_SUPABASE_PROJECT_REF", "dunxzvbxekxqrfnmtzmj"):
+                    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+                        assert_demo_database_config()
 
 
 def test_extract_supabase_project_ref_from_database_url():
