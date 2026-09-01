@@ -95,3 +95,31 @@ def test_ask_stream_includes_retrieval_debug_when_rewrite_ran():
     assert "retrieval_debug" in body
     assert "rewritten_query" in body
     assert "intact roof tiles" in body
+
+
+def test_ask_stream_sources_include_doc_id():
+    from app.models import RetrievedChunk
+
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        doc_id="drive-file-1",
+        score=0.9,
+        content_snippet="Wind damage.",
+        document_title="Roof Report.pdf",
+        source="google_drive",
+        source_url="https://drive.google.com/file/d/drive-file-1/view",
+        section_label="ROOF",
+    )
+    prepared = ("rag", "Wind damage noted.", [chunk], None, None)
+    client = _client()
+    try:
+        with patch.object(
+            main, "with_db_conn_retry", new=AsyncMock(return_value=prepared)
+        ):
+            body = _post_stream(client)
+    finally:
+        _clear_overrides()
+
+    assert "event: sources" in body
+    assert '"doc_id": "drive-file-1"' in body
+    assert "Roof Report.pdf" in body

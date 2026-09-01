@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -32,6 +33,7 @@ class GeocodeResult:
     latitude: float
     longitude: float
     resolved_address: str
+    county: str = ""
 
 
 @dataclass
@@ -144,7 +146,17 @@ async def geocode_address(address: str) -> GeocodeResult:
         latitude=float(lat),
         longitude=float(lon),
         resolved_address=(top.get("formatted_address") or addr).strip(),
+        county=_county_from_geocode(top),
     )
+
+
+def _county_from_geocode(result: dict) -> str:
+    for component in result.get("address_components") or []:
+        types = component.get("types") or []
+        if "administrative_area_level_2" in types:
+            name = (component.get("long_name") or "").strip()
+            return re.sub(r"\s+County$", "", name, flags=re.I).strip()
+    return ""
 
 
 async def fetch_static_map(

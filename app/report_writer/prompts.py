@@ -17,6 +17,16 @@ from app.report_writer.constants import (
 from app.report_writer.photo_summary import build_photo_context_block
 
 MAX_CONTEXT_CHARS = 8000
+_APPRAISER_META_KEYS = (
+    "property_appraiser_parcel_id",
+    "property_appraiser_owner",
+    "property_appraiser_site_address",
+    "property_appraiser_use_code",
+    "property_appraiser_acreage",
+    "property_appraiser_legal",
+    "property_appraiser_county",
+)
+_SKIP_META_PREFIXES = ("property_appraiser_", "property_map_", "historical_aerials")
 
 
 def build_retrieval_query(
@@ -67,6 +77,36 @@ def build_section_retrieval_query(
     if extra:
         parts.append(extra)
     return "\n".join(parts).strip()
+
+
+def _appraiser_block(meta: dict) -> str:
+    lines: list[str] = []
+    labels = {
+        "property_appraiser_county": "County",
+        "property_appraiser_parcel_id": "Parcel ID",
+        "property_appraiser_owner": "Owner",
+        "property_appraiser_site_address": "Site address",
+        "property_appraiser_use_code": "Use code",
+        "property_appraiser_acreage": "Acreage",
+        "property_appraiser_legal": "Legal description",
+    }
+    for key in _APPRAISER_META_KEYS:
+        val = (meta.get(key) or "").strip() if isinstance(meta.get(key), str) else ""
+        if val:
+            lines.append(f"- {labels.get(key, key)}: {val}")
+    if not lines:
+        return ""
+    return (
+        "County property appraiser records (use for property context; do not invent values):\n"
+        + "\n".join(lines)
+        + "\n\n"
+    )
+
+
+def _skip_meta_key(key: str) -> bool:
+    if key in (REPORT_TYPE_KEY, "report_template"):
+        return True
+    return any(key == p or key.startswith(p) for p in _SKIP_META_PREFIXES)
 
 
 def _context_block(chunks: list[dict]) -> str:
@@ -121,7 +161,7 @@ def build_section_prompt(
     meta_lines = "\n".join(
         f"- {k.replace('_', ' ').title()}: {v}"
         for k, v in meta.items()
-        if v and k not in (REPORT_TYPE_KEY, "report_template")
+        if v and not _skip_meta_key(k)
     )
     label_by_key = section_labels_for_type(type_id)
     prior_parts: list[str] = []
@@ -148,6 +188,7 @@ def build_section_prompt(
         f"Vocabulary contract: {vocabulary_contract()}\n\n"
         f"{outline_block}"
         f"Property metadata:\n{meta_lines or '(none)'}\n\n"
+        f"{_appraiser_block(meta)}"
         f"{image_block}"
         f"Field notes for this claim:\n{field_notes.strip() or '(none)'}\n\n"
         + (f"Prior sections already drafted (keep consistent; reuse their terminology verbatim):\n{prior}\n\n" if prior else "")

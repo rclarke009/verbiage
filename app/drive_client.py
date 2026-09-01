@@ -36,6 +36,7 @@ PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 EXPORT_MIME_PLAIN = "text/plain"
+EXPORT_MIME_PDF = "application/pdf"
 
 DRIVE_INGEST_MIMES: tuple[str, ...] = (
     GOOGLE_DOCS_MIME,
@@ -446,6 +447,54 @@ def download_drive_file_bytes(file_id: str, name: str | None = None) -> tuple[by
 
 async def download_drive_file_bytes_async(file_id: str, name: str | None = None) -> tuple[bytes, str]:
     return await asyncio.to_thread(download_drive_file_bytes, file_id, name)
+
+
+def _filename_with_pdf_ext(name: str) -> str:
+    title = (name or "").strip() or "document"
+    if title.lower().endswith(".pdf"):
+        return title
+    return f"{title}.pdf"
+
+
+def _export_drive_bytes(service, file_id: str, name: str, export_mime: str) -> bytes:
+    try:
+        content = service.files().export_media(fileId=file_id, mimeType=export_mime).execute()
+        if not isinstance(content, bytes):
+            content = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        if len(content) > MAX_DRIVE_DOWNLOAD_BYTES:
+            raise DriveClientError(
+                f"File {name} exceeds max download size "
+                f"({MAX_DRIVE_DOWNLOAD_BYTES // (1024 * 1024)} MB)"
+            )
+        return content
+    except DriveClientError:
+        raise
+    except Exception as e:
+        raise DriveClientError(f"Export failed for {name}: {e}") from e
+
+
+def download_drive_source_file(file_id: str, name: str | None = None) -> tuple[bytes, str, str]:
+    """Download a Drive file for the user: original bytes, or Google Doc exported as PDF.
+
+    Returns (bytes, mime_type, download_filename).
+    """
+    creds = _get_credentials()
+    service = _build_service(creds)
+    try:
+        meta = (
+            service.files()
+            .get(fileId=file_id, fields="id,name,mimeType", supportsAllDrives=True)
+            .execute()
+        )
+    except Exception as e:
+        raise DriveClientError(f"Could not get file {file_id}: {e}") from e
+    mime = meta.get("mimeType") or "application/octet-stream"
+    title = meta.get("name") or name or file_id
+    if mime == GOOGLE_DOCS_MIME:
+        data = _export_drive_bytes(service, file_id, title, EXPORT_MIME_PDF)
+        return data, PDF_MIME, _filename_with_pdf_ext(title)
+    data = _download_drive_bytes(service, file_id, title)
+    return data, mime, title
 
 
 def _list_files_for_query(service, q: str, fields: str) -> list[dict]:

@@ -44,6 +44,7 @@ from app.report_writer.models import (
     HistoricalAerialItemModel,
     HistoricalAerialsResponse,
     PropertyMapResponse,
+    PropertyAppraiserResponse,
     RegenerateSectionRequest,
     ReportTypeModel,
     ReportTypeSectionModel,
@@ -88,6 +89,11 @@ from app.report_writer.property_maps import (
     _MAP_ATTRIBUTION,
     fetch_property_maps,
     property_map_metadata_from_result,
+)
+from app.report_writer.property_appraiser import (
+    _ATTRIBUTION as _APPRAISER_ATTRIBUTION,
+    fetch_property_appraiser,
+    property_appraiser_metadata_from_result,
 )
 from app.report_writer.validation import normalize_report_type_metadata, validate_report_type_metadata
 from app.report_writer.sse import stream_graph_events
@@ -389,6 +395,117 @@ async def get_property_map_image(
         except HTTPException:
             pass
         raise HTTPException(status_code=404, detail="Property map image not found") from e
+
+    return Response(content=data, media_type="image/jpeg")
+
+
+def _property_appraiser_url(claim_id: str, path: str | None) -> str | None:
+    if claim_id and path:
+        return f"/report-writer/claims/{claim_id}/property-appraiser/image"
+    return None
+
+
+@router.get("/property-appraiser", response_model=PropertyAppraiserResponse)
+async def get_property_appraiser(
+    request: Request,
+    address: str = Query(..., min_length=3),
+    claim_id: str | None = Query(default=None),
+    force: bool = Query(default=False),
+    user_id: str = Depends(get_current_user),
+):
+    previous_meta: dict | None = None
+    if claim_id:
+
+        def _load(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return None
+            return claim.get("property_metadata") or {}
+
+        previous_meta = await _with_conn(request, _load)
+        if previous_meta is None:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+    result = await fetch_property_appraiser(
+        address.strip(),
+        user_id=user_id if claim_id else None,
+        claim_id=claim_id,
+        previous_meta=previous_meta,
+        force=force,
+    )
+
+    if claim_id:
+        meta_patch = property_appraiser_metadata_from_result(result)
+        merged = {**(previous_meta or {}), **meta_patch}
+
+        def _save(conn):
+            updated = update_claim(conn, claim_id, user_id, property_metadata=merged)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Claim not found")
+            return updated
+
+        await _with_conn(request, _save)
+
+    fields = result.fields
+    return PropertyAppraiserResponse(
+        resolved_address=result.resolved_address,
+        latitude=result.latitude,
+        longitude=result.longitude,
+        county=result.county,
+        fetch_key=result.fetch_key,
+        image_url=_property_appraiser_url(claim_id or "", result.path),
+        property_appraiser_path=result.path,
+        preview=result.preview,
+        source_url=result.source_url,
+        parcel_id=fields.parcel_id,
+        owner=fields.owner,
+        site_address=fields.site_address,
+        use_code=fields.use_code,
+        acreage=fields.acreage,
+        legal=fields.legal,
+        attribution=[result.attribution or _APPRAISER_ATTRIBUTION],
+    )
+
+
+@router.get("/claims/{claim_id}/property-appraiser/image")
+async def get_property_appraiser_image(
+    request: Request,
+    claim_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    def _load(conn):
+        claim = get_claim(conn, claim_id, user_id)
+        if not claim:
+            return None
+        meta = claim.get("property_metadata") or {}
+        path = (meta.get("property_appraiser_path") or "").strip()
+        if not path:
+            return None
+        return path
+
+    path = await _with_conn(request, _load)
+    if not path:
+        raise HTTPException(status_code=404, detail="Property appraiser image not found")
+
+    try:
+        data = read_claim_image_bytes(path)
+    except OSError as e:
+
+        def _clear_stale_path(conn):
+            claim = get_claim(conn, claim_id, user_id)
+            if not claim:
+                return
+            meta = dict(claim.get("property_metadata") or {})
+            if "property_appraiser_path" not in meta:
+                return
+            meta.pop("property_appraiser_path", None)
+            update_claim(conn, claim_id, user_id, property_metadata=meta)
+
+        try:
+            await _with_conn(request, _clear_stale_path)
+        except HTTPException:
+            pass
+        raise HTTPException(status_code=404, detail="Property appraiser image not found") from e
 
     return Response(content=data, media_type="image/jpeg")
 

@@ -31,6 +31,7 @@ from app.db import (
     create_ingest_batch,
     delete_document as remove_document_from_db,
     email_in_signup_allowlist,
+    get_document_file_fields,
     get_document_full_text,
     get_document_index_by_doc_ids,
     get_ingest_batch,
@@ -49,6 +50,7 @@ from app.models import (
     RetrievedChunk,
     ChunkingOptions,
     DocumentSummary,
+    DocumentZipRequest,
     DocumentsListResponse,
     SimilarTitleMatch,
     SimilarTitlesResponse,
@@ -82,6 +84,14 @@ from app.retrieval import (
 )
 from app.source_url import resolved_source_url
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMTimeoutError, LLMUpstreamTimeoutError
+from app.document_download import (
+    MAX_ZIP_DOCS,
+    content_disposition,
+    fetch_drive_source,
+    is_drive_backed_source,
+    pack_sources_zip,
+    safe_download_filename,
+)
 from app.drive_client import (
     list_docs_metadata_async,
     test_connection,
@@ -1242,6 +1252,7 @@ def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
         )
         payload.append(
             {
+                "doc_id": c.doc_id or "",
                 "filename": c.document_title or c.doc_id or "document",
                 "source_url": c.source_url or "",
                 "source_type": kind,
@@ -1616,6 +1627,97 @@ def get_documents(
         )
 
     return with_db_conn_retry_sync(request, do_list)
+
+
+@app.get("/documents/{doc_id}/file")
+async def download_document_file(
+    doc_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
+):
+    """Download the original Drive file for an indexed document."""
+
+    def lookup(conn):
+        fields = get_document_file_fields(conn, [doc_id])
+        return fields.get(doc_id)
+
+    meta = with_db_conn_retry_sync(request, lookup)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Document not found")
+    title, source, _source_url, source_filename = meta
+    if not is_drive_backed_source(source):
+        raise HTTPException(
+            status_code=404,
+            detail="Original file is not available for download",
+        )
+    try:
+        data, mime, filename = await asyncio.to_thread(
+            fetch_drive_source, doc_id, source_filename or title
+        )
+    except DriveClientError as e:
+        raise HTTPException(status_code=503, detail=str(e) or "Download failed") from e
+    download_name = safe_download_filename(filename or source_filename or title)
+    return Response(
+        content=data,
+        media_type=mime or "application/octet-stream",
+        headers={"Content-Disposition": content_disposition(download_name)},
+    )
+
+
+@app.post("/documents/download-zip")
+async def download_documents_zip(
+    body: DocumentZipRequest,
+    request: Request,
+    user_id: str = Depends(get_current_user),
+    _demo: None = Depends(block_in_demo),
+):
+    """Zip original Drive files for the given document ids."""
+    doc_ids = list(dict.fromkeys(d.strip() for d in body.doc_ids if d and d.strip()))
+    if not doc_ids:
+        raise HTTPException(status_code=400, detail="No document ids provided")
+    if len(doc_ids) > MAX_ZIP_DOCS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many documents (max {MAX_ZIP_DOCS})",
+        )
+
+    def lookup(conn):
+        return get_document_file_fields(conn, doc_ids)
+
+    meta_by_id = with_db_conn_retry_sync(request, lookup)
+    files: list[tuple[str, bytes]] = []
+    failures: list[str] = []
+    for did in doc_ids:
+        meta = meta_by_id.get(did) if meta_by_id else None
+        if not meta:
+            failures.append(f"{did}: Document not found")
+            continue
+        title, source, _source_url, source_filename = meta
+        label = source_filename or title or did
+        if not is_drive_backed_source(source):
+            failures.append(f"{label}: Original file is not available for download")
+            continue
+        try:
+            data, _mime, filename = await asyncio.to_thread(
+                fetch_drive_source, did, source_filename or title
+            )
+        except DriveClientError as e:
+            failures.append(f"{label}: {e}")
+            continue
+        files.append((filename or label, data))
+
+    if not files and failures:
+        raise HTTPException(status_code=503, detail="Could not download any selected files")
+    if not files:
+        raise HTTPException(status_code=404, detail="No files to download")
+
+    zip_bytes = pack_sources_zip(files, failures)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": content_disposition("sources.zip")},
+    )
 
 
 @app.post("/documents/{doc_id}/reindex", response_model=IngestResponse)

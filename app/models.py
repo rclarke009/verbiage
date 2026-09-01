@@ -312,6 +312,10 @@ class SimilarTitlesResponse(BaseModel):
     matches: list[SimilarTitleMatch] = Field(default_factory=list)
 
 
+class DocumentZipRequest(BaseModel):
+    doc_ids: list[str] = Field(..., min_length=1, description="Document ids to include in the zip")
+
+
 class SignupRequest(BaseModel):
     email: str = Field(..., min_length=3)
     password: str = Field(..., min_length=6)

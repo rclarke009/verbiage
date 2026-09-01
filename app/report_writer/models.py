@@ -210,6 +210,25 @@ class PropertyMapResponse(BaseModel):
     attribution: list[str] = Field(default_factory=lambda: ["Map data © Google"])
 
 
+class PropertyAppraiserResponse(BaseModel):
+    resolved_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    county: str = ""
+    fetch_key: str = ""
+    image_url: str | None = None
+    property_appraiser_path: str | None = None
+    preview: str = ""
+    source_url: str = ""
+    parcel_id: str = ""
+    owner: str = ""
+    site_address: str = ""
+    use_code: str = ""
+    acreage: str = ""
+    legal: str = ""
+    attribution: list[str] = Field(default_factory=lambda: ["County property appraiser public records"])
+
+
 class HistoricalAerialItemModel(BaseModel):
     year: int
     path: str | None = None

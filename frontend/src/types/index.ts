@@ -1,6 +1,7 @@
 /** Types aligned with Verbiage FastAPI (app/models.py) and SSE source payloads */
 
 export interface Source {
+  doc_id?: string
   filename: string
   source_url?: string
   source_type?: string
@@ -228,6 +229,18 @@ export interface ClaimPropertyMetadata {
   property_map_satellite_path?: string
   property_map_roadmap_path?: string
   property_map_fetched_at?: string
+  property_appraiser_fetch_key?: string
+  property_appraiser_resolved_address?: string
+  property_appraiser_county?: string
+  property_appraiser_fetched_at?: string
+  property_appraiser_path?: string
+  property_appraiser_source_url?: string
+  property_appraiser_parcel_id?: string
+  property_appraiser_owner?: string
+  property_appraiser_site_address?: string
+  property_appraiser_use_code?: string
+  property_appraiser_acreage?: string
+  property_appraiser_legal?: string
   historical_aerials_fetch_key?: string
   historical_aerials_fetched_at?: string
   historical_aerials_comment?: string
@@ -293,6 +306,25 @@ export interface PropertyMapResponse {
   property_map_roadmap_path?: string | null
   satellite_preview: string
   roadmap_preview: string
+  attribution: string[]
+}
+
+export interface PropertyAppraiserResponse {
+  resolved_address: string
+  latitude: number | null
+  longitude: number | null
+  county: string
+  fetch_key: string
+  image_url?: string | null
+  property_appraiser_path?: string | null
+  preview: string
+  source_url: string
+  parcel_id: string
+  owner: string
+  site_address: string
+  use_code: string
+  acreage: string
+  legal: string
   attribution: string[]
 }
 

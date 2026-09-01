@@ -27,6 +27,10 @@ import {
   clearHistoricalAerialsMetadata,
 } from '../../hooks/useHistoricalAerials'
 import { usePropertyMap, clearPropertyMapMetadata } from '../../hooks/usePropertyMap'
+import {
+  usePropertyAppraiser,
+  clearPropertyAppraiserMetadata,
+} from '../../hooks/usePropertyAppraiser'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
@@ -152,6 +156,26 @@ export function ReportWriterTab() {
       updateDraft(prev => ({
         ...prev,
         property_metadata: clearPropertyMapMetadata(prev.property_metadata ?? {}),
+      })),
+  })
+
+  const propertyAppraiser = usePropertyAppraiser({
+    claimId: activeId,
+    address: fullAddress,
+    metadata: draft.property_metadata ?? {},
+    onMetadataPatch: patch =>
+      updateDraft(prev => {
+        const nextMeta = { ...prev.property_metadata }
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === '') delete nextMeta[k]
+          else if (v !== undefined) nextMeta[k] = v
+        }
+        return { ...prev, property_metadata: nextMeta }
+      }),
+    onPropertyAppraiserClear: () =>
+      updateDraft(prev => ({
+        ...prev,
+        property_metadata: clearPropertyAppraiserMetadata(prev.property_metadata ?? {}),
       })),
   })
 
@@ -466,6 +490,11 @@ export function ReportWriterTab() {
                   propertyMapPreview={propertyMap.preview}
                   onRefreshPropertyMap={propertyMap.refresh}
                   onCachedImagesUnavailable={propertyMap.markCachedImagesUnavailable}
+                  propertyAppraiserLoading={propertyAppraiser.loading}
+                  propertyAppraiserError={propertyAppraiser.error}
+                  propertyAppraiserPreview={propertyAppraiser.preview}
+                  onRefreshPropertyAppraiser={propertyAppraiser.refresh}
+                  onPropertyAppraiserCachedUnavailable={propertyAppraiser.markCachedImagesUnavailable}
                   historicalAerialsLoading={historicalAerials.loading}
                   historicalAerialsError={historicalAerials.error}
                   historicalAerialsPreview={historicalAerials.preview}

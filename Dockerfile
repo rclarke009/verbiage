@@ -29,6 +29,11 @@ COPY requirements.txt .
 RUN grep -v '^sentence-transformers' requirements.txt > /tmp/requirements-base.txt && \
     pip install --no-cache-dir -r /tmp/requirements-base.txt
 
+# Chromium for county property-appraiser screenshots (bounded Playwright scrape).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
+
 # Optional reranker stack: heavy downloads often flake on free-tier builders (broken pipe).
 RUN if [ "$SKIP_RERANK" != "1" ]; then \
       for attempt in 1 2 3; do \

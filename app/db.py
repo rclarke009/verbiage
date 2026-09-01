@@ -992,6 +992,29 @@ def list_documents(
         cur.close()
 
 
+def get_document_file_fields(
+    conn: PgConnection, doc_ids: list[str]
+) -> dict[str, tuple[str | None, str | None, str | None, str | None]]:
+    """
+    For each doc_id, return (title, source, source_url, source_filename).
+    Omits doc_ids that are not in the table.
+    """
+    if not doc_ids:
+        return {}
+    unique: list[str] = list(dict.fromkeys(doc_ids))
+    placeholders = ",".join(["%s"] * len(unique))
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"SELECT doc_id, title, source, source_url, source_filename "
+            f"FROM documents WHERE doc_id IN ({placeholders})",
+            unique,
+        )
+        return {r[0]: (r[1], r[2], r[3], r[4]) for r in cur.fetchall()}
+    finally:
+        cur.close()
+
+
 def get_document_source_fields(
     conn: PgConnection, doc_ids: list[str]
 ) -> dict[str, tuple[str | None, str | None, str | None]]:

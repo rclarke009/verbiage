@@ -27,6 +27,7 @@ from app.report_writer.historical_aerials import (
     included_historical_aerials,
 )
 from app.report_writer.property_maps import read_property_map_bytes
+from app.report_writer.property_appraiser import read_property_appraiser_bytes
 from app.report_writer.storage import read_claim_image_bytes
 
 
@@ -92,6 +93,8 @@ class ReportDocument:
     property_satellite: ReportPhoto | None = None
     property_roadmap: ReportPhoto | None = None
     property_map_attribution: str = "Map data © Google"
+    property_appraiser: ReportPhoto | None = None
+    property_appraiser_attribution: str = ""
     historical_aerials: list[ReportPhoto] = field(default_factory=list)
     historical_aerials_comment: str = ""
     historical_aerials_attribution: str = _HISTORICAL_AERIALS_ATTRIBUTION
@@ -114,6 +117,28 @@ def _load_property_map_photo(meta: dict, variant: str, caption: str) -> ReportPh
     data, ext = compress_image_bytes(raw, max_dimension=1000, quality=80)
     cx, cy = image_emu_size(data, width_inches=3.2, max_height_inches=3.0)
     return ReportPhoto(data=data, caption=caption, file_extension=ext, cx=cx, cy=cy)
+
+
+def _load_property_appraiser_photo(meta: dict) -> ReportPhoto | None:
+    raw = read_property_appraiser_bytes(meta)
+    if not raw:
+        return None
+    data, ext = compress_image_bytes(raw, max_dimension=1400, quality=80)
+    cx, cy = image_emu_size(data, width_inches=6.5, max_height_inches=8.0)
+    county = (meta.get("property_appraiser_county") or "").strip()
+    caption = f"{county} County property appraiser parcel record." if county else "County property appraiser parcel record."
+    return ReportPhoto(data=data, caption=caption, file_extension=ext, cx=cx, cy=cy)
+
+
+def _property_appraiser_attribution(meta: dict) -> str:
+    county = (meta.get("property_appraiser_county") or "").strip()
+    url = (meta.get("property_appraiser_source_url") or "").strip()
+    parts = []
+    if county:
+        parts.append(f"{county} County Property Appraiser")
+    if url:
+        parts.append(url)
+    return " · ".join(parts) if parts else "County property appraiser public records"
 
 
 def _load_historical_aerial_photos(meta: dict) -> list[ReportPhoto]:
@@ -197,6 +222,7 @@ def build_report_document(
 
     property_satellite = _load_property_map_photo(meta, "satellite", "Satellite view of property location.")
     property_roadmap = _load_property_map_photo(meta, "roadmap", "Property location within Florida.")
+    property_appraiser = _load_property_appraiser_photo(meta)
     historical_aerials = _load_historical_aerial_photos(meta)
     historical_comment = (meta.get("historical_aerials_comment") or "").strip()
 
@@ -223,6 +249,8 @@ def build_report_document(
         photos=photos,
         property_satellite=property_satellite,
         property_roadmap=property_roadmap,
+        property_appraiser=property_appraiser,
+        property_appraiser_attribution=_property_appraiser_attribution(meta) if property_appraiser else "",
         historical_aerials=historical_aerials,
         historical_aerials_comment=historical_comment if historical_aerials else "",
     )

@@ -7,6 +7,7 @@ interface Props {
   onSave: (text: string, query: string, sources: Source[]) => void
   onRemove: (id: string) => void
   showRetrievalDebug?: boolean
+  canDownloadSources?: boolean
 }
 
 /** Returns the user's current selection if it falls inside `container`, else ''. */
@@ -19,7 +20,13 @@ function selectionWithin(container: HTMLElement | null): string {
   return sel.toString().trim()
 }
 
-export function ResultCard({ result, onSave, onRemove, showRetrievalDebug = true }: Props) {
+export function ResultCard({
+  result,
+  onSave,
+  onRemove,
+  showRetrievalDebug = true,
+  canDownloadSources = false,
+}: Props) {
   const answerRef = useRef<HTMLDivElement>(null)
   const [saved, setSaved] = useState(false)
 
@@ -116,7 +123,11 @@ export function ResultCard({ result, onSave, onRemove, showRetrievalDebug = true
       </div>
 
       {result.sources.length > 0 && (
-        <SourceList sources={result.sources} chunksUsed={result.chunksUsed} />
+        <SourceList
+          sources={result.sources}
+          chunksUsed={result.chunksUsed}
+          canDownload={canDownloadSources}
+        />
       )}
 
       {!result.streaming && result.answer && (

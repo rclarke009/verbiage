@@ -14,12 +14,14 @@ import { AddressFields } from './AddressFields'
 import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { HistoricalAerialsPreview } from './HistoricalAerialsPreview'
 import { PropertyMapPreview } from './PropertyMapPreview'
+import { PropertyAppraiserPreview } from './PropertyAppraiserPreview'
 import { StormPicker } from './StormPicker'
 import { WeatherPicker } from './WeatherPicker'
 import type {
   HistoricalAerialsResponse,
   WeatherOptionsResponse,
   PropertyMapResponse,
+  PropertyAppraiserResponse,
 } from '../../types'
 
 const inputStyle: React.CSSProperties = {
@@ -58,6 +60,11 @@ export function ClaimForm({
   propertyMapPreview,
   onRefreshPropertyMap,
   onCachedImagesUnavailable,
+  propertyAppraiserLoading,
+  propertyAppraiserError,
+  propertyAppraiserPreview,
+  onRefreshPropertyAppraiser,
+  onPropertyAppraiserCachedUnavailable,
   historicalAerialsLoading,
   historicalAerialsError,
   historicalAerialsPreview,
@@ -90,6 +97,11 @@ export function ClaimForm({
   propertyMapPreview?: PropertyMapResponse | null
   onRefreshPropertyMap?: () => void
   onCachedImagesUnavailable?: () => void
+  propertyAppraiserLoading?: boolean
+  propertyAppraiserError?: string | null
+  propertyAppraiserPreview?: PropertyAppraiserResponse | null
+  onRefreshPropertyAppraiser?: () => void
+  onPropertyAppraiserCachedUnavailable?: () => void
   historicalAerialsLoading?: boolean
   historicalAerialsError?: string | null
   historicalAerialsPreview?: HistoricalAerialsResponse | null
@@ -183,6 +195,13 @@ export function ClaimForm({
           resolvedAddress={metaString(meta, 'property_map_resolved_address') || undefined}
           onRefresh={onRefreshPropertyMap ?? (() => {})}
           onCachedImagesUnavailable={onCachedImagesUnavailable}
+        />
+        <PropertyAppraiserPreview
+          preview={propertyAppraiserPreview ?? null}
+          loading={!!propertyAppraiserLoading}
+          error={propertyAppraiserError ?? null}
+          onRefresh={onRefreshPropertyAppraiser ?? (() => {})}
+          onCachedImagesUnavailable={onPropertyAppraiserCachedUnavailable}
         />
       </div>
 

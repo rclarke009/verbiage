@@ -11,6 +11,7 @@ import type {
   AddressSuggestion,
   HistoricalAerialsResponse,
   PropertyMapResponse,
+  PropertyAppraiserResponse,
 } from '../types'
 
 const BASE = '/report-writer'
@@ -115,6 +116,19 @@ export async function fetchPropertyMap(address: string, claimId?: string): Promi
   const res = await apiFetch(`${BASE}/property-map?${q}`)
   if (!res.ok) throw new Error(await readErrorDetail(res))
   return res.json() as Promise<PropertyMapResponse>
+}
+
+export async function fetchPropertyAppraiser(
+  address: string,
+  claimId?: string,
+  force = false,
+): Promise<PropertyAppraiserResponse> {
+  const q = new URLSearchParams({ address })
+  if (claimId) q.set('claim_id', claimId)
+  if (force) q.set('force', 'true')
+  const res = await apiFetch(`${BASE}/property-appraiser?${q}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<PropertyAppraiserResponse>
 }
 
 export async function fetchHistoricalAerials(

@@ -97,6 +97,8 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     if doc.include_engineering_letter:
         page_count += 1
     page_count += 1  # purpose/weather
+    if doc.property_appraiser:
+        page_count += 1
     if doc.property_satellite or doc.property_roadmap:
         page_count += 1
     if doc.historical_aerials:
@@ -176,6 +178,7 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     )
     story.append(Paragraph(doc.weather_continued_text, styles["body"]))
     story.append(Paragraph(doc.weather_attribution_text, styles["body"]))
+    story.extend(_property_appraiser_flow(doc, styles))
     story.extend(_property_location_flow(doc, styles))
     story.extend(_historical_aerials_flow(doc, styles))
     story.append(PageBreak())
@@ -245,6 +248,23 @@ def _engineering_letter_flow(doc: ReportDocument, styles: dict[str, ParagraphSty
         "Printed copies of this document are not considered signed and sealed."
     )
     flow.append(Paragraph(disclaimer, styles["body"]))
+    return flow
+
+
+def _property_appraiser_flow(doc: ReportDocument, styles: dict[str, ParagraphStyle]) -> list:
+    if not doc.property_appraiser:
+        return []
+    photo = doc.property_appraiser
+    flow: list = [PageBreak(), Paragraph("PROPERTY APPRAISER", styles["section"]), Spacer(1, 0.1 * inch)]
+    width = 6.5 * inch
+    height = 8.0 * inch
+    if photo.cx and photo.cy:
+        aspect = photo.cy / photo.cx
+        height = min(width * aspect, 8.0 * inch)
+    flow.append(Image(io.BytesIO(photo.data), width=width, height=height))
+    flow.append(Paragraph(photo.caption, styles["body"]))
+    if doc.property_appraiser_attribution:
+        flow.append(Paragraph(doc.property_appraiser_attribution, styles["body"]))
     return flow
 
 

@@ -187,6 +187,7 @@ class DocxReportRenderer:
         body += xml_paragraph("WEATHER HISTORY CONTINUED", bold=True, color="5BA3D6", spacing_after=0)
         body += xml_paragraph(doc.weather_continued_text, spacing_after=240)
         body += xml_paragraph(doc.weather_attribution_text, spacing_after=240)
+        body += self._property_appraiser_xml(doc)
         body += self._property_location_xml(doc)
         body += self._historical_aerials_xml(doc)
         body += page_break()
@@ -215,6 +216,23 @@ class DocxReportRenderer:
                     body += page_break()
 
         return body
+
+    def _property_appraiser_xml(self, doc: ReportDocument) -> str:
+        if not doc.property_appraiser:
+            return ""
+        photo = doc.property_appraiser
+        xml = page_break()
+        xml += xml_large_bold("PROPERTY APPRAISER")
+        xml += xml_spacer(after=120)
+        ref = self._add_image(photo.data, "appraiser", cx=photo.cx, cy=photo.cy, compress=False)
+        xml += xml_photo_table(
+            [(ref.rel_id, ref.doc_pr_id, photo.caption, ref.cx, ref.cy)],
+            columns=1,
+        )
+        xml += xml_spacer(before=120, after=60)
+        if doc.property_appraiser_attribution:
+            xml += xml_paragraph(doc.property_appraiser_attribution, spacing_after=0)
+        return xml
 
     def _property_location_xml(self, doc: ReportDocument) -> str:
         if not doc.property_satellite and not doc.property_roadmap:

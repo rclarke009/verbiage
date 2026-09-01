@@ -90,6 +90,7 @@ export function ChatTab() {
                   onSave={savePassage}
                   onRemove={removeResult}
                   showRetrievalDebug={showRetrievalDebug}
+                  canDownloadSources={!!session}
                 />
               ))}
             </div>
