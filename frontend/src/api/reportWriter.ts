@@ -242,9 +242,20 @@ export function regenerateSectionStreamUrl(claimId: string, sectionKey: string):
 /** Export endpoints can be slow (Drive photo fetch + render); retry transient gateway blips. */
 const EXPORT_FETCH_OPTS = { retries: 4, baseDelayMs: 1500 } as const
 
-export async function exportClaimDocx(claimId: string, title: string): Promise<void> {
+export async function importJobPackage(file: File): Promise<Claim> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await apiFetch(`${BASE}/claims/import-job-package`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json() as Promise<Claim>
+}
+
+export async function exportClaimDocx(claimId: string, title: string, mode: 'pages' | 'full' = 'pages'): Promise<void> {
   const res = await apiFetchRetry(
-    `${BASE}/claims/${claimId}/export/docx`,
+    `${BASE}/claims/${claimId}/export/docx?mode=${mode}`,
     { method: 'GET' },
     EXPORT_FETCH_OPTS,
   )
@@ -258,10 +269,24 @@ export async function exportClaimDocx(claimId: string, title: string): Promise<v
   URL.revokeObjectURL(url)
 }
 
-export async function fetchClaimPdfBlob(claimId: string, signal?: AbortSignal): Promise<Blob> {
+export async function downloadClaimPdf(claimId: string, title: string, mode: 'full' | 'chapter' = 'chapter'): Promise<void> {
+  const blob = await fetchClaimPdfBlob(claimId, undefined, mode)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.pdf`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function fetchClaimPdfBlob(
+  claimId: string,
+  signal?: AbortSignal,
+  mode: 'full' | 'chapter' = 'full',
+): Promise<Blob> {
   const init = await getAuthFetchInit({ method: 'GET', signal })
   const res = await apiFetchRetry(
-    `${BASE}/claims/${claimId}/export/pdf`,
+    `${BASE}/claims/${claimId}/export/pdf?mode=${mode}`,
     init,
     EXPORT_FETCH_OPTS,
   )

@@ -196,6 +196,56 @@ def test_pdf_footer_is_page_number_only(sample_claim: dict, sample_sections: dic
     assert not re.search(r"Page\s+\d+\s+of\s+\d+", text)
 
 
+def test_chapter_pdf_skips_cover_label(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
+    full = draft_to_pdf_bytes(sample_sections, claim=sample_claim, images=[], skip_cover=False)
+    chapter = draft_to_pdf_bytes(sample_sections, claim=sample_claim, images=[], skip_cover=True)
+    assert len(chapter) < len(full)
+
+
+def test_docx_pages_mode_has_page_field_not_numpages(
+    sample_claim: dict, sample_sections: dict[str, dict]
+) -> None:
+    data = draft_to_docx_bytes(sample_sections, claim=sample_claim, images=[], pages_tuned=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = zf.namelist()
+        assert "word/footer1.xml" in names
+        footer = zf.read("word/footer1.xml").decode("utf-8")
+        assert "PAGE" in footer
+        assert "NUMPAGES" not in footer
+        doc_xml = zf.read("word/document.xml").decode("utf-8")
+        assert "footerReference" in doc_xml
+
+
+def test_docx_includes_specimen_table(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
+    claim = {
+        **sample_claim,
+        "property_metadata": {
+            **sample_claim["property_metadata"],
+            "document_layout": {
+                "specimens": [
+                    {
+                        "id": "s1",
+                        "label": "Specimen 1",
+                        "testing_type_id": "windows",
+                        "result": "Fail",
+                        "notes": "Leak at sill",
+                        "include": True,
+                    }
+                ],
+                "photos": [],
+                "hidden_sections": [],
+                "section_order": [],
+            },
+        },
+    }
+    data = draft_to_docx_bytes(sample_sections, claim=claim, images=[])
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        doc_xml = zf.read("word/document.xml").decode("utf-8")
+    assert "SPECIMEN TESTING" in doc_xml
+    assert "Specimen 1" in doc_xml
+    assert "Leak at sill" in doc_xml
+
+
 def test_docx_without_engineering_letter(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
     claim = {
         **sample_claim,

@@ -77,12 +77,14 @@ def _styles() -> dict[str, ParagraphStyle]:
     }
 
 
-def _footer(canvas, doc_template, *, address: str, page_num: int) -> None:
+def _footer(canvas, doc_template, *, address: str, page_num: int, include_address: bool, include_page_numbers: bool) -> None:
     canvas.saveState()
     canvas.setFont("Helvetica", 9)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.7 * inch, 0.5 * inch, address.upper()[:80])
-    canvas.drawRightString(PAGE_W - 0.7 * inch, 0.5 * inch, f"Page {page_num}")
+    if include_address:
+        canvas.drawString(0.7 * inch, 0.5 * inch, address.upper()[:80])
+    if include_page_numbers:
+        canvas.drawRightString(PAGE_W - 0.7 * inch, 0.5 * inch, f"Page {page_num}")
     canvas.restoreState()
 
 
@@ -93,8 +95,16 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
 
     def on_page(canvas, doc_template) -> None:
         page_num = canvas.getPageNumber()
-        if page_num > 1:
-            _footer(canvas, doc_template, address=doc.address_line1 or doc.full_address, page_num=page_num)
+        logical = doc.starting_page_number + page_num - 1
+        if doc.skip_cover or page_num > 1:
+            _footer(
+                canvas,
+                doc_template,
+                address=doc.address_line1 or doc.full_address,
+                page_num=logical,
+                include_address=doc.include_address_footer,
+                include_page_numbers=doc.include_page_numbers,
+            )
 
     pdf = SimpleDocTemplate(
         buf,
@@ -126,8 +136,8 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
                 canvas.drawString(0.83 * inch, y, line)
                 y -= 0.25 * inch
 
-    # Build content starting page 2
-    story.append(PageBreak())
+    if not doc.skip_cover:
+        story.append(PageBreak())
     story.append(Spacer(1, 0.1 * inch))
     story.append(Paragraph("OVERVIEW", styles["title"]))
     if doc.address_line1:
@@ -152,16 +162,17 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     story.append(Paragraph(doc.purpose_text, styles["body"]))
     story.append(Paragraph("<b>OBSERVATIONS:</b>", ParagraphStyle("o", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold")))
     story.append(Paragraph(doc.observations_text, styles["body"]))
-    story.append(Paragraph("<b>WEATHER HISTORY:</b>", ParagraphStyle("w", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold")))
-    story.append(Paragraph(doc.weather_text, styles["body"]))
-    story.append(
-        Paragraph(
-            "<b>WEATHER HISTORY CONTINUED</b>",
-            ParagraphStyle("wc", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold"),
+    if doc.include_weather:
+        story.append(Paragraph("<b>WEATHER HISTORY:</b>", ParagraphStyle("w", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold")))
+        story.append(Paragraph(doc.weather_text, styles["body"]))
+        story.append(
+            Paragraph(
+                "<b>WEATHER HISTORY CONTINUED</b>",
+                ParagraphStyle("wc", parent=styles["body"], textColor=ACCENT, fontName="Helvetica-Bold"),
+            )
         )
-    )
-    story.append(Paragraph(doc.weather_continued_text, styles["body"]))
-    story.append(Paragraph(doc.weather_attribution_text, styles["body"]))
+        story.append(Paragraph(doc.weather_continued_text, styles["body"]))
+        story.append(Paragraph(doc.weather_attribution_text, styles["body"]))
     story.extend(_property_appraiser_flow(doc, styles))
     story.extend(_property_location_flow(doc, styles))
     story.extend(_historical_aerials_flow(doc, styles))
@@ -173,22 +184,52 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
             story.append(Paragraph(para.replace("\n", "<br/>"), styles["body"]))
         story.append(Spacer(1, 0.1 * inch))
 
+    if doc.specimens:
+        story.append(PageBreak())
+        story.append(Paragraph("SPECIMEN TESTING", styles["section"]))
+        story.append(Spacer(1, 0.1 * inch))
+        table_data = [["Specimen", "Type", "Result", "Notes"]]
+        for spec in doc.specimens:
+            table_data.append([spec.label, spec.testing_type_id, spec.result, spec.notes[:80]])
+        table = Table(table_data, colWidths=[1.6 * inch, 1.3 * inch, 1.2 * inch, 2.6 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(table)
+
     if doc.photos:
         story.append(PageBreak())
         story.append(Paragraph("INSPECTION PHOTOGRAPHS", styles["section"]))
         story.append(Spacer(1, 0.1 * inch))
-        for i in range(0, len(doc.photos), 4):
-            group = doc.photos[i : i + 4]
+        per_page = 2 if doc.pages_tuned else 4
+        img_w = 3.2 * inch if doc.pages_tuned else 3.2 * inch
+        img_h = 2.0 * inch if doc.pages_tuned else 2.4 * inch
+        for i in range(0, len(doc.photos), per_page):
+            group = doc.photos[i : i + per_page]
             for photo in group:
-                img = Image(io.BytesIO(photo.data), width=3.2 * inch, height=2.4 * inch)
+                img = Image(io.BytesIO(photo.data), width=img_w, height=img_h)
                 story.append(img)
                 story.append(Paragraph(photo.caption, styles["body"]))
                 story.append(Spacer(1, 0.08 * inch))
-            if i + 4 < len(doc.photos):
+            if i + per_page < len(doc.photos):
                 story.append(PageBreak())
 
     def first_page(canvas, doc_template) -> None:
-        draw_cover(canvas, doc_template)
+        if doc.skip_cover:
+            on_page(canvas, doc_template)
+        else:
+            draw_cover(canvas, doc_template)
 
     def later_pages(canvas, doc_template) -> None:
         on_page(canvas, doc_template)

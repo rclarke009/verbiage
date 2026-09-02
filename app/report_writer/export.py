@@ -21,11 +21,15 @@ def draft_to_docx_bytes(
     *,
     claim: dict | None = None,
     images: list[dict] | None = None,
+    pages_tuned: bool = False,
+    skip_cover: bool = False,
 ) -> bytes:
     claim_data = claim or {"title": title, "claim_id": "", "property_metadata": {}}
     if title and not claim_data.get("title"):
         claim_data = {**claim_data, "title": title}
-    doc = build_report_document(claim_data, sections, images)
+    doc = build_report_document(
+        claim_data, sections, images, skip_cover=skip_cover, pages_tuned=pages_tuned
+    )
     return render_report_docx(doc)
 
 
@@ -35,9 +39,10 @@ def draft_to_pdf_bytes(
     *,
     claim: dict | None = None,
     images: list[dict] | None = None,
+    skip_cover: bool = False,
 ) -> bytes:
     claim_data = claim or {"title": title, "claim_id": "", "property_metadata": {}}
     if title and not claim_data.get("title"):
         claim_data = {**claim_data, "title": title}
-    doc = build_report_document(claim_data, sections, images)
+    doc = build_report_document(claim_data, sections, images, skip_cover=skip_cover)
     return render_report_pdf(doc)

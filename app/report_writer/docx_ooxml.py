@@ -297,8 +297,93 @@ def _append_sect_pr(body: str) -> str:
     return body[:last_open] + new_para + body[last_close + len("</w:p>") :]
 
 
-def wrap_document_xml(body: str) -> str:
-    body_with_sect = _append_sect_pr(body)
+def xml_specimen_table(rows: list[tuple[str, str, str, str]]) -> str:
+    header = ("Specimen", "Type", "Result", "Notes")
+    widths = (2200, 1800, 1600, 3600)
+    xml = (
+        '<w:tbl><w:tblPr><w:tblW w:w="9200" w:type="dxa"/>'
+        '<w:tblBorders>'
+        '<w:top w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        '<w:left w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        '<w:right w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>'
+        "</w:tblBorders></w:tblPr><w:tblGrid>"
+    )
+    for w in widths:
+        xml += f'<w:gridCol w:w="{w}"/>'
+    xml += "</w:tblGrid><w:tr>"
+    for i, label in enumerate(header):
+        xml += (
+            f'<w:tc><w:tcPr><w:tcW w:w="{widths[i]}" w:type="dxa"/></w:tcPr>'
+            f"{xml_paragraph(label, bold=True, font_size=10, spacing_after=40)}</w:tc>"
+        )
+    xml += "</w:tr>"
+    for row in rows:
+        xml += "<w:tr>"
+        for i, value in enumerate(row):
+            xml += (
+                f'<w:tc><w:tcPr><w:tcW w:w="{widths[i]}" w:type="dxa"/></w:tcPr>'
+                f"{xml_paragraph(value, font_size=10, spacing_after=40)}</w:tc>"
+            )
+        xml += "</w:tr>"
+    xml += "</w:tbl>"
+    return xml
+
+
+def footer_xml(*, address: str, include_address: bool, include_page_numbers: bool) -> str:
+    left = address.upper()[:80] if include_address and address else ""
+    page_runs = ""
+    if include_page_numbers:
+        page_runs = (
+            "<w:r><w:t xml:space=\"preserve\">Page </w:t></w:r>"
+            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+            "<w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r>"
+            "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+        )
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:tbl>
+    <w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>
+    <w:tr>
+      <w:tc><w:p><w:r><w:t xml:space="preserve">{xml_escape(left)}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:p><w:pPr><w:jc w:val="right"/></w:pPr>{page_runs}</w:p></w:tc>
+    </w:tr>
+  </w:tbl>
+</w:ftr>"""
+
+
+def wrap_document_xml(body: str, *, footer_rel: str | None = None) -> str:
+    extra = ""
+    if footer_rel:
+        extra = f'<w:footerReference w:type="default" r:id="{footer_rel}"/>'
+    sect = _SECT_PR + extra
+    orig = _append_sect_pr
+    def _append_with_footer(body_xml: str) -> str:
+        nonlocal_sect = f"<w:sectPr>{sect}</w:sectPr>"
+        if not body_xml.strip():
+            return f"<w:p><w:pPr>{nonlocal_sect}</w:pPr></w:p>"
+        last_close = body_xml.rfind("</w:p>")
+        if last_close == -1:
+            return body_xml + f"<w:p><w:pPr>{nonlocal_sect}</w:pPr></w:p>"
+        last_open = body_xml.rfind("<w:p", 0, last_close)
+        if last_open == -1:
+            return body_xml + f"<w:p><w:pPr>{nonlocal_sect}</w:pPr></w:p>"
+        para = body_xml[last_open : last_close + len("</w:p>")]
+        if "<w:sectPr>" in para:
+            return body_xml
+        if "<w:pPr>" in para:
+            ppr_close = para.rfind("</w:pPr>")
+            if ppr_close != -1:
+                new_para = para[:ppr_close] + nonlocal_sect + para[ppr_close:]
+            else:
+                new_para = para[: -len("</w:p>")] + f"<w:pPr>{nonlocal_sect}</w:pPr></w:p>"
+        else:
+            new_para = para[: -len("</w:p>")] + f"<w:pPr>{nonlocal_sect}</w:pPr></w:p>"
+        return body_xml[:last_open] + new_para + body_xml[last_close + len("</w:p>") :]
+
+    body_with_sect = _append_with_footer(body) if footer_rel else orig(body)
     return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"

@@ -1,18 +1,21 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createClaim,
   deleteClaim,
+  downloadClaimPdf,
   exportClaimDocx,
   getClaim,
+  importJobPackage,
+  listClaimImages,
   listClaims,
   listReportTypes,
   listRuns,
   updateClaim,
   updateSection,
 } from '../../api/reportWriter'
-import type { Claim } from '../../types'
+import type { Claim, DocumentLayout } from '../../types'
 import { composeFullAddress } from '../../lib/address'
 import {
   canGenerateFromDraft,
@@ -34,7 +37,7 @@ import {
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
-import { DraftEditor } from './DraftEditor'
+import { DocumentCanvas } from './DocumentCanvas'
 import { GeneratePrerequisitesBanner } from './GeneratePrerequisitesBanner'
 import { GenerationProgress } from './GenerationProgress'
 import { PhotoAnalysisBanner } from './PhotoAnalysisBanner'
@@ -64,6 +67,7 @@ export function ReportWriterTab() {
     invalidate: invalidatePdfPreview,
     cancel: cancelPdfPreview,
     closePreview: closePdfPreview,
+    refreshLive: refreshPdfLive,
   } = useClaimPdfPreview()
   const {
     state: genState,
@@ -109,6 +113,11 @@ export function ReportWriterTab() {
   const hasGeneratedContent = Object.values(draft.sections ?? {}).some(s => (s.content ?? '').trim())
   const generateBlockers = getGenerateBlockers(draft)
   const canGenerate = canGenerateFromDraft(draft)
+
+  useEffect(() => {
+    if (!activeId) return
+    void refreshPdfLive(activeId)
+  }, [activeId, refreshPdfLive])
 
   const updateDraft = useCallback(
     (updater: (prev: Claim) => Claim) => {
@@ -223,7 +232,26 @@ export function ReportWriterTab() {
     },
   })
 
+  const importMutation = useMutation({
+    mutationFn: (file: File) => importJobPackage(file),
+    onSuccess: data => {
+      queryClient.invalidateQueries({ queryKey: ['report-writer-claims'] })
+      setLocalDraft(null)
+      setActiveId(data.claim_id)
+      queryClient.invalidateQueries({ queryKey: ['report-writer-images', data.claim_id] })
+    },
+  })
+
+  const imagesQuery = useQuery({
+    queryKey: ['report-writer-images', activeId],
+    queryFn: () => listClaimImages(activeId!),
+    enabled: !!activeId,
+  })
+
+  const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pdfLiveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sectionSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const flushPendingSectionSaves = useCallback(async () => {
     if (!activeId) return
@@ -248,7 +276,6 @@ export function ReportWriterTab() {
 
   const handleSectionChange = useCallback(
     (key: string, content: string) => {
-      invalidatePdfPreview()
       updateDraft(prev => ({
         ...prev,
         sections: {
@@ -260,10 +287,43 @@ export function ReportWriterTab() {
       const timers = sectionSaveTimers.current
       if (timers[key]) clearTimeout(timers[key])
       timers[key] = setTimeout(() => {
-        updateSection(activeId, key, content).catch(() => {})
+        updateSection(activeId, key, content)
+          .then(() => {
+            if (pdfLiveTimer.current) clearTimeout(pdfLiveTimer.current)
+            pdfLiveTimer.current = setTimeout(() => {
+              void refreshPdfLive(activeId)
+            }, 600)
+          })
+          .catch(() => {})
       }, 800)
     },
-    [activeId, invalidatePdfPreview, updateDraft],
+    [activeId, refreshPdfLive, updateDraft],
+  )
+
+  const handleLayoutChange = useCallback(
+    (layout: DocumentLayout) => {
+      updateDraft(prev => ({
+        ...prev,
+        property_metadata: { ...prev.property_metadata, document_layout: layout },
+      }))
+      if (!activeId) return
+      if (layoutSaveTimer.current) clearTimeout(layoutSaveTimer.current)
+      layoutSaveTimer.current = setTimeout(() => {
+        const meta = {
+          ...(localDraft ?? claimQuery.data)?.property_metadata,
+          document_layout: layout,
+        }
+        updateClaim(activeId, { property_metadata: meta })
+          .then(() => {
+            if (pdfLiveTimer.current) clearTimeout(pdfLiveTimer.current)
+            pdfLiveTimer.current = setTimeout(() => {
+              void refreshPdfLive(activeId)
+            }, 400)
+          })
+          .catch(() => {})
+      }, 500)
+    },
+    [activeId, claimQuery.data, localDraft, refreshPdfLive, updateDraft],
   )
 
   const handleGenerate = async () => {
@@ -349,10 +409,22 @@ export function ReportWriterTab() {
           resetStream()
         }}
         onCreate={() => createMutation.mutate()}
+        onImportPackage={() => importInputRef.current?.click()}
+      />
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) importMutation.mutate(file)
+        }}
       />
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        {(claimsError || reportTypesQuery.error || createMutation.error) && (
+        {(claimsError || reportTypesQuery.error || createMutation.error || importMutation.error) && (
           <p
             role="alert"
             style={{ color: 'var(--app-danger)', fontSize: 13, margin: '0 0 12px' }}
@@ -360,6 +432,7 @@ export function ReportWriterTab() {
             {(claimsError instanceof Error && claimsError.message) ||
               (reportTypesQuery.error instanceof Error && reportTypesQuery.error.message) ||
               (createMutation.error instanceof Error && createMutation.error.message) ||
+              (importMutation.error instanceof Error && importMutation.error.message) ||
               'Could not load Report Writer.'}
           </p>
         )}
@@ -417,10 +490,17 @@ export function ReportWriterTab() {
               ) : null}
               <button
                 type="button"
-                onClick={() => exportClaimDocx(activeId, draft.title)}
+                onClick={() => downloadClaimPdf(activeId, draft.title, 'chapter')}
                 style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
               >
-                Export DOCX
+                Insert chapter PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => exportClaimDocx(activeId, draft.title, 'pages')}
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+              >
+                Edit in Pages/Word
               </button>
               <button
                 type="button"
@@ -464,7 +544,7 @@ export function ReportWriterTab() {
               cancelling={cancelling}
             />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 0.9fr) 240px', gap: 16 }}>
               <div style={{ minWidth: 0 }}>
                 <ClaimForm
                   claim={draft}
@@ -508,15 +588,31 @@ export function ReportWriterTab() {
                   generateTitle={generateTitle}
                 />
                 <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
-                <DraftEditor
+                <DocumentCanvas
                   claim={draft}
                   sections={activeReportType?.sections ?? []}
+                  images={imagesQuery.data ?? []}
                   streamSections={genState.status !== 'idle' ? genState.sections : undefined}
                   onSectionChange={handleSectionChange}
                   onRegenerateSection={handleRegenerateSection}
                   regenerateDisabled={generating}
+                  onLayoutChange={handleLayoutChange}
                 />
               </div>
+              <aside style={{ minWidth: 0 }}>
+                <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Live PDF</h3>
+                {pdfIframeUrl ? (
+                  <iframe
+                    title="Report preview"
+                    src={pdfIframeUrl}
+                    style={{ width: '100%', height: 640, border: '1px solid var(--app-border)', borderRadius: 6, background: '#fff' }}
+                  />
+                ) : (
+                  <p style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
+                    {pdfLoading ? 'Rendering preview…' : 'Save or edit a section to refresh the branded PDF.'}
+                  </p>
+                )}
+              </aside>
               <aside>
                 <SourcesPanel sources={sources} />
                 <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />

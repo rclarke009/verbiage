@@ -191,6 +191,38 @@ export interface HistoricalAerialItem {
   image_url?: string | null
 }
 
+export interface DocumentPhotoLayout {
+  image_id: string
+  include: boolean
+  caption: string
+  sort_order: number
+  specimen_id?: string | null
+  photo_type?: string
+}
+
+export interface DocumentSpecimen {
+  id: string
+  label: string
+  testing_type_id: string
+  result: string
+  notes: string
+  include: boolean
+  photo_ids?: string[]
+  inaccessible?: boolean
+}
+
+export interface DocumentLayout {
+  include_page_numbers?: boolean
+  include_address_footer?: boolean
+  include_engineering_letter?: boolean
+  include_weather?: boolean
+  starting_page_number?: number
+  section_order?: string[]
+  hidden_sections?: string[]
+  specimens?: DocumentSpecimen[]
+  photos?: DocumentPhotoLayout[]
+}
+
 export interface ClaimPropertyMetadata {
   report_type?: string
   address?: string
@@ -252,7 +284,8 @@ export interface ClaimPropertyMetadata {
   drive_photo_folder_id?: string
   drive_photo_folder_label?: string
   drive_photo_folders?: DrivePhotoFolderRef[]
-  [key: string]: string | DrivePhotoFolderRef[] | HistoricalAerialItem[] | undefined
+  document_layout?: DocumentLayout
+  [key: string]: string | DrivePhotoFolderRef[] | HistoricalAerialItem[] | DocumentLayout | undefined
 }
 
 /** Alias used by claim forms and Drive folder helpers. */

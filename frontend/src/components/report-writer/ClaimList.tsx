@@ -8,6 +8,7 @@ export function ClaimList({
   reportTypes,
   onSelect,
   onCreate,
+  onImportPackage,
 }: {
   claims: Claim[]
   loading?: boolean
@@ -15,6 +16,7 @@ export function ClaimList({
   reportTypes: ReportTypeDefinition[]
   onSelect: (id: string) => void
   onCreate: () => void
+  onImportPackage: () => void
 }) {
   const typeLabel = (id: string | undefined) =>
     reportTypes.find(t => t.id === id)?.label ?? (id ? id.replace(/_/g, ' ') : null)
@@ -25,7 +27,7 @@ export function ClaimList({
         onClick={onCreate}
         style={{
           width: '100%',
-          marginBottom: 12,
+          marginBottom: 8,
           padding: '8px 12px',
           background: 'var(--app-primary)',
           color: 'var(--app-on-primary)',
@@ -36,6 +38,23 @@ export function ClaimList({
         }}
       >
         New claim
+      </button>
+      <button
+        type="button"
+        onClick={onImportPackage}
+        style={{
+          width: '100%',
+          marginBottom: 12,
+          padding: '8px 12px',
+          background: 'transparent',
+          color: 'var(--app-primary)',
+          border: '1px solid var(--app-primary)',
+          borderRadius: 6,
+          cursor: 'pointer',
+          fontSize: 13,
+        }}
+      >
+        Import WindowTest package
       </button>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {loading ? (

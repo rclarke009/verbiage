@@ -147,6 +147,26 @@ export function useClaimPdfPreview() {
     setModalOpen(false)
   }, [])
 
+  const refreshLive = useCallback(
+    async (claimId: string) => {
+      abortRef.current?.abort()
+      abortRef.current = null
+      inflightRef.current = null
+      if (cachedUrlRef.current) {
+        URL.revokeObjectURL(cachedUrlRef.current)
+        cachedUrlRef.current = null
+      }
+      cachedClaimIdRef.current = null
+      try {
+        const url = await startFetch(claimId, false)
+        if (url) setIframeUrl(url)
+      } catch (err) {
+        console.log('MYDEBUG →', err)
+      }
+    },
+    [startFetch],
+  )
+
   return {
     modalOpen,
     iframeUrl,
@@ -156,5 +176,6 @@ export function useClaimPdfPreview() {
     invalidate,
     cancel,
     closePreview,
+    refreshLive,
   }
 }

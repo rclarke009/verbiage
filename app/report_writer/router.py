@@ -23,6 +23,7 @@ from app.geocode.nominatim import search_addresses
 from app.ingest_jobs import IngestBatchStatusResponse
 from app.report_writer.deps import ReportWriterDeps, reset_report_writer_deps, set_report_writer_deps
 from app.report_writer.export import draft_to_docx_bytes, draft_to_pdf_bytes
+from app.report_writer.job_package_import import JobPackageError, import_full_job_package
 from app.report_writer.constants import REPORT_TYPES, get_report_type, report_type_def, section_keys_for_type
 from app.report_writer.models import (
     ClaimCreateRequest,
@@ -819,6 +820,36 @@ async def post_claim(
     return _claim_response(claim)
 
 
+@router.post("/claims/import-job-package", response_model=ClaimResponse)
+async def import_job_package(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    def _import(conn):
+        return import_full_job_package(
+            conn,
+            user_id=user_id,
+            zip_bytes=data,
+            filename=file.filename or "",
+        )
+
+    try:
+        claim = await _with_conn(request, _import)
+    except JobPackageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def _sections(conn):
+        return get_claim_sections(conn, claim["claim_id"])
+
+    sections = await _with_conn(request, _sections)
+    return _claim_response(claim, sections)
+
+
 @router.get("/claims", response_model=ClaimsListResponse)
 async def get_claims(
     request: Request,
@@ -1299,6 +1330,7 @@ async def export_docx(
     request: Request,
     claim_id: str,
     user_id: str = Depends(get_current_user),
+    mode: str = Query("pages"),
 ):
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
@@ -1314,9 +1346,12 @@ async def export_docx(
     claim, sections, images = result
     export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
     title = claim["title"] or export_title
+    pages_tuned = mode != "full"
 
     def _render_docx() -> bytes:
-        return draft_to_docx_bytes(sections, title=title, claim=claim, images=images)
+        return draft_to_docx_bytes(
+            sections, title=title, claim=claim, images=images, pages_tuned=pages_tuned
+        )
 
     data = await asyncio.to_thread(_render_docx)
     filename = (title or "report").replace(" ", "_")[:80] + ".docx"
@@ -1332,6 +1367,7 @@ async def export_pdf(
     request: Request,
     claim_id: str,
     user_id: str = Depends(get_current_user),
+    mode: str = Query("full"),
 ):
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
@@ -1347,14 +1383,18 @@ async def export_pdf(
     claim, sections, images = result
     export_title = report_type_def(get_report_type(claim["property_metadata"])).export_title
     title = claim["title"] or export_title
+    skip_cover = mode == "chapter"
 
     def _render_pdf() -> bytes:
-        return draft_to_pdf_bytes(sections, title=title, claim=claim, images=images)
+        return draft_to_pdf_bytes(
+            sections, title=title, claim=claim, images=images, skip_cover=skip_cover
+        )
 
     data = await asyncio.to_thread(_render_pdf)
     filename = (title or "report").replace(" ", "_")[:80] + ".pdf"
+    disposition = "attachment" if skip_cover else "inline"
     return Response(
         content=data,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )

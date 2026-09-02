@@ -20,6 +20,12 @@ from app.report_writer.boilerplate import (
 )
 from app.geocode.address_format import report_address_lines
 from app.report_writer.constants import get_report_type, report_type_def, sections_for_type
+from app.report_writer.document_layout import (
+    ensure_layout,
+    included_specimens,
+    ordered_included_photos,
+    section_keys_visible,
+)
 from app.report_writer.damage_detection import count_photo_stats, photo_review_summary, select_export_images
 from app.report_writer.image_utils import compress_image_bytes, image_emu_size
 from app.report_writer.historical_aerials import (
@@ -71,6 +77,15 @@ class ReportSection:
 
 
 @dataclass
+class ReportSpecimen:
+    id: str
+    label: str
+    testing_type_id: str
+    result: str
+    notes: str = ""
+
+
+@dataclass
 class ReportDocument:
     title: str
     claim_id: str
@@ -90,6 +105,7 @@ class ReportDocument:
     engineering_letter_paragraphs: list[str]
     sections: list[ReportSection] = field(default_factory=list)
     photos: list[ReportPhoto] = field(default_factory=list)
+    specimens: list[ReportSpecimen] = field(default_factory=list)
     property_satellite: ReportPhoto | None = None
     property_roadmap: ReportPhoto | None = None
     property_map_attribution: str = "Map data © Google"
@@ -98,9 +114,17 @@ class ReportDocument:
     historical_aerials: list[ReportPhoto] = field(default_factory=list)
     historical_aerials_comment: str = ""
     historical_aerials_attribution: str = _HISTORICAL_AERIALS_ATTRIBUTION
+    include_page_numbers: bool = True
+    include_address_footer: bool = True
+    include_weather: bool = True
+    skip_cover: bool = False
+    pages_tuned: bool = False
+    starting_page_number: int = 1
 
 
-def _photo_caption(vision: dict | None) -> str:
+def _photo_caption(vision: dict | None, fallback: str = "") -> str:
+    if fallback.strip():
+        return fallback.strip()
     if not vision:
         return "Inspection photograph."
     cap = (vision.get("caption") or "").strip()
@@ -163,10 +187,14 @@ def build_report_document(
     claim: dict,
     sections: dict[str, dict],
     images: list[dict] | None = None,
+    *,
+    skip_cover: bool = False,
+    pages_tuned: bool = False,
 ) -> ReportDocument:
     meta = claim.get("property_metadata") or {}
     type_id = get_report_type(meta)
     type_def = report_type_def(type_id)
+    layout = ensure_layout(meta, images=images or [])
     title = (claim.get("title") or type_def.export_title).strip()
     claim_id = str(claim.get("claim_id") or "")
     report_number = claim_id[:8].upper() if claim_id else "DRAFT"
@@ -178,18 +206,23 @@ def build_report_document(
         or ""
     )
 
+    labels = dict(sections_for_type(type_id))
     doc_sections: list[ReportSection] = []
-    for key, label in sections_for_type(type_id):
+    for key in section_keys_visible(layout, type_id):
         content = ((sections.get(key) or {}).get("content") or "").strip()
         if content:
-            doc_sections.append(ReportSection(key=key, label=label.upper(), content=content))
+            doc_sections.append(ReportSection(key=key, label=labels.get(key, key).upper(), content=content))
 
     photos: list[ReportPhoto] = []
-    img_list = select_export_images(
-        images or [],
-        max_photos=REPORT_EXPORT_MAX_PHOTOS,
-        damage_only=REPORT_EXPORT_DAMAGE_PHOTOS_ONLY,
-    )
+    has_layout_photos = bool(layout.get("photos"))
+    if has_layout_photos:
+        img_list = ordered_included_photos(layout, images or [])
+    else:
+        img_list = select_export_images(
+            images or [],
+            max_photos=REPORT_EXPORT_MAX_PHOTOS,
+            damage_only=REPORT_EXPORT_DAMAGE_PHOTOS_ONLY,
+        )
     if img_list:
         workers = min(4, len(img_list))
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -197,16 +230,20 @@ def build_report_document(
     else:
         raw_bytes_list = []
 
+    max_dim = 700 if pages_tuned else 800
     for img, raw in zip(img_list, raw_bytes_list):
         if not raw:
             continue
-        # Sized for ~3.5" embed in PDF/DOCX; keeps memory and render time down on large claims.
-        data, ext = compress_image_bytes(raw, max_dimension=800, quality=75)
-        cx, cy = image_emu_size(data)
+        data, ext = compress_image_bytes(raw, max_dimension=max_dim, quality=75)
+        width_in = 3.2 if pages_tuned else None
+        if width_in:
+            cx, cy = image_emu_size(data, width_inches=width_in, max_height_inches=2.5)
+        else:
+            cx, cy = image_emu_size(data)
         photos.append(
             ReportPhoto(
                 data=data,
-                caption=_photo_caption(img.get("vision_analysis")),
+                caption=_photo_caption(img.get("vision_analysis"), str(img.get("_layout_caption") or "")),
                 file_extension=ext,
                 cx=cx,
                 cy=cy,
@@ -226,6 +263,25 @@ def build_report_document(
     historical_aerials = _load_historical_aerial_photos(meta)
     historical_comment = (meta.get("historical_aerials_comment") or "").strip()
 
+    specimens = [
+        ReportSpecimen(
+            id=str(item.get("id") or item.get("label") or ""),
+            label=str(item.get("label") or "Specimen"),
+            testing_type_id=str(item.get("testing_type_id") or ""),
+            result=str(item.get("result") or ""),
+            notes=str(item.get("notes") or ""),
+        )
+        for item in included_specimens(layout)
+    ]
+
+    include_letter = bool(layout.get("include_engineering_letter"))
+    if type_id != "engineering":
+        include_letter = False
+    try:
+        start_page = max(1, int(layout.get("starting_page_number") or 1))
+    except (TypeError, ValueError):
+        start_page = 1
+
     return ReportDocument(
         title=title,
         claim_id=claim_id,
@@ -236,21 +292,28 @@ def build_report_document(
         full_address=full_address,
         inspection_date=default_inspection_date(meta),
         prepared_by=default_prepared_by(meta),
-        include_engineering_letter=type_id == "engineering" and include_engineering_letter(meta),
+        include_engineering_letter=include_letter,
         purpose_text=purpose_text(meta),
         observations_text=obs,
-        weather_text=weather_text(meta),
-        weather_continued_text=weather_continued_text(meta),
-        weather_attribution_text=weather_attribution_text(meta),
+        weather_text=weather_text(meta) if layout.get("include_weather", True) else "",
+        weather_continued_text=weather_continued_text(meta) if layout.get("include_weather", True) else "",
+        weather_attribution_text=weather_attribution_text(meta) if layout.get("include_weather", True) else "",
         engineering_letter_paragraphs=engineering_letter_paragraphs(
             meta, line1 or full_address, conclusion
         ),
         sections=doc_sections,
         photos=photos,
+        specimens=specimens,
         property_satellite=property_satellite,
         property_roadmap=property_roadmap,
         property_appraiser=property_appraiser,
         property_appraiser_attribution=_property_appraiser_attribution(meta) if property_appraiser else "",
         historical_aerials=historical_aerials,
         historical_aerials_comment=historical_comment if historical_aerials else "",
+        include_page_numbers=bool(layout.get("include_page_numbers", True)),
+        include_address_footer=bool(layout.get("include_address_footer", True)),
+        include_weather=bool(layout.get("include_weather", True)),
+        skip_cover=skip_cover,
+        pages_tuned=pages_tuned,
+        starting_page_number=start_page,
     )

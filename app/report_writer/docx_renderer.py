@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from app.report_writer.docx_ooxml import (
+    footer_xml,
     page_break,
     wrap_document_xml,
     wrap_rels_xml,
@@ -24,6 +25,7 @@ from app.report_writer.docx_ooxml import (
     xml_paragraph,
     xml_photo_table,
     xml_spacer,
+    xml_specimen_table,
 )
 from app.report_writer.image_utils import compress_image_bytes, image_emu_size, load_asset_bytes
 from app.report_writer.report_document import ReportDocument
@@ -72,8 +74,23 @@ class DocxReportRenderer:
 
             body = self._build_body(doc)
 
+            footer_rel = "rIdFooter1"
+            self._rels += (
+                f'  <Relationship Id="{footer_rel}" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" '
+                'Target="footer1.xml"/>\n'
+            )
+            (temp_dir / "word" / "footer1.xml").write_text(
+                footer_xml(
+                    address=doc.address_line1 or doc.full_address,
+                    include_address=doc.include_address_footer,
+                    include_page_numbers=doc.include_page_numbers,
+                ),
+                encoding="utf-8",
+            )
+
             doc_xml_path = temp_dir / "word" / "document.xml"
-            doc_xml_path.write_text(wrap_document_xml(body), encoding="utf-8")
+            doc_xml_path.write_text(wrap_document_xml(body, footer_rel=footer_rel), encoding="utf-8")
 
             rels_path = temp_dir / "word" / "_rels" / "document.xml.rels"
             rels_path.write_text(wrap_rels_xml(self._rels), encoding="utf-8")
@@ -82,6 +99,16 @@ class DocxReportRenderer:
                 (media_dir / name).write_bytes(data)
 
             self._update_content_types(temp_dir)
+            ct_path = temp_dir / "[Content_Types].xml"
+            if ct_path.is_file():
+                ct_xml = ct_path.read_text(encoding="utf-8")
+                if "footer1.xml" not in ct_xml:
+                    ct_xml = ct_xml.replace(
+                        "</Types>",
+                        '  <Override PartName="/word/footer1.xml" '
+                        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>\n</Types>',
+                    )
+                    ct_path.write_text(ct_xml, encoding="utf-8")
 
             out_buf = io.BytesIO()
             with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as out_zf:
@@ -140,26 +167,27 @@ class DocxReportRenderer:
 
     def _build_body(self, doc: ReportDocument) -> str:
         body = ""
-        cover_data = load_asset_bytes("cover_page.png")
-        cover_ref = self._add_image(
-            cover_data,
-            "cover",
-            cx=int(8.5 * EMU_PER_INCH),
-            cy=int(11.0 * EMU_PER_INCH),
-        )
-        body += xml_full_page_image(cover_ref.rel_id, cover_ref.doc_pr_id, cover_ref.cx, cover_ref.cy)
+        if not doc.skip_cover:
+            cover_data = load_asset_bytes("cover_page.png")
+            cover_ref = self._add_image(
+                cover_data,
+                "cover",
+                cx=int(8.5 * EMU_PER_INCH),
+                cy=int(11.0 * EMU_PER_INCH),
+            )
+            body += xml_full_page_image(cover_ref.rel_id, cover_ref.doc_pr_id, cover_ref.cx, cover_ref.cy)
 
-        x = int(0.83 * EMU_PER_INCH)
-        body += xml_cover_text_with_tabs(["Residential"], x_emu=x, y_emu=int(8.96 * EMU_PER_INCH), font_size=20)
-        body += xml_cover_text_with_tabs(
-            ["Prepared for:", doc.client_name], x_emu=x, y_emu=int(9.34 * EMU_PER_INCH)
-        )
-        body += xml_cover_text_with_tabs(
-            ["Address:", doc.address_line1], x_emu=x, y_emu=int(9.59 * EMU_PER_INCH)
-        )
-        if doc.address_line2:
-            body += xml_cover_text_with_tabs([doc.address_line2], x_emu=x, y_emu=int(9.84 * EMU_PER_INCH))
-        body += page_break()
+            x = int(0.83 * EMU_PER_INCH)
+            body += xml_cover_text_with_tabs(["Residential"], x_emu=x, y_emu=int(8.96 * EMU_PER_INCH), font_size=20)
+            body += xml_cover_text_with_tabs(
+                ["Prepared for:", doc.client_name], x_emu=x, y_emu=int(9.34 * EMU_PER_INCH)
+            )
+            body += xml_cover_text_with_tabs(
+                ["Address:", doc.address_line1], x_emu=x, y_emu=int(9.59 * EMU_PER_INCH)
+            )
+            if doc.address_line2:
+                body += xml_cover_text_with_tabs([doc.address_line2], x_emu=x, y_emu=int(9.84 * EMU_PER_INCH))
+            body += page_break()
 
         body += xml_overview_title("OVERVIEW")
         if doc.address_line1:
@@ -182,11 +210,12 @@ class DocxReportRenderer:
         body += xml_paragraph(doc.purpose_text, spacing_after=240)
         body += xml_paragraph("OBSERVATIONS:", bold=True, color="5BA3D6", spacing_after=0)
         body += xml_paragraph(doc.observations_text, spacing_after=240)
-        body += xml_paragraph("WEATHER HISTORY:", bold=True, color="5BA3D6", spacing_after=0)
-        body += xml_paragraph(doc.weather_text, spacing_after=240)
-        body += xml_paragraph("WEATHER HISTORY CONTINUED", bold=True, color="5BA3D6", spacing_after=0)
-        body += xml_paragraph(doc.weather_continued_text, spacing_after=240)
-        body += xml_paragraph(doc.weather_attribution_text, spacing_after=240)
+        if doc.include_weather:
+            body += xml_paragraph("WEATHER HISTORY:", bold=True, color="5BA3D6", spacing_after=0)
+            body += xml_paragraph(doc.weather_text, spacing_after=240)
+            body += xml_paragraph("WEATHER HISTORY CONTINUED", bold=True, color="5BA3D6", spacing_after=0)
+            body += xml_paragraph(doc.weather_continued_text, spacing_after=240)
+            body += xml_paragraph(doc.weather_attribution_text, spacing_after=240)
         body += self._property_appraiser_xml(doc)
         body += self._property_location_xml(doc)
         body += self._historical_aerials_xml(doc)
@@ -197,13 +226,22 @@ class DocxReportRenderer:
             body += xml_spacer(after=120)
             body += xml_body_paragraphs(section.content)
 
+        if doc.specimens:
+            body += page_break()
+            body += xml_large_bold("SPECIMEN TESTING")
+            body += xml_spacer(after=120)
+            body += xml_specimen_table(
+                [(s.label, s.testing_type_id, s.result, s.notes) for s in doc.specimens]
+            )
+
         if doc.photos:
             body += page_break()
             body += xml_large_bold("INSPECTION PHOTOGRAPHS")
             body += xml_spacer(after=120)
+            per_page = 2 if doc.pages_tuned else 4
             idx = 0
             while idx < len(doc.photos):
-                group = doc.photos[idx : idx + 4]
+                group = doc.photos[idx : idx + per_page]
                 entries = []
                 for photo in group:
                     ref = self._add_image(photo.data, "photo", cx=photo.cx, cy=photo.cy, compress=False)
@@ -211,7 +249,7 @@ class DocxReportRenderer:
                 cols = 2 if len(group) > 1 else 1
                 body += xml_photo_table(entries, columns=cols)
                 body += xml_spacer(before=120, after=120)
-                idx += 4
+                idx += per_page
                 if idx < len(doc.photos):
                     body += page_break()
 

@@ -483,6 +483,8 @@ def insert_claim_image(
     content_type: str,
     size_bytes: int,
     sort_order: int = 0,
+    vision_analysis: dict | None = None,
+    analysis_status: str = "pending",
 ) -> dict[str, Any]:
     image_id = str(uuid.uuid4())
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -490,11 +492,23 @@ def insert_claim_image(
         cur.execute(
             """
             INSERT INTO report_claim_images
-                (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes, sort_order, analysis_status)
-            VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, 'pending')
+                (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes,
+                 sort_order, analysis_status, vision_analysis)
+            VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (image_id, claim_id, user_id, storage_path, filename, content_type, size_bytes, sort_order),
+            (
+                image_id,
+                claim_id,
+                user_id,
+                storage_path,
+                filename,
+                content_type,
+                size_bytes,
+                sort_order,
+                analysis_status,
+                Json(vision_analysis) if vision_analysis is not None else None,
+            ),
         )
         row = cur.fetchone()
         conn.commit()
