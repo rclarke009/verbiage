@@ -192,6 +192,8 @@ logging.basicConfig(
     level=logging.INFO,
     format=_LOG_FMT,
 )
+# httpx INFO logs full URLs, including API keys in query strings.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 # Replace default formatters with trace-aware ones (basicConfig may have already attached handlers).
 for _h in logging.root.handlers:
     _h.setFormatter(_SafeTraceFormatter(_LOG_FMT))

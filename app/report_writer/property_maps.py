@@ -154,6 +154,7 @@ async def geocode_address(address: str) -> GeocodeResult:
         raise HTTPException(status_code=404, detail="Address could not be geocoded")
     if status not in ("OK",):
         message = data.get("error_message") or status or "unknown error"
+        logger.warning("Google geocode status=%s error=%s", status, message)
         raise HTTPException(status_code=502, detail=_maps_key_restriction_detail(message, "Geocoding"))
 
     results = data.get("results") or []
