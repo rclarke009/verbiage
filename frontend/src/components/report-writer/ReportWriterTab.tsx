@@ -745,7 +745,14 @@ export function ReportWriterTab() {
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)' }}>
                   {[draft.title || 'Untitled claim', fullAddress.trim() || null].filter(Boolean).join(' · ')}
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 0.9fr) 240px', gap: 16 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))',
+                    gap: 16,
+                    alignItems: 'start',
+                  }}
+                >
                   <div style={{ minWidth: 0 }}>
                     <DocumentCanvas
                       claim={draft}
@@ -758,26 +765,28 @@ export function ReportWriterTab() {
                       onLayoutChange={handleLayoutChange}
                     />
                   </div>
-                  <aside style={{ minWidth: 0 }}>
-                    <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Live PDF</h3>
-                    {pdfIframeUrl ? (
-                      <iframe
-                        title="Report preview"
-                        src={pdfIframeUrl}
-                        style={{ width: '100%', height: 640, border: '1px solid var(--app-border)', borderRadius: 6, background: '#fff' }}
-                      />
-                    ) : (
-                      <p style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
-                        {pdfLoading ? 'Rendering preview…' : 'Save or edit a section to refresh the branded PDF.'}
-                      </p>
-                    )}
-                  </aside>
-                  <aside>
-                    <SourcesPanel sources={sources} />
-                    <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
-                    <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Run history</h3>
-                    <RunHistory runs={runsQuery.data ?? []} />
-                  </aside>
+                  <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <aside style={{ minWidth: 0 }}>
+                      <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Live PDF</h3>
+                      {pdfIframeUrl ? (
+                        <iframe
+                          title="Report preview"
+                          src={pdfIframeUrl}
+                          style={{ width: '100%', height: 640, border: '1px solid var(--app-border)', borderRadius: 6, background: '#fff' }}
+                        />
+                      ) : (
+                        <p style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
+                          {pdfLoading ? 'Rendering preview…' : 'Save or edit a section to refresh the branded PDF.'}
+                        </p>
+                      )}
+                    </aside>
+                    <aside>
+                      <SourcesPanel sources={sources} />
+                      <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
+                      <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Run history</h3>
+                      <RunHistory runs={runsQuery.data ?? []} />
+                    </aside>
+                  </div>
                 </div>
               </div>
             ) : null}

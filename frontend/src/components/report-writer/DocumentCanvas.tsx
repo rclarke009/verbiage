@@ -148,21 +148,26 @@ export function DocumentCanvas({
   const selectedItem = outline.find(o => o.id === selected) || outline[0]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12, minHeight: 420 }}>
-      <nav style={{ borderRight: '1px solid var(--app-border)', paddingRight: 8, overflowY: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, minHeight: 420 }}>
+      <nav
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 4,
+          paddingBottom: 8,
+          borderBottom: '1px solid var(--app-border)',
+        }}
+      >
         {outline.map(item => (
           <button
             key={item.id}
             type="button"
             onClick={() => setSelected(item.id)}
             style={{
-              display: 'block',
-              width: '100%',
               textAlign: 'left',
               padding: '6px 8px',
-              marginBottom: 4,
               borderRadius: 4,
-              border: selected === item.id ? '1px solid var(--app-primary)' : '1px solid transparent',
+              border: selected === item.id ? '1px solid var(--app-primary)' : '1px solid var(--app-border)',
               background: selected === item.id ? 'var(--app-info-bg)' : 'transparent',
               cursor: 'pointer',
               fontSize: 12,
@@ -173,7 +178,7 @@ export function DocumentCanvas({
           </button>
         ))}
       </nav>
-      <div>
+      <div style={{ minWidth: 0 }}>
         {selectedItem?.kind === 'chrome' ? (
           <ChromeEditor layout={layout} onChange={patchLayout} />
         ) : null}
