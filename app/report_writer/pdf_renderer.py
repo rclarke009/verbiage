@@ -77,12 +77,12 @@ def _styles() -> dict[str, ParagraphStyle]:
     }
 
 
-def _footer(canvas, doc_template, *, address: str, page_num: int, total_pages: int) -> None:
+def _footer(canvas, doc_template, *, address: str, page_num: int) -> None:
     canvas.saveState()
     canvas.setFont("Helvetica", 9)
     canvas.setFillColor(colors.grey)
     canvas.drawString(0.7 * inch, 0.5 * inch, address.upper()[:80])
-    canvas.drawRightString(PAGE_W - 0.7 * inch, 0.5 * inch, f"Page {page_num} of {total_pages}")
+    canvas.drawRightString(PAGE_W - 0.7 * inch, 0.5 * inch, f"Page {page_num}")
     canvas.restoreState()
 
 
@@ -91,26 +91,10 @@ def render_report_pdf(doc: ReportDocument) -> bytes:
     story: list = []
     styles = _styles()
 
-    # Pre-count pages roughly for footer (SimpleDocTemplate two-pass)
-    page_count = 1  # cover
-    page_count += 1  # overview
-    if doc.include_engineering_letter:
-        page_count += 1
-    page_count += 1  # purpose/weather
-    if doc.property_appraiser:
-        page_count += 1
-    if doc.property_satellite or doc.property_roadmap:
-        page_count += 1
-    if doc.historical_aerials:
-        page_count += 1
-    page_count += max(1, len(doc.sections))
-    if doc.photos:
-        page_count += max(1, (len(doc.photos) + 3) // 4)
-
     def on_page(canvas, doc_template) -> None:
         page_num = canvas.getPageNumber()
         if page_num > 1:
-            _footer(canvas, doc_template, address=doc.address_line1 or doc.full_address, page_num=page_num, total_pages=page_count)
+            _footer(canvas, doc_template, address=doc.address_line1 or doc.full_address, page_num=page_num)
 
     pdf = SimpleDocTemplate(
         buf,

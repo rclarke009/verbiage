@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 
 import pytest
+from pypdf import PdfReader
 
 from app.report_writer.boilerplate import purpose_text, weather_continued_text, weather_text
 from app.report_writer.docx_ooxml import xml_escape
@@ -185,6 +187,13 @@ def test_pdf_export_structure(sample_claim: dict, sample_sections: dict[str, dic
     data = draft_to_pdf_bytes(sample_sections, claim=sample_claim, images=[])
     assert data.startswith(b"%PDF")
     assert len(data) > 1000
+
+
+def test_pdf_footer_is_page_number_only(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
+    data = draft_to_pdf_bytes(sample_sections, claim=sample_claim, images=[])
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(data)).pages)
+    assert re.search(r"Page\s+2", text)
+    assert not re.search(r"Page\s+\d+\s+of\s+\d+", text)
 
 
 def test_docx_without_engineering_letter(sample_claim: dict, sample_sections: dict[str, dict]) -> None:
