@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type {
   Claim,
-  PhotoAnalysisCounts,
   PropertyMetadata,
   ReportTypeDefinition,
 } from '../../types'
@@ -11,7 +10,6 @@ import {
   setDrivePhotoFolders,
 } from '../../lib/drivePhotoFolders'
 import { AddressFields } from './AddressFields'
-import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { HistoricalAerialsPreview } from './HistoricalAerialsPreview'
 import { PropertyMapPreview } from './PropertyMapPreview'
 import { PropertyAppraiserPreview } from './PropertyAppraiserPreview'
@@ -41,15 +39,9 @@ const stepLegend: React.CSSProperties = {
 
 export function ClaimForm({
   claim,
-  claimId,
   reportTypes,
   typeLocked = false,
   onChange,
-  onConfirmPhotoSync,
-  photoSyncing,
-  photoSyncError,
-  photoCounts,
-  onUploadBatchStarted,
   weatherLoading,
   weatherError,
   weatherOptions,
@@ -72,21 +64,11 @@ export function ClaimForm({
   onHistoricalAerialsCachedUnavailable,
   onHistoricalAerialIncludeChange,
   onHistoricalAerialCommentChange,
-  canGenerate = false,
-  generating = false,
-  onGenerate,
-  generateTitle,
 }: {
   claim: Claim
-  claimId: string | null
   reportTypes: ReportTypeDefinition[]
   typeLocked?: boolean
   onChange: (patch: Partial<Pick<Claim, 'title' | 'field_notes' | 'property_metadata'>>) => void
-  onConfirmPhotoSync: () => void
-  photoSyncing: boolean
-  photoSyncError: string | null
-  photoCounts?: PhotoAnalysisCounts | null
-  onUploadBatchStarted?: (batchId: string) => void
   weatherLoading?: boolean
   weatherError?: string | null
   weatherOptions?: WeatherOptionsResponse | null
@@ -109,10 +91,6 @@ export function ClaimForm({
   onHistoricalAerialsCachedUnavailable?: () => void
   onHistoricalAerialIncludeChange?: (year: number, include: boolean) => void
   onHistoricalAerialCommentChange?: (comment: string) => void
-  canGenerate?: boolean
-  generating?: boolean
-  onGenerate?: () => void
-  generateTitle?: string
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
@@ -204,17 +182,6 @@ export function ClaimForm({
           onCachedImagesUnavailable={onPropertyAppraiserCachedUnavailable}
         />
       </div>
-
-      <PhotoFolderPanel
-        claimId={claimId ?? ''}
-        claim={claim}
-        onMetadataChange={updateMetadata}
-        onConfirmSync={onConfirmPhotoSync}
-        syncing={photoSyncing}
-        syncError={photoSyncError}
-        photoCounts={photoCounts}
-        onUploadBatchStarted={onUploadBatchStarted}
-      />
 
       <fieldset
         style={{
@@ -369,43 +336,6 @@ export function ClaimForm({
           </p>
         ) : null}
       </label>
-
-      <div
-        style={{
-          marginTop: 4,
-          padding: '16px 14px',
-          borderTop: '2px solid var(--app-border)',
-          borderRadius: 8,
-          background: 'var(--app-bg-subtle, rgba(0, 0, 0, 0.02))',
-        }}
-      >
-        <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--app-primary)' }}>Report sections</h3>
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
-          The sections below are your report draft. Generate them from the steps above, then edit anything you like.
-          Generating or regenerating will not overwrite text you have edited.
-        </p>
-        {onGenerate ? (
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={generating || !canGenerate}
-            title={generateTitle}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--app-primary)',
-              color: 'var(--app-on-primary)',
-              cursor: generating || !canGenerate ? 'not-allowed' : 'pointer',
-              opacity: generating || !canGenerate ? 0.6 : 1,
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            {generating ? 'Generating…' : 'Generate draft'}
-          </button>
-        ) : null}
-      </div>
     </div>
   )
 }

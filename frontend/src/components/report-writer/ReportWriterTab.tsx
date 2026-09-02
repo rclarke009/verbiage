@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -22,6 +22,11 @@ import {
   generateTitleFromBlockers,
   getGenerateBlockers,
 } from '../../lib/reportWriterGenerate'
+import {
+  claimHasGeneratedContent,
+  defaultReportWriterWorkspace,
+  type ReportWriterWorkspace,
+} from '../../lib/reportWriterWorkspace'
 import { useClaimPdfPreview } from '../../hooks/useClaimPdfPreview'
 import { useClaimPhotoSync } from '../../hooks/useClaimPhotoSync'
 import { useClaimWeather, clearWeatherMetadata } from '../../hooks/useClaimWeather'
@@ -38,6 +43,7 @@ import { useReportWriterStream } from '../../hooks/useReportWriterStream'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
 import { DocumentCanvas } from './DocumentCanvas'
+import { PhotoFolderPanel } from './PhotoFolderPanel'
 import { GeneratePrerequisitesBanner } from './GeneratePrerequisitesBanner'
 import { GenerationProgress } from './GenerationProgress'
 import { PhotoAnalysisBanner } from './PhotoAnalysisBanner'
@@ -54,10 +60,40 @@ const emptyClaim = (): Claim => ({
   sections: {},
 })
 
+const WORKSPACE_TABS: { id: ReportWriterWorkspace; label: string }[] = [
+  { id: 'intake', label: 'Starting data' },
+  { id: 'photos', label: 'Photos' },
+  { id: 'report', label: 'Report' },
+]
+
+const tabBtn = (active: boolean): CSSProperties => ({
+  padding: '6px 12px',
+  borderRadius: 6,
+  border: active ? '2px solid var(--app-primary)' : '1px solid var(--app-border)',
+  background: active ? 'var(--app-bg)' : 'transparent',
+  color: active ? 'var(--app-primary)' : 'var(--app-text)',
+  fontWeight: active ? 600 : 400,
+  cursor: 'pointer',
+  fontSize: 13,
+})
+
+const primaryBtn = (disabled: boolean): CSSProperties => ({
+  padding: '8px 16px',
+  borderRadius: 6,
+  border: 'none',
+  background: 'var(--app-primary)',
+  color: 'var(--app-on-primary)',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  opacity: disabled ? 0.6 : 1,
+  fontSize: 13,
+  fontWeight: 600,
+})
+
 export function ReportWriterTab() {
   const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [localDraft, setLocalDraft] = useState<Claim | null>(null)
+  const [workspace, setWorkspace] = useState<ReportWriterWorkspace | null>(null)
   const {
     modalOpen: pdfModalOpen,
     iframeUrl: pdfIframeUrl,
@@ -110,14 +146,36 @@ export function ReportWriterTab() {
   const reportTypes = reportTypesQuery.data ?? []
   const activeReportType = reportTypes.find(t => t.id === draft.property_metadata?.report_type)
   const sectionKeys = activeReportType?.sections.map(s => s.key) ?? []
-  const hasGeneratedContent = Object.values(draft.sections ?? {}).some(s => (s.content ?? '').trim())
+  const hasGeneratedContent = claimHasGeneratedContent(draft.sections)
   const generateBlockers = getGenerateBlockers(draft)
   const canGenerate = canGenerateFromDraft(draft)
 
+  const defaultWorkspaceFor = useRef<string | null>(null)
+
   useEffect(() => {
-    if (!activeId) return
+    if (activeId !== defaultWorkspaceFor.current) {
+      defaultWorkspaceFor.current = null
+      setWorkspace(null)
+    }
+    if (!activeId || !claimQuery.data || claimQuery.data.claim_id !== activeId) return
+    if (defaultWorkspaceFor.current === activeId) return
+    defaultWorkspaceFor.current = activeId
+    setWorkspace(
+      defaultReportWriterWorkspace({
+        hasGeneratedContent: claimHasGeneratedContent(claimQuery.data.sections),
+        generating: false,
+      }),
+    )
+  }, [activeId, claimQuery.data])
+
+  useEffect(() => {
+    if (generating) setWorkspace('report')
+  }, [generating])
+
+  useEffect(() => {
+    if (!activeId || workspace !== 'report') return
     void refreshPdfLive(activeId)
-  }, [activeId, refreshPdfLive])
+  }, [activeId, workspace, refreshPdfLive])
 
   const updateDraft = useCallback(
     (updater: (prev: Claim) => Claim) => {
@@ -336,6 +394,7 @@ export function ReportWriterTab() {
       )
       if (!ok) return
     }
+    setWorkspace('report')
     await flushPendingSectionSaves()
     await saveMutation.mutateAsync()
     invalidatePdfPreview()
@@ -453,7 +512,7 @@ export function ReportWriterTab() {
               </button>
               <button
                 type="button"
-                onClick={handleGenerate}
+                onClick={() => void handleGenerate()}
                 disabled={generating || !canGenerate}
                 title={generateTitle}
                 style={{
@@ -468,40 +527,44 @@ export function ReportWriterTab() {
               >
                 {generating ? 'Generating…' : 'Generate draft'}
               </button>
-              <button
-                type="button"
-                disabled={pdfLoading}
-                onClick={() => {
-                  if (!activeId) return
-                  void openPdfPreview(activeId)
-                }}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
-              >
-                {pdfLoading ? 'Loading PDF…' : 'Preview PDF'}
-              </button>
-              {pdfLoading ? (
-                <button
-                  type="button"
-                  onClick={() => cancelPdfPreview()}
-                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
-                >
-                  Cancel PDF
-                </button>
+              {workspace === 'report' ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={pdfLoading}
+                    onClick={() => {
+                      if (!activeId) return
+                      void openPdfPreview(activeId)
+                    }}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+                  >
+                    {pdfLoading ? 'Loading PDF…' : 'Preview PDF'}
+                  </button>
+                  {pdfLoading ? (
+                    <button
+                      type="button"
+                      onClick={() => cancelPdfPreview()}
+                      style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+                    >
+                      Cancel PDF
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => downloadClaimPdf(activeId, draft.title, 'chapter')}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+                  >
+                    Insert chapter PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportClaimDocx(activeId, draft.title, 'pages')}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
+                  >
+                    Edit in Pages/Word
+                  </button>
+                </>
               ) : null}
-              <button
-                type="button"
-                onClick={() => downloadClaimPdf(activeId, draft.title, 'chapter')}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
-              >
-                Insert chapter PDF
-              </button>
-              <button
-                type="button"
-                onClick={() => exportClaimDocx(activeId, draft.title, 'pages')}
-                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--app-border)', cursor: 'pointer' }}
-              >
-                Edit in Pages/Word
-              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -518,48 +581,66 @@ export function ReportWriterTab() {
               </button>
             </div>
 
+            <div
+              role="tablist"
+              aria-label="Report writer workspace"
+              style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}
+            >
+              {WORKSPACE_TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={workspace === tab.id}
+                  onClick={() => setWorkspace(tab.id)}
+                  style={tabBtn(workspace === tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             <GeneratePrerequisitesBanner blockers={generateBlockers} generating={generating} />
 
-            <PhotoAnalysisBanner
-              hasAddress={!!fullAddress.trim()}
-              hasFolder={!!draft.property_metadata?.drive_photo_folder_id}
-              counts={photoSync.counts}
-              batchStatus={photoSync.batchStatus}
-              syncing={photoSync.syncing}
-              retrying={photoSync.retrying}
-              cancelling={photoSync.cancelling}
-              pollReconnecting={photoSync.pollReconnecting}
-              pollError={photoSync.pollError}
-              onRetryStuck={() => void photoSync.retryStuck()}
-              onCancel={
-                photoSync.batchId && photoSync.analysisActive
-                  ? () => void photoSync.cancelAnalysis()
-                  : undefined
-              }
-            />
+            {workspace === 'photos' ? (
+              <PhotoAnalysisBanner
+                hasAddress={!!fullAddress.trim()}
+                hasFolder={!!draft.property_metadata?.drive_photo_folder_id}
+                counts={photoSync.counts}
+                batchStatus={photoSync.batchStatus}
+                syncing={photoSync.syncing}
+                retrying={photoSync.retrying}
+                cancelling={photoSync.cancelling}
+                pollReconnecting={photoSync.pollReconnecting}
+                pollError={photoSync.pollError}
+                onRetryStuck={() => void photoSync.retryStuck()}
+                onCancel={
+                  photoSync.batchId && photoSync.analysisActive
+                    ? () => void photoSync.cancelAnalysis()
+                    : undefined
+                }
+              />
+            ) : null}
 
-            <GenerationProgress
-              state={genState}
-              onCancel={generating ? () => void handleCancelGeneration() : undefined}
-              cancelling={cancelling}
-            />
+            {workspace === 'report' || generating ? (
+              <GenerationProgress
+                state={genState}
+                onCancel={generating ? () => void handleCancelGeneration() : undefined}
+                cancelling={cancelling}
+              />
+            ) : null}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 0.9fr) 240px', gap: 16 }}>
-              <div style={{ minWidth: 0 }}>
+            {!workspace ? (
+              <p style={{ color: 'var(--app-text-subtle)', fontSize: 14 }}>Loading claim…</p>
+            ) : null}
+
+            {workspace === 'intake' ? (
+              <div style={{ maxWidth: 720 }}>
                 <ClaimForm
                   claim={draft}
-                  claimId={activeId}
                   reportTypes={reportTypes}
                   typeLocked={hasGeneratedContent}
                   onChange={patch => updateDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
-                  onConfirmPhotoSync={handleConfirmPhotoSync}
-                  photoSyncing={photoSync.syncing}
-                  photoSyncError={photoSync.syncError}
-                  photoCounts={photoSync.counts}
-                  onUploadBatchStarted={batchId => {
-                    photoSync.watchBatch(batchId)
-                    void photoSync.refreshCounts()
-                  }}
                   weatherLoading={weather.loading}
                   weatherError={weather.error}
                   weatherOptions={weather.options}
@@ -582,44 +663,124 @@ export function ReportWriterTab() {
                   onHistoricalAerialsCachedUnavailable={historicalAerials.markCachedImagesUnavailable}
                   onHistoricalAerialIncludeChange={historicalAerials.setInclude}
                   onHistoricalAerialCommentChange={historicalAerials.setComment}
-                  canGenerate={canGenerate}
-                  generating={generating}
-                  onGenerate={() => void handleGenerate()}
-                  generateTitle={generateTitle}
                 />
-                <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
-                <DocumentCanvas
-                  claim={draft}
-                  sections={activeReportType?.sections ?? []}
-                  images={imagesQuery.data ?? []}
-                  streamSections={genState.status !== 'idle' ? genState.sections : undefined}
-                  onSectionChange={handleSectionChange}
-                  onRegenerateSection={handleRegenerateSection}
-                  regenerateDisabled={generating}
-                  onLayoutChange={handleLayoutChange}
-                />
-              </div>
-              <aside style={{ minWidth: 0 }}>
-                <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Live PDF</h3>
-                {pdfIframeUrl ? (
-                  <iframe
-                    title="Report preview"
-                    src={pdfIframeUrl}
-                    style={{ width: '100%', height: 640, border: '1px solid var(--app-border)', borderRadius: 6, background: '#fff' }}
-                  />
-                ) : (
-                  <p style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
-                    {pdfLoading ? 'Rendering preview…' : 'Save or edit a section to refresh the branded PDF.'}
+                <div
+                  style={{
+                    marginTop: 16,
+                    padding: '16px 14px',
+                    borderTop: '2px solid var(--app-border)',
+                    borderRadius: 8,
+                    background: 'var(--app-bg-subtle, rgba(0, 0, 0, 0.02))',
+                  }}
+                >
+                  <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
+                    Next, add job photos (optional) or generate a draft to edit the report.
                   </p>
-                )}
-              </aside>
-              <aside>
-                <SourcesPanel sources={sources} />
-                <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
-                <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Run history</h3>
-                <RunHistory runs={runsQuery.data ?? []} />
-              </aside>
-            </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setWorkspace('photos')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 6,
+                        border: '1px solid var(--app-border)',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Add photos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerate()}
+                      disabled={generating || !canGenerate}
+                      title={generateTitle}
+                      style={primaryBtn(generating || !canGenerate)}
+                    >
+                      {generating ? 'Generating…' : 'Generate draft'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {workspace === 'photos' ? (
+              <div style={{ maxWidth: 720 }}>
+                <PhotoFolderPanel
+                  claimId={activeId}
+                  claim={draft}
+                  onMetadataChange={patch =>
+                    updateDraft(prev => ({
+                      ...prev,
+                      property_metadata: { ...prev.property_metadata, ...patch },
+                    }))
+                  }
+                  onConfirmSync={handleConfirmPhotoSync}
+                  syncing={photoSync.syncing}
+                  syncError={photoSync.syncError}
+                  photoCounts={photoSync.counts}
+                  onUploadBatchStarted={batchId => {
+                    photoSync.watchBatch(batchId)
+                    void photoSync.refreshCounts()
+                  }}
+                />
+                <div style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerate()}
+                    disabled={generating || !canGenerate}
+                    title={generateTitle}
+                    style={primaryBtn(generating || !canGenerate)}
+                  >
+                    {generating ? 'Generating…' : 'Generate draft'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {workspace === 'report' ? (
+              <div>
+                <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)' }}>
+                  {[draft.title || 'Untitled claim', fullAddress.trim() || null].filter(Boolean).join(' · ')}
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 0.9fr) 240px', gap: 16 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <DocumentCanvas
+                      claim={draft}
+                      sections={activeReportType?.sections ?? []}
+                      images={imagesQuery.data ?? []}
+                      streamSections={genState.status !== 'idle' ? genState.sections : undefined}
+                      onSectionChange={handleSectionChange}
+                      onRegenerateSection={handleRegenerateSection}
+                      regenerateDisabled={generating}
+                      onLayoutChange={handleLayoutChange}
+                    />
+                  </div>
+                  <aside style={{ minWidth: 0 }}>
+                    <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Live PDF</h3>
+                    {pdfIframeUrl ? (
+                      <iframe
+                        title="Report preview"
+                        src={pdfIframeUrl}
+                        style={{ width: '100%', height: 640, border: '1px solid var(--app-border)', borderRadius: 6, background: '#fff' }}
+                      />
+                    ) : (
+                      <p style={{ fontSize: 12, color: 'var(--app-text-subtle)' }}>
+                        {pdfLoading ? 'Rendering preview…' : 'Save or edit a section to refresh the branded PDF.'}
+                      </p>
+                    )}
+                  </aside>
+                  <aside>
+                    <SourcesPanel sources={sources} />
+                    <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--app-border)' }} />
+                    <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Run history</h3>
+                    <RunHistory runs={runsQuery.data ?? []} />
+                  </aside>
+                </div>
+              </div>
+            ) : null}
           </>
         )}
       </div>
