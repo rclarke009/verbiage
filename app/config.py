@@ -147,6 +147,9 @@ GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_LAB
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID")
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL")
 GOOGLE_MAPS_API_KEY = _google_env("GOOGLE_MAPS_API_KEY")
+# Optional Referer for server-side Geocoding / Static Maps when the key is
+# restricted to HTTP referrers. Falls back to PUBLIC_APP_URL when unset.
+GOOGLE_MAPS_HTTP_REFERER = _google_env("GOOGLE_MAPS_HTTP_REFERER")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
 # SUPABASE_JWT_SECRET must be Project Settings → API → JWT Secret (the symmetric secret used

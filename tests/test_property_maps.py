@@ -103,6 +103,11 @@ def test_property_map_metadata_from_result() -> None:
 
 def test_geocode_address_success(monkeypatch: pytest.MonkeyPatch, geocode_payload: dict) -> None:
     monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.report_writer.property_maps.PUBLIC_APP_URL",
+        "https://rag-document-analysis-backend.onrender.com",
+    )
+    monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_HTTP_REFERER", "")
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -119,6 +124,39 @@ def test_geocode_address_success(monkeypatch: pytest.MonkeyPatch, geocode_payloa
     assert result.latitude == 26.33
     assert result.longitude == -81.81
     assert "Testville" in result.resolved_address
+    headers = mock_client.get.call_args.kwargs["headers"]
+    assert headers["Referer"] == "https://rag-document-analysis-backend.onrender.com/"
+    assert headers["Origin"] == "https://rag-document-analysis-backend.onrender.com"
+
+
+def test_geocode_address_rewrites_key_restriction_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_API_KEY", "test-key")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "status": "REQUEST_DENIED",
+        "error_message": (
+            "This IP, site or mobile application is not authorized to use this API key. "
+            "Request received from IP address 74.220.48.176, with empty referer"
+        ),
+    }
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    monkeypatch.setattr(
+        "app.report_writer.property_maps.get_async_client",
+        lambda: mock_client,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(geocode_address("100 Example Lane, Testville, FL"))
+    assert exc_info.value.status_code == 502
+    assert "restricted" in str(exc_info.value.detail).lower()
+    assert "PUBLIC_APP_URL" in str(exc_info.value.detail)
 
 
 def test_fetch_property_maps_persists_images(

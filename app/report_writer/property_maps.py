@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
-from app.config import GOOGLE_MAPS_API_KEY
+from app.config import GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_HTTP_REFERER, PUBLIC_APP_URL
 from app.http_client import get_async_client
 from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import delete_claim_image_file, write_claim_image
@@ -97,6 +97,30 @@ def _preview_data_url(data: bytes) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def _google_maps_request_headers() -> dict[str, str]:
+    """Referer for website-restricted Maps keys. Server calls otherwise send none."""
+    raw = (GOOGLE_MAPS_HTTP_REFERER or PUBLIC_APP_URL or "").strip().rstrip("/")
+    if not raw:
+        return {}
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw}"
+    return {"Referer": f"{raw}/", "Origin": raw}
+
+
+def _maps_key_restriction_detail(message: str, kind: str) -> str:
+    lower = (message or "").lower()
+    if "not authorized" in lower or "empty referer" in lower:
+        return (
+            f"{kind} API error: this Google Maps key is restricted and the "
+            "server request was rejected (missing/blocked Referer or IP). "
+            "In Google Cloud Console, set Application restriction to IP addresses "
+            "and allow this host’s outbound IP, or keep HTTP referrers and allow "
+            "PUBLIC_APP_URL (and set that env var). "
+            f"Google said: {message}"
+        )
+    return f"{kind} API error: {message}"
+
+
 async def geocode_address(address: str) -> GeocodeResult:
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(
@@ -113,6 +137,7 @@ async def geocode_address(address: str) -> GeocodeResult:
         resp = await client.get(
             _GEOCODE_URL,
             params={"address": addr, "key": GOOGLE_MAPS_API_KEY},
+            headers=_google_maps_request_headers(),
             timeout=15.0,
         )
     except Exception as e:
@@ -129,7 +154,7 @@ async def geocode_address(address: str) -> GeocodeResult:
         raise HTTPException(status_code=404, detail="Address could not be geocoded")
     if status not in ("OK",):
         message = data.get("error_message") or status or "unknown error"
-        raise HTTPException(status_code=502, detail=f"Geocoding API error: {message}")
+        raise HTTPException(status_code=502, detail=_maps_key_restriction_detail(message, "Geocoding"))
 
     results = data.get("results") or []
     if not results:
@@ -193,7 +218,12 @@ async def fetch_static_map(
 
     client = get_async_client()
     try:
-        resp = await client.get(_STATIC_MAP_URL, params=params, timeout=20.0)
+        resp = await client.get(
+            _STATIC_MAP_URL,
+            params=params,
+            headers=_google_maps_request_headers(),
+            timeout=20.0,
+        )
     except Exception as e:
         logger.warning("Google static map request failed (%s): %s", maptype, e)
         raise HTTPException(status_code=502, detail=f"Static map request failed: {e}") from e
