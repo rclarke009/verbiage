@@ -7,11 +7,11 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 
 from fastapi import HTTPException
 
-from app.config import GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_HTTP_REFERER, PUBLIC_APP_URL
+from app.config import GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_HTTP_REFERER
 from app.http_client import get_async_client
 from app.report_writer.image_utils import compress_image_bytes
 from app.report_writer.storage import delete_claim_image_file, write_claim_image
@@ -97,14 +97,30 @@ def _preview_data_url(data: bytes) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def _normalize_maps_referer(raw: str) -> str | None:
+    """Return origin only when the URL has a real http(s) host. Skip malformed env values."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if value.startswith(("http://", "https://")):
+        parsed = urlparse(value)
+    elif "://" in value or value.startswith(("http:", "https:")):
+        return None
+    else:
+        parsed = urlparse(f"https://{value}")
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0]
+    if parsed.scheme not in ("http", "https") or "." not in host:
+        return None
+    origin = urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")).rstrip("/")
+    return origin or None
+
+
 def _google_maps_request_headers() -> dict[str, str]:
-    """Referer for website-restricted Maps keys. Server calls otherwise send none."""
-    raw = (GOOGLE_MAPS_HTTP_REFERER or PUBLIC_APP_URL or "").strip().rstrip("/")
-    if not raw:
+    """Optional Referer for website-restricted keys. IP-restricted keys must send none."""
+    origin = _normalize_maps_referer(GOOGLE_MAPS_HTTP_REFERER)
+    if not origin:
         return {}
-    if not raw.startswith(("http://", "https://")):
-        raw = f"https://{raw}"
-    return {"Referer": f"{raw}/", "Origin": raw}
+    return {"Referer": f"{origin}/", "Origin": origin}
 
 
 def _maps_key_restriction_detail(message: str, kind: str) -> str:
@@ -114,8 +130,8 @@ def _maps_key_restriction_detail(message: str, kind: str) -> str:
             f"{kind} API error: this Google Maps key is restricted and the "
             "server request was rejected (missing/blocked Referer or IP). "
             "In Google Cloud Console, set Application restriction to IP addresses "
-            "and allow this host’s outbound IP, or keep HTTP referrers and allow "
-            "PUBLIC_APP_URL (and set that env var). "
+            "and allow this host’s outbound IP, or set HTTP referrers and "
+            "GOOGLE_MAPS_HTTP_REFERER to a matching origin. "
             f"Google said: {message}"
         )
     return f"{kind} API error: {message}"

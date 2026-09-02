@@ -103,10 +103,6 @@ def test_property_map_metadata_from_result() -> None:
 
 def test_geocode_address_success(monkeypatch: pytest.MonkeyPatch, geocode_payload: dict) -> None:
     monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "app.report_writer.property_maps.PUBLIC_APP_URL",
-        "https://rag-document-analysis-backend.onrender.com",
-    )
     monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_HTTP_REFERER", "")
 
     mock_resp = MagicMock()
@@ -124,9 +120,39 @@ def test_geocode_address_success(monkeypatch: pytest.MonkeyPatch, geocode_payloa
     assert result.latitude == 26.33
     assert result.longitude == -81.81
     assert "Testville" in result.resolved_address
+    assert mock_client.get.call_args.kwargs["headers"] == {}
+
+
+def test_geocode_sends_referer_only_when_explicit(monkeypatch: pytest.MonkeyPatch, geocode_payload: dict) -> None:
+    monkeypatch.setattr("app.report_writer.property_maps.GOOGLE_MAPS_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.report_writer.property_maps.GOOGLE_MAPS_HTTP_REFERER",
+        "https://rag-document-analysis-backend.onrender.com",
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = geocode_payload
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    monkeypatch.setattr(
+        "app.report_writer.property_maps.get_async_client",
+        lambda: mock_client,
+    )
+
+    asyncio.run(geocode_address("100 Example Lane, Testville, FL"))
     headers = mock_client.get.call_args.kwargs["headers"]
     assert headers["Referer"] == "https://rag-document-analysis-backend.onrender.com/"
     assert headers["Origin"] == "https://rag-document-analysis-backend.onrender.com"
+
+
+def test_normalize_maps_referer_rejects_malformed() -> None:
+    from app.report_writer.property_maps import _normalize_maps_referer
+
+    assert _normalize_maps_referer("https:/rag-document-analysis-backend.onrender.com") is None
+    assert _normalize_maps_referer("https://rag-document-analysis-backend.onrender.com/") == (
+        "https://rag-document-analysis-backend.onrender.com"
+    )
 
 
 def test_geocode_address_rewrites_key_restriction_error(
@@ -156,7 +182,7 @@ def test_geocode_address_rewrites_key_restriction_error(
         asyncio.run(geocode_address("100 Example Lane, Testville, FL"))
     assert exc_info.value.status_code == 502
     assert "restricted" in str(exc_info.value.detail).lower()
-    assert "PUBLIC_APP_URL" in str(exc_info.value.detail)
+    assert "GOOGLE_MAPS_HTTP_REFERER" in str(exc_info.value.detail)
 
 
 def test_fetch_property_maps_persists_images(

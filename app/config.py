@@ -147,8 +147,8 @@ GOOGLE_DRIVE_DEFAULT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_DEFAULT_FOLDER_LAB
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID")
 GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL = _google_env("GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL")
 GOOGLE_MAPS_API_KEY = _google_env("GOOGLE_MAPS_API_KEY")
-# Optional Referer for server-side Geocoding / Static Maps when the key is
-# restricted to HTTP referrers. Falls back to PUBLIC_APP_URL when unset.
+# Optional. Only set if the Maps key is restricted to HTTP referrers (not IPs).
+# Do not copy PUBLIC_APP_URL here — a bad origin breaks IP-restricted keys.
 GOOGLE_MAPS_HTTP_REFERER = _google_env("GOOGLE_MAPS_HTTP_REFERER")
 
 # Supabase Auth: verify JWTs and expose URL/anon key to frontend via GET /config
