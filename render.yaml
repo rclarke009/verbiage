@@ -6,10 +6,11 @@
 #
 # Optional separate worker (extra ~$7/mo): see docs/render-worker-setup.md
 #
-# Sub-2GB instances: RERANK_ENABLED=0 avoids ~100MB CrossEncoder + warm-up 503s.
+# Prod Standard (2GB): RERANK_ENABLED=1 + SKIP_RERANK=0 bakes MiniLM at image build
+# (Render maps env vars to Docker ARG). Demo stays SKIP_RERANK=1 / RERANK_ENABLED=0.
 # Dual tenant: DATABASE_URL=TrueDB, DEMO_DATABASE_URL=verbiage-demo. Do not set DEMO_MODE.
 # INGEST_WORKER_ENABLED=1 processes photo vision on this service (no second worker).
-# Liveness probe: /health (instant). Use /health/ready manually or in deep monitoring (Postgres).
+# Health: /health/ready so Render waits out reranker warm-up (503 until MiniLM loads).
 #
 # Secrets use sync: false — managed in the Render dashboard.
 services:
@@ -17,9 +18,11 @@ services:
     name: rag-document-analysis-backend
     runtime: docker
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health
+    healthCheckPath: /health/ready
     envVars:
       - key: RERANK_ENABLED
+        value: "1"
+      - key: SKIP_RERANK
         value: "0"
       - key: INGEST_WORKER_ENABLED
         value: "1"
@@ -87,6 +90,8 @@ services:
         value: "5"
       - key: RERANK_ENABLED
         value: "0"
+      - key: SKIP_RERANK
+        value: "1"
       - key: INGEST_WORKER_ENABLED
         value: "0"
       - key: LLM_TOKEN_LIMIT

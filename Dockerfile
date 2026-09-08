@@ -19,8 +19,8 @@ ENV HF_HOME=/app/hf-cache \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Skip ~2GB torch/sentence-transformers bake when RERANK_ENABLED=0 (prod + demo default).
-# Rebuild with --build-arg SKIP_RERANK=0 if you enable reranking in production.
+# Skip ~2GB torch/sentence-transformers bake unless SKIP_RERANK=0.
+# Prod Render env sets SKIP_RERANK=0 (passed as a Docker build-arg). Demo leaves 1.
 ARG SKIP_RERANK=1
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
