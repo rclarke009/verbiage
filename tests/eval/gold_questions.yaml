@@ -228,7 +228,7 @@ questions:
       - 200_remote_example_st_farville
 
   - id: tile_roof_no_storm_opening_multi
-    question: "Which tile-roof properties had intact roof tiles and no storm-created opening?"
+    question: "Which properties had intact roof tiles and no storm-created opening?"
     category: answerable_multi
     must_mention: ["tile", "no storm-created opening"]
     relevant_doc_ids:
