@@ -16,7 +16,6 @@ import asyncio
 import os
 
 import psycopg2
-from pgvector.psycopg2 import register_vector
 
 from app.db import create_db
 from app.demo_corpus.seed import corpus_docs, seed_corpus_sync
@@ -29,9 +28,9 @@ except ImportError:  # pragma: no cover - fallback when imported as a top-level 
 
 def _connect_from_env():
     url = os.environ["EVAL_DATABASE_URL"]
-    conn = psycopg2.connect(url)
-    register_vector(conn)
-    return conn
+    # create_db enables the vector extension and registers the type.
+    # Registering first fails on a fresh eval database.
+    return psycopg2.connect(url)
 
 
 def main() -> None:

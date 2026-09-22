@@ -1,6 +1,7 @@
-# Faithfulness eval harness. Brings up an ephemeral pgvector DB, seeds the frozen
-# corpus, runs the eval, and tears the DB down. Requires Docker plus an LLM backend
-# (OPENAI_API_KEY or a running Ollama) and an embedding backend / warm cache.
+# Eval harness. Brings up an ephemeral pgvector DB, seeds the frozen corpus, runs
+# retrieval (recall@pool) + faithfulness, and tears the DB down. Requires Docker.
+# Faithfulness also needs an LLM backend (OPENAI_API_KEY or Ollama) and an embedding
+# backend / warm cache; retrieval-only needs the cache, not generation.
 
 # --env-file /dev/null: the eval stack needs nothing from the repo .env, and skipping
 # it avoids docker compose interpolation warnings from $-containing secrets in .env.
@@ -12,7 +13,7 @@ EVAL_ENV     := VERBIAGE_EVAL=1 EVAL_DATABASE_URL=$(EVAL_DB_URL)
 # bare `python3`, then `python`. Override with `make PYTHON=... eval` if needed.
 PYTHON ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || command -v python3 2>/dev/null || command -v python)
 
-.PHONY: eval eval-full eval-up eval-down eval-warm-cache
+.PHONY: eval eval-full eval-retrieval-rerank eval-up eval-down eval-warm-cache
 
 # Fast gate (local NLI judge) -- run this after every tweak.
 # Run the suite, ALWAYS tear the DB down, then exit with the suite's real status
@@ -23,6 +24,10 @@ eval: eval-up
 # Deep gate (OpenAI LLM-as-judge) -- nightly / manual.
 eval-full: eval-up
 	@$(EVAL_ENV) $(PYTHON) -m pytest -m eval_full tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
+
+# Optional: load the cross-encoder and compare recall@k vs slice-only on the same pool.
+eval-retrieval-rerank: eval-up
+	@$(EVAL_ENV) $(PYTHON) -m pytest -m eval_retrieval_rerank tests/eval -s; status=$$?; $(MAKE) eval-down; exit $$status
 
 eval-up:
 	-$(COMPOSE_EVAL) down -v --remove-orphans 2>/dev/null || true

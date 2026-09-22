@@ -20,6 +20,7 @@ from app.config import (
     DEMO_MODE,
     DEMO_OPEN_SIGNUP,
     DEMO_ANONYMOUS,
+    DEMO_REPORT_LIMIT,
     DEMO_SIGNUP_LIMIT,
     DEMO_SIGNUP_WINDOW_SECONDS,
     dual_tenant_enabled,
@@ -28,12 +29,16 @@ from app.errors import LLMRateLimitedError
 
 logger = logging.getLogger(__name__)
 
-_DEMO_ENABLED_TABS = ("chat", "preferences")
+_DEMO_ENABLED_TABS = ("chat", "report-writer", "preferences")
 DEMO_GUEST_USER_ID = "demo-guest"
 
 # Per-user Ask timestamps (demo only; in-memory, single worker).
 _ask_timestamps: dict[str, deque[float]] = defaultdict(deque)
 _ask_lock = asyncio.Lock()
+
+# Guest Report Writer generate timestamps (separate from Ask).
+_report_timestamps: dict[str, deque[float]] = defaultdict(deque)
+_report_lock = asyncio.Lock()
 
 # Signup attempts per client IP (demo only).
 _signup_timestamps: dict[str, deque[float]] = defaultdict(deque)
@@ -45,7 +50,7 @@ def is_demo_mode() -> bool:
 
 
 def is_demo_only_service() -> bool:
-    """True on a demo-only process (no Drive, ingest, or Report Writer)."""
+    """True on a demo-only process (no Drive or ingest). Report Writer stays on for the sample claim."""
     return DEMO_MODE and not dual_tenant_enabled()
 
 
@@ -129,6 +134,26 @@ async def acquire_demo_ask_quota(request: Request, user_id: str) -> None:
             f"Demo limit reached ({DEMO_ASK_LIMIT} searches per hour). Try again later."
         )
     await _record_event(_ask_timestamps, key, _ask_lock)
+
+
+async def acquire_demo_report_quota(request: Request, user_id: str) -> None:
+    """Consume one guest Report Writer generation. Signed-in users are not limited."""
+    if user_id != DEMO_GUEST_USER_ID:
+        return
+    key = f"ip:{_client_ip(request)}"
+    count = await _prune_and_count(
+        _report_timestamps, key, DEMO_ASK_WINDOW_SECONDS, _report_lock
+    )
+    if count >= DEMO_REPORT_LIMIT:
+        logger.info("demo report quota exceeded key=%s", key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Demo limit reached ({DEMO_REPORT_LIMIT} report drafts per hour). "
+                "Try again later."
+            ),
+        )
+    await _record_event(_report_timestamps, key, _report_lock)
 
 
 def demo_forbidden() -> None:

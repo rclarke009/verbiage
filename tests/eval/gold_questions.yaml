@@ -1,4 +1,4 @@
-# Frozen gold question set for the faithfulness eval.
+# Frozen gold question set for the faithfulness + retrieval eval.
 #
 # category:
 #   answerable_single  -> answer should come from one report
@@ -9,57 +9,92 @@
 # must_mention: substrings expected somewhere in the retrieved context. Used only
 #   as a retrieval-quality / context-relevance signal so a low faithfulness score
 #   can be attributed to the generator vs. the retriever. Not used for unanswerable.
+#
+# relevant_doc_ids: filename stems from app/demo_corpus/. Labeled gold for
+#   recall@pool / recall@k / MRR (document granularity). Required on answerable
+#   questions; omit on unanswerable.
 
 questions:
   - id: water_damage_storm_opening
     question: "Please provide text about water damage due to storm created opening"
     category: answerable_multi
     must_mention: ["storm-created opening", "water"]
+    relevant_doc_ids:
+      - 100_harbor_example_rd_sampletown
+      - 100_maple_ct_lakeside
+      - 150_ocean_example_terrace_surfside
+      - 200_birch_ave_riverton
+      - 200_remote_example_st_farville
+      - 400_willow_way_hillcrest
+      - 500_palm_example_blvd_gulfview
+      - 600_windward_example_lane_farpoint
+      - 800_sand_example_rd_duneville
 
   - id: sample_road_roof
     question: "What roof damage was found at 100 Harbor Example Road in Sampletown?"
     category: answerable_single
     must_mention: ["shingles"]
+    relevant_doc_ids:
+      - 100_harbor_example_rd_sampletown
 
   - id: floor_tiles_storm
     question: "How does water from a storm-created opening affect floor tiles?"
     category: answerable_multi
     must_mention: ["tile", "adhering"]
+    relevant_doc_ids:
+      - 100_harbor_example_rd_sampletown
+      - 100_maple_ct_lakeside
+      - 400_willow_way_hillcrest
+      - 600_windward_example_lane_farpoint
 
   - id: sample_city_moisture_cause
     question: "What caused the interior moisture at 412 Example Drive in Sample City?"
     category: answerable_single
     must_mention: ["plumbing", "leak"]
+    relevant_doc_ids:
+      - 412_example_drive_samplecity
 
   - id: hail_tile_gulfview
     question: "What hail damage was found on the tile roof at 500 Palm Example Boulevard in Gulfview?"
     category: answerable_single
     must_mention: ["hail", "tile"]
+    relevant_doc_ids:
+      - 500_palm_example_blvd_gulfview
 
   - id: hail_quotes_verbose
     question: "please provide quotes about hail damage"
     category: answerable_single
     must_mention: ["hailstone", "tile"]
+    relevant_doc_ids:
+      - 500_palm_example_blvd_gulfview
 
   - id: hail_quotes_will_you_please
     question: "will you please provide information on hail damage from our reports"
     category: answerable_single
     must_mention: ["hailstone", "tile"]
+    relevant_doc_ids:
+      - 500_palm_example_blvd_gulfview
 
   - id: hail_quotes_suffix
     question: "hail damage quote please"
     category: answerable_single
     must_mention: ["hailstone", "tile"]
+    relevant_doc_ids:
+      - 500_palm_example_blvd_gulfview
 
   - id: soffit_fascia_surfside
     question: "Describe the soffit and fascia damage at 150 Ocean Example Terrace in Surfside."
     category: answerable_single
     must_mention: ["soffit", "fascia"]
+    relevant_doc_ids:
+      - 150_ocean_example_terrace_surfside
 
   - id: no_storm_damage_groveport
     question: "Was any storm-related roof damage found at 250 Mango Example Court in Groveport?"
     category: answerable_single
     must_mention: ["no storm-related", "metal"]
+    relevant_doc_ids:
+      - 250_mango_example_ct_groveport
 
   - id: wyoming_hail
     question: "What hail damage was found on roofs in Wyoming?"
@@ -79,6 +114,9 @@ questions:
       latitude: 26.976
       longitude: -82.090
     must_mention: ["Maple", "Willow"]
+    relevant_doc_ids:
+      - 100_maple_ct_lakeside
+      - 400_willow_way_hillcrest
 
   # --- Expanded set (25): grounded in app/demo_corpus + deliberate refusals ---
 
@@ -86,81 +124,116 @@ questions:
     question: "What roof damage was observed at 100 Maple Court in Lakeside?"
     category: answerable_single
     must_mention: ["shingles", "windward"]
+    relevant_doc_ids:
+      - 100_maple_ct_lakeside
 
   - id: birch_riverton_crown_molding
     question: "What interior cracking was found in the primary bedroom at 200 Birch Avenue in Riverton?"
     category: answerable_single
     must_mention: ["crown molding", "water intrusion"]
+    relevant_doc_ids:
+      - 200_birch_ave_riverton
 
   - id: farville_bathroom_window
     question: "Describe the hall bathroom damage at 200 Remote Example Street in Farville."
     category: answerable_single
     must_mention: ["window frame", "wall cavity"]
+    relevant_doc_ids:
+      - 200_remote_example_st_farville
 
   - id: cedar_brookfield_plumbing
     question: "What caused the interior moisture at 300 Cedar Lane in Brookfield?"
     category: answerable_single
     must_mention: ["plumbing", "kitchen sink"]
+    relevant_doc_ids:
+      - 300_cedar_ln_brookfield
 
   - id: willow_hillcrest_moisture_readings
     question: "What did moisture readings show at 400 Willow Way in Hillcrest?"
     category: answerable_single
     must_mention: ["moisture readings", "elevated"]
+    relevant_doc_ids:
+      - 400_willow_way_hillcrest
 
   - id: windward_farpoint_family_room
     question: "What floor tile condition was reported at 600 Windward Example Lane in Farpoint?"
     category: answerable_single
     must_mention: ["family room", "adhering"]
+    relevant_doc_ids:
+      - 600_windward_example_lane_farpoint
 
   - id: duneville_chimney_cricket
     question: "What storm-created opening was found near the chimney at 800 Sand Example Road in Duneville?"
     category: answerable_single
     must_mention: ["chimney cricket", "flashing"]
+    relevant_doc_ids:
+      - 800_sand_example_rd_duneville
 
   - id: duneville_west_stucco
     question: "What exterior stucco damage was noted on the west elevation at 800 Sand Example Road in Duneville?"
     category: answerable_single
     must_mention: ["stucco", "window corners"]
+    relevant_doc_ids:
+      - 800_sand_example_rd_duneville
 
   - id: surfside_attic_staining
     question: "What attic conditions were observed at 150 Ocean Example Terrace in Surfside?"
     category: answerable_single
     must_mention: ["attic sheathing", "water staining"]
+    relevant_doc_ids:
+      - 150_ocean_example_terrace_surfside
 
   - id: gulfview_living_room_ceiling
     question: "What interior ceiling damage was found at 500 Palm Example Boulevard in Gulfview?"
     category: answerable_single
     must_mention: ["living room", "ceiling", "moisture"]
+    relevant_doc_ids:
+      - 500_palm_example_blvd_gulfview
 
   - id: groveport_metal_roof_intact
     question: "Were the metal roof panels damaged at 250 Mango Example Court in Groveport?"
     category: answerable_single
     must_mention: ["metal roof", "intact"]
+    relevant_doc_ids:
+      - 250_mango_example_ct_groveport
 
   - id: sampletown_garage_ceiling
     question: "What garage water damage was documented at 100 Harbor Example Road in Sampletown?"
     category: answerable_single
     must_mention: ["garage", "ceiling", "drywall"]
+    relevant_doc_ids:
+      - 100_harbor_example_rd_sampletown
 
   - id: sampletown_bedroom_windowsill
     question: "What windowsill damage was observed at 100 Harbor Example Road in Sampletown?"
     category: answerable_single
     must_mention: ["windowsill", "cracking"]
+    relevant_doc_ids:
+      - 100_harbor_example_rd_sampletown
 
   - id: plumbing_not_storm_multi
     question: "Which inspected properties had interior moisture from a plumbing leak rather than a storm-created opening?"
     category: answerable_multi
     must_mention: ["plumbing", "kitchen sink"]
+    relevant_doc_ids:
+      - 300_cedar_ln_brookfield
+      - 412_example_drive_samplecity
 
   - id: hip_roof_south_slope_multi
     question: "Which reports describe high-velocity winds tearing shingles on a south-facing slope of a hip roof?"
     category: answerable_multi
     must_mention: ["south-facing", "hip roof", "underlayment"]
+    relevant_doc_ids:
+      - 200_birch_ave_riverton
+      - 200_remote_example_st_farville
 
   - id: tile_roof_no_storm_opening_multi
     question: "Which tile-roof properties had intact roof tiles and no storm-created opening?"
     category: answerable_multi
     must_mention: ["tile", "no storm-created opening"]
+    relevant_doc_ids:
+      - 300_cedar_ln_brookfield
+      - 412_example_drive_samplecity
 
   - id: nearby_ian_willow
     question: "Which nearby properties share the same storm as this claim?"
@@ -172,6 +245,9 @@ questions:
       latitude: 26.968
       longitude: -82.115
     must_mention: ["Maple", "Harbor"]
+    relevant_doc_ids:
+      - 100_maple_ct_lakeside
+      - 100_harbor_example_rd_sampletown
 
   - id: wildfire_california_ash
     question: "Summarize wildfire ash and smoke damage findings for California properties in the inspections."

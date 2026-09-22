@@ -288,9 +288,13 @@ async def lifespan(app):
         from app.demo_seed import maybe_seed_demo_corpus
 
         def _seed_demo() -> int | None:
+            from app.demo_sample import ensure_demo_sample_claim
+
             conn = seed_pool.getconn()
             try:
-                return maybe_seed_demo_corpus(conn)
+                seeded_docs = maybe_seed_demo_corpus(conn)
+                ensure_demo_sample_claim(conn)
+                return seeded_docs
             finally:
                 seed_pool.putconn(conn)
 
@@ -333,25 +337,22 @@ async def lifespan(app):
     report_writer_cm = None
     app.state.report_writer_graph = None
     app.state.report_writer_regen_graph = None
-    if not is_demo_only_service():
-        try:
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from app.report_writer.graph import build_regenerate_section_graph, build_report_writer_graph
 
-            rw_db_url = report_writer_database_url()
-            if rw_db_url != DATABASE_URL:
-                logger.info("Report Writer checkpointer using session-mode Postgres URL (6543 pooler is incompatible)")
-            report_writer_cm = AsyncPostgresSaver.from_conn_string(rw_db_url)
-            checkpointer = await report_writer_cm.__aenter__()
-            await checkpointer.setup()
-            app.state.report_writer_graph = build_report_writer_graph(checkpointer)
-            app.state.report_writer_regen_graph = build_regenerate_section_graph(checkpointer)
-            app.state.report_writer_checkpointer_cm = report_writer_cm
-            logger.info("Report Writer LangGraph compiled with Postgres checkpointer")
-        except Exception as e:
-            logger.warning("Report Writer graph init failed (report-writer routes unavailable): %s", e)
-    else:
-        logger.info("Report Writer disabled (demo mode)")
+        rw_db_url = report_writer_database_url()
+        if rw_db_url != DATABASE_URL:
+            logger.info("Report Writer checkpointer using session-mode Postgres URL (6543 pooler is incompatible)")
+        report_writer_cm = AsyncPostgresSaver.from_conn_string(rw_db_url)
+        checkpointer = await report_writer_cm.__aenter__()
+        await checkpointer.setup()
+        app.state.report_writer_graph = build_report_writer_graph(checkpointer)
+        app.state.report_writer_regen_graph = build_regenerate_section_graph(checkpointer)
+        app.state.report_writer_checkpointer_cm = report_writer_cm
+        logger.info("Report Writer LangGraph compiled with Postgres checkpointer")
+    except Exception as e:
+        logger.warning("Report Writer graph init failed (report-writer routes unavailable): %s", e)
 
     yield
 
@@ -1133,6 +1134,7 @@ async def _retrieve_for_ask(
     embedding_model: str | None,
     rag_endpoint: str,
     reranker,                      # <-- new: request.app.state.reranker
+    candidate_k: int | None = None,
 ) -> RetrieveOutcome:
     """Retrieve chunks per ask_request.retrieval_mode and record mode-appropriate metrics.
 
@@ -1144,11 +1146,19 @@ async def _retrieve_for_ask(
     cosine similarity is below RAG_MIN_RELEVANCE_SCORE the result is dropped to [], so
     the existing zero-chunk path in _ask_prompt_from_chunks turns it into a refusal.
     Pure lexical lookups have no cosine and are never gated.
+
+    ``candidate_k`` overrides first-pass pool size. When omitted, the pool widens to
+    ``max(top_k * 4, 20)`` only if a reranker is present; otherwise it stays ``top_k``.
+    Eval passes an explicit pool width so recall@pool can be scored without loading
+    the cross-encoder. ``pool_chunks`` on the outcome is the pre-rerank / pre-slice list.
     """
     rerank_ms: float | None = None
     with rag_phase_span("retrieve", endpoint=rag_endpoint) as retrieve_span:
         top_k = ask_request.top_k
-        pool_k = max(top_k * 4, 20) if reranker is not None else top_k
+        if candidate_k is not None:
+            pool_k = candidate_k
+        else:
+            pool_k = max(top_k * 4, 20) if reranker is not None else top_k
         auto_routed = ask_request.retrieval_mode == "auto"
         resolved_mode = ask_request.retrieval_mode
         gate_blocked = False
@@ -1215,6 +1225,17 @@ async def _retrieve_for_ask(
             gate_blocked=gate_blocked if gate_blocked else None,
         )
 
+        def _outcome(ranked: list[RetrievedChunk]) -> RetrieveOutcome:
+            return RetrieveOutcome(
+                chunks=ranked,
+                top_cosine=top_cosine,
+                gate_blocked=gate_blocked,
+                retrieval_mode=resolved_mode,
+                auto_routed=auto_routed,
+                rerank_ms=rerank_ms,
+                pool_chunks=list(candidates),
+            )
+
         if candidates and reranker is not None and len(candidates) > 1:
             with rag_phase_span("rerank", endpoint=rag_endpoint) as rerank_span:
                 t_rerank = time.perf_counter()
@@ -1224,23 +1245,9 @@ async def _retrieve_for_ask(
                 rerank_ms = (time.perf_counter() - t_rerank) * 1000.0
                 if rerank_span is not None:
                     rerank_span.set_attribute("rag.chunk_count", len(ranked))
-                return RetrieveOutcome(
-                    chunks=ranked,
-                    top_cosine=top_cosine,
-                    gate_blocked=gate_blocked,
-                    retrieval_mode=resolved_mode,
-                    auto_routed=auto_routed,
-                    rerank_ms=rerank_ms,
-                )
+                return _outcome(ranked)
         ranked = await _rerank_chunks(ask_request.question, candidates, top_k, reranker)
-        return RetrieveOutcome(
-            chunks=ranked,
-            top_cosine=top_cosine,
-            gate_blocked=gate_blocked,
-            retrieval_mode=resolved_mode,
-            auto_routed=auto_routed,
-            rerank_ms=rerank_ms,
-        )
+        return _outcome(ranked)
 
 
 def _sources_payload_for_sse(top_chunks: list[RetrievedChunk]) -> list[dict]:
@@ -1968,8 +1975,7 @@ async def auth_google_callback(
 
 from app.report_writer.router import router as report_writer_router
 
-if not is_demo_only_service():
-    app.include_router(report_writer_router)
+app.include_router(report_writer_router)
 
 
 # Mount static frontend last so API routes take precedence.

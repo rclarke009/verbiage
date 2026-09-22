@@ -150,6 +150,24 @@ def test_retrieve_for_ask_no_reranker_uses_topk_pool(monkeypatch):
 
     assert calls["vector"][2] == 5  # 3rd positional arg is the pool size -> no widening
     assert [c.chunk_id for c in out.chunks] == ["v"]
+    assert [c.chunk_id for c in out.pool_chunks] == ["v"]
+
+
+def test_retrieve_for_ask_candidate_k_widens_without_reranker(monkeypatch):
+    """Eval forces pool width via candidate_k so recall@pool != recall@k without MiniLM."""
+    calls: dict = {}
+    pool_chunks = [_rc(str(i), 0.9) for i in range(20)]
+    monkeypatch.setattr(main, "retrieve_top_k", _spy(calls, "vector", pool_chunks))
+    monkeypatch.setattr(main, "record_retrieval_scores", lambda *a, **k: None)
+
+    req = AskRequest(question="q", retrieval_mode="vector", top_k=5)
+    out = asyncio.run(
+        main._retrieve_for_ask(None, req, [0.0], "model", "sync", None, candidate_k=20)
+    )
+
+    assert calls["vector"][2] == 20
+    assert [c.chunk_id for c in out.pool_chunks] == [str(i) for i in range(20)]
+    assert [c.chunk_id for c in out.chunks] == [str(i) for i in range(5)]
 
 
 def test_retrieve_for_ask_widens_pool_and_reranks_vector(monkeypatch):
@@ -165,6 +183,8 @@ def test_retrieve_for_ask_widens_pool_and_reranks_vector(monkeypatch):
     assert calls["vector"][2] == 20  # max(top_k*4, 20) == 20
     assert fake.calls == 1
     assert len(out.chunks) == 5  # reranked pool trimmed back to top_k
+    assert [c.chunk_id for c in out.pool_chunks] == [str(i) for i in range(20)]
+    assert len(out.pool_chunks) == 20
 
 
 def test_retrieve_for_ask_gate_blocks_before_rerank(monkeypatch):
@@ -178,6 +198,7 @@ def test_retrieve_for_ask_gate_blocks_before_rerank(monkeypatch):
     out = asyncio.run(main._retrieve_for_ask(None, req, [0.0], "model", "sync", fake))
 
     assert out.chunks == []
+    assert out.pool_chunks == []
     assert fake.calls == 0
 
 

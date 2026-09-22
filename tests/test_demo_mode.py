@@ -18,9 +18,11 @@ from tests.conftest_api import api_client, clear_api_overrides, prime_app_state,
 def reset_demo_state():
     demo_module._ask_timestamps.clear()
     demo_module._signup_timestamps.clear()
+    demo_module._report_timestamps.clear()
     yield
     demo_module._ask_timestamps.clear()
     demo_module._signup_timestamps.clear()
+    demo_module._report_timestamps.clear()
 
 
 def test_config_includes_demo_fields_when_demo_mode():
@@ -32,7 +34,7 @@ def test_config_includes_demo_fields_when_demo_mode():
     data = resp.json()
     assert data["demo_mode"] is True
     assert data["demo_anonymous"] is True
-    assert data["enabled_tabs"] == ["chat", "preferences"]
+    assert data["enabled_tabs"] == ["chat", "report-writer", "preferences"]
     assert "{feature}" in data["demo_gate_message"]
     assert "google_drive_default_folder_id" not in data
 
@@ -54,7 +56,7 @@ def test_config_dual_tenant_includes_auth_and_guest_flags():
     data = resp.json()
     assert data["demo_mode"] is False
     assert data["demo_anonymous"] is True
-    assert data["enabled_tabs"] == ["chat", "preferences"]
+    assert data["enabled_tabs"] == ["chat", "report-writer", "preferences"]
     assert "google_drive_default_folder_id" in data
 
 
@@ -391,3 +393,32 @@ def test_assert_live_database_content_allows_real_docs():
 
     with patch("app.demo_database.dual_tenant_enabled", return_value=True):
         assert_live_database_content(conn)
+
+
+def test_guest_cannot_create_report_claim():
+    from app.auth import get_report_writer_user
+    from app.demo import DEMO_GUEST_USER_ID
+
+    main.app.dependency_overrides[get_report_writer_user] = lambda: DEMO_GUEST_USER_ID
+    try:
+        resp = TestClient(main.app).post("/report-writer/claims", json={})
+    finally:
+        main.app.dependency_overrides.pop(get_report_writer_user, None)
+    assert resp.status_code == 403
+
+
+def test_guest_report_quota_is_separate_from_ask():
+    request = MagicMock()
+    request.headers = {}
+    request.client = MagicMock(host="203.0.113.9")
+
+    async def _burn():
+        for _ in range(demo_module.DEMO_REPORT_LIMIT):
+            await demo_module.acquire_demo_report_quota(request, demo_module.DEMO_GUEST_USER_ID)
+        with pytest.raises(Exception) as exc:
+            await demo_module.acquire_demo_report_quota(request, demo_module.DEMO_GUEST_USER_ID)
+        return exc
+
+    exc = asyncio.run(_burn())
+    assert exc.value.status_code == 429
+    assert "report drafts" in exc.value.detail

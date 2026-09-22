@@ -165,9 +165,11 @@ Sudden collapse of lexical (full-text) hits → **query mix changed**, or **`tsv
 
 ### recall@k
 
-Of the gold-relevant chunks, what fraction appear in the **top-k** results?
+Of the gold-relevant **documents**, what fraction appear in the **top-k** prompt results?
 
-In a **retrieve-then-rerank** pipeline, **first-pass recall@k matters most**: the reranker can only reorder what first-pass found. If the right chunk never entered the candidate pool, reranking can’t save it.
+In a **retrieve-then-rerank** pipeline, **first-pass recall@pool matters most**: the reranker can only reorder what first-pass found. If the right report never entered the candidate pool, reranking can’t save it.
+
+**Implemented** on the frozen eval corpus (document-level `relevant_doc_ids`, \(P=20\), \(k=3\)). See [retrieval-eval.md](retrieval-eval.md) for why doc-level labeled recall (not RAGAS, not chunk IDs, not Prometheus) and the interview Q→A.
 
 ### nDCG@k
 
@@ -243,8 +245,9 @@ End-to-end can **hide** a stage regression: cheap/fast requests average the pain
 | First infra check when retrieval drops? | Embedding model version. |
 | Why embedding version change breaks retrieval? | Different versions embed into different spaces. |
 | After embedding version change? | Re-embed the whole corpus. |
-| recall@k? | Of gold-relevant chunks, fraction in top-k. |
-| Why first-pass recall@k matters most? | Reranker can only reorder what first-pass found. |
+| recall@k? | Of gold-relevant **docs**, fraction in the prompt top-k. |
+| Why first-pass recall@pool matters most? | Reranker can only reorder what first-pass found. |
+| Where is recall@pool implemented? | `tests/eval/test_retrieval.py`; design notes in [retrieval-eval.md](retrieval-eval.md). |
 | nDCG@k? | Ranking quality: relevant items count more higher up (normalized to ideal). |
 | nDCG@k especially useful for? | Ranked lists — including reranker quality. |
 | MRR? | Average of 1 / (rank of first relevant result). |
@@ -274,6 +277,6 @@ The faithfulness eval runner mirrors Ask’s normalize + rewrite-once path ([`te
 
 **Live drift:** gate-pass, cosine, lexical hit-rate, stage latency, embedding version, index size.
 
-**Gold regression:** faithfulness 1.0, refusal 1.0 on should-refuse, false-refusal ~0, plus claim-level fails.
+**Gold regression:** faithfulness 1.0, refusal 1.0 on should-refuse, false-refusal ~0, plus claim-level fails; retrieval recall@pool 1.0 (see [retrieval-eval.md](retrieval-eval.md)).
 
-Code pointers: [`tests/eval/judges.py`](../tests/eval/judges.py) (NliJudge), [`tests/eval/test_faithfulness.py`](../tests/eval/test_faithfulness.py), [`app/config.py`](../app/config.py) (`RAG_MIN_RELEVANCE_SCORE`), [`app/corrective.py`](../app/corrective.py), [`setup_and_testing.md`](../setup_and_testing.md) (how to run `make eval`).
+Code pointers: [`tests/eval/judges.py`](../tests/eval/judges.py) (NliJudge), [`tests/eval/test_faithfulness.py`](../tests/eval/test_faithfulness.py), [`tests/eval/test_retrieval.py`](../tests/eval/test_retrieval.py), [`app/config.py`](../app/config.py) (`RAG_MIN_RELEVANCE_SCORE`), [`app/corrective.py`](../app/corrective.py), [`setup_and_testing.md`](../setup_and_testing.md) (how to run `make eval`).

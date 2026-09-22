@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import Response, StreamingResponse
 from psycopg2.pool import PoolError
 
-from app.auth import get_current_user
+from app.auth import get_report_writer_user
+from app.demo import DEMO_GUEST_USER_ID, acquire_demo_report_quota, demo_forbidden
+from app.demo_sample import DEMO_SAMPLE_CLAIM_ID
 from app.config import GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID, GOOGLE_DRIVE_JOBS_ROOT_FOLDER_LABEL
 from app.db import cancel_ingest_batch, get_ingest_batch, get_ingest_batch_errors, get_valid_conn
 from app.drive_client import (
@@ -142,8 +144,34 @@ def _claim_response(claim: dict, sections: dict | None = None) -> ClaimResponse:
     )
 
 
+def _db_pool(request: Request):
+    """Prod pool unless this request is a demo guest (dual-tenant)."""
+    tenant = getattr(request.state, "db_tenant", "prod")
+    if tenant == "demo":
+        demo_pool = getattr(request.app.state, "demo_db_pool", None)
+        if demo_pool is not None:
+            return demo_pool
+    return request.app.state.db_pool
+
+
+def _reject_guest(user_id: str) -> None:
+    if user_id == DEMO_GUEST_USER_ID:
+        demo_forbidden()
+
+
+def _guest_sample_only(user_id: str, claim_id: str) -> None:
+    if user_id == DEMO_GUEST_USER_ID and claim_id != DEMO_SAMPLE_CLAIM_ID:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+
+async def _guest_generate(request: Request, user_id: str, claim_id: str) -> None:
+    _guest_sample_only(user_id, claim_id)
+    if user_id == DEMO_GUEST_USER_ID:
+        await acquire_demo_report_quota(request, user_id)
+
+
 async def _with_conn(request: Request, fn):
-    pool = request.app.state.db_pool
+    pool = _db_pool(request)
     try:
         conn = get_valid_conn(pool)
     except PoolError as e:
@@ -190,8 +218,9 @@ def _batch_status_response(batch: dict, errors: list[str]) -> IngestBatchStatusR
 @router.get("/drive/match-folder", response_model=DriveFolderMatchResponse)
 async def match_photo_folder(
     address: str = Query(..., min_length=3),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     jobs_root = resolve_drive_folder_id(GOOGLE_DRIVE_JOBS_ROOT_FOLDER_ID)
     if not jobs_root:
         raise HTTPException(
@@ -216,8 +245,9 @@ async def match_photo_folder(
 async def suggest_address(
     q: str = Query(..., min_length=3),
     limit: int = Query(default=5, ge=1, le=10),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     results = await search_addresses(q.strip(), limit=limit)
     return AddressSuggestResponse(
         suggestions=[
@@ -239,8 +269,9 @@ async def suggest_address(
 async def get_claim_weather(
     address: str = Query(..., min_length=3),
     date: str = Query(..., min_length=4, description="Storm date (ISO or display format)"),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     try:
         storm_date = parse_storm_date(date)
     except ValueError as e:
@@ -300,8 +331,9 @@ async def get_property_map(
     request: Request,
     address: str = Query(..., min_length=3),
     claim_id: str | None = Query(default=None),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     previous_meta: dict | None = None
     if claim_id:
 
@@ -359,8 +391,9 @@ async def get_property_map_image(
     request: Request,
     claim_id: str,
     variant: str = Query(..., pattern="^(satellite|roadmap)$"),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -412,8 +445,9 @@ async def get_property_appraiser(
     address: str = Query(..., min_length=3),
     claim_id: str | None = Query(default=None),
     force: bool = Query(default=False),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     previous_meta: dict | None = None
     if claim_id:
 
@@ -472,8 +506,9 @@ async def get_property_appraiser(
 async def get_property_appraiser_image(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -517,8 +552,9 @@ async def get_historical_aerials(
     address: str = Query(..., min_length=3),
     date: str = Query(..., min_length=4, description="Storm / DOL date (ISO or display format)"),
     claim_id: str | None = Query(default=None),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     previous_meta: dict | None = None
     if claim_id:
 
@@ -596,8 +632,9 @@ async def get_historical_aerial_image(
     request: Request,
     claim_id: str,
     year: int = Query(..., ge=1990, le=2100),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -648,8 +685,9 @@ async def get_historical_aerial_image(
 async def get_photo_analysis_counts(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _counts(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -667,8 +705,9 @@ async def sync_photos_from_drive(
     request: Request,
     claim_id: str,
     body: PhotoSyncRequest | None = None,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _folders_for_claim(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -693,7 +732,8 @@ async def sync_photos_from_drive(
             detail="No photo folder linked. Set drive_photo_folders on the claim or pass folder_id.",
         )
 
-    conn = get_valid_conn(request.app.state.db_pool)
+    pool = _db_pool(request)
+    conn = get_valid_conn(pool)
     try:
         try:
             result = await sync_claim_photos_from_drive(
@@ -705,7 +745,7 @@ async def sync_photos_from_drive(
         except ValueError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
     finally:
-        request.app.state.db_pool.putconn(conn)
+        pool.putconn(conn)
 
     return PhotoSyncResponse(**result)
 
@@ -714,9 +754,10 @@ async def sync_photos_from_drive(
 async def retry_stuck_photos(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
     """Reset orphaned running/failed image rows and re-enqueue vision jobs."""
+    _reject_guest(user_id)
 
     def _retry(conn):
         reset = reset_stuck_claim_photos(conn, claim_id, user_id, max_age_minutes=None)
@@ -743,8 +784,9 @@ async def get_photo_batch_status(
     request: Request,
     claim_id: str,
     batch_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _get(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -772,8 +814,9 @@ async def cancel_photo_batch(
     request: Request,
     claim_id: str,
     batch_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _cancel(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -802,8 +845,9 @@ async def cancel_photo_batch(
 async def post_claim(
     request: Request,
     body: ClaimCreateRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     validate_report_type_metadata(body.property_metadata)
     metadata = normalize_report_type_metadata(body.property_metadata)
 
@@ -824,8 +868,9 @@ async def post_claim(
 async def import_job_package(
     request: Request,
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -853,10 +898,13 @@ async def import_job_package(
 @router.get("/claims", response_model=ClaimsListResponse)
 async def get_claims(
     request: Request,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
     def _list(conn):
-        return list_claims(conn, user_id)
+        claims = list_claims(conn, user_id)
+        if user_id == DEMO_GUEST_USER_ID:
+            return [c for c in claims if c["claim_id"] == DEMO_SAMPLE_CLAIM_ID]
+        return claims
 
     claims = await _with_conn(request, _list)
     return ClaimsListResponse(claims=[_claim_response(c) for c in claims])
@@ -866,8 +914,9 @@ async def get_claims(
 async def get_claim_detail(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _get(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -887,8 +936,9 @@ async def patch_claim(
     request: Request,
     claim_id: str,
     body: ClaimUpdateRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     if body.property_metadata is not None:
         validate_report_type_metadata(body.property_metadata)
 
@@ -940,8 +990,9 @@ async def patch_claim(
 async def remove_claim(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     def _delete(conn):
         return delete_claim(conn, claim_id, user_id)
 
@@ -957,8 +1008,9 @@ async def patch_section(
     claim_id: str,
     section_key: str,
     body: SectionUpdateRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _edit(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -990,8 +1042,9 @@ async def generate_draft(
     request: Request,
     claim_id: str,
     body: GenerateRequest | None = None,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    await _guest_generate(request, user_id, claim_id)
     graph = request.app.state.report_writer_graph
     if graph is None:
         raise HTTPException(status_code=503, detail="Report Writer graph not initialized")
@@ -1039,7 +1092,7 @@ async def generate_draft(
     }
     config = {"configurable": {"thread_id": claim_id}}
 
-    deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
+    deps = ReportWriterDeps(db_pool=_db_pool(request), reranker=request.app.state.reranker)
 
     async def event_iter():
         token = set_report_writer_deps(deps)
@@ -1074,8 +1127,9 @@ async def cancel_generation(
     request: Request,
     claim_id: str,
     body: CancelGenerationRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _cancel(conn):
         return cancel_generation_run_if_running(
             conn,
@@ -1094,8 +1148,9 @@ async def regenerate_section(
     claim_id: str,
     section_key: str,
     body: RegenerateSectionRequest | None = None,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    await _guest_generate(request, user_id, claim_id)
     regen_graph = getattr(request.app.state, "report_writer_regen_graph", None)
     if regen_graph is None:
         raise HTTPException(status_code=503, detail="Regenerate graph not initialized")
@@ -1142,7 +1197,7 @@ async def regenerate_section(
         "errors": [],
     }
     config = {"configurable": {"thread_id": f"{claim_id}:regen:{run_id}"}}
-    deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
+    deps = ReportWriterDeps(db_pool=_db_pool(request), reranker=request.app.state.reranker)
 
     async def event_iter():
         token = set_report_writer_deps(deps)
@@ -1173,8 +1228,9 @@ async def resume_generation(
     request: Request,
     claim_id: str,
     body: ResumeRequest,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     graph = request.app.state.report_writer_graph
     if graph is None:
         raise HTTPException(status_code=503, detail="Report Writer graph not initialized")
@@ -1190,7 +1246,7 @@ async def resume_generation(
     if body.action == "cancel":
         return {"status": "cancelled"}
 
-    deps = ReportWriterDeps(db_pool=request.app.state.db_pool, reranker=request.app.state.reranker)
+    deps = ReportWriterDeps(db_pool=_db_pool(request), reranker=request.app.state.reranker)
     run_id = str(uuid.uuid4())
 
     async def event_iter():
@@ -1218,8 +1274,9 @@ async def resume_generation(
 async def get_runs(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _list(conn):
         return list_generation_runs(conn, claim_id, user_id)
 
@@ -1234,8 +1291,9 @@ async def get_run_detail(
     request: Request,
     claim_id: str,
     run_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _get(conn):
         return get_generation_run(conn, claim_id, run_id, user_id)
 
@@ -1269,8 +1327,9 @@ async def upload_image(
     request: Request,
     claim_id: str,
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _reject_guest(user_id)
     data = await file.read()
     filename = file.filename or "photo.jpg"
     content_type = file.content_type or "application/octet-stream"
@@ -1311,8 +1370,9 @@ async def upload_image(
 async def get_images(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _list(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -1329,9 +1389,10 @@ async def get_images(
 async def export_docx(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
     mode: str = Query("pages"),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:
@@ -1366,9 +1427,10 @@ async def export_docx(
 async def export_pdf(
     request: Request,
     claim_id: str,
-    user_id: str = Depends(get_current_user),
+    user_id: str = Depends(get_report_writer_user),
     mode: str = Query("full"),
 ):
+    _guest_sample_only(user_id, claim_id)
     def _load(conn):
         claim = get_claim(conn, claim_id, user_id)
         if not claim:

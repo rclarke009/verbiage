@@ -104,6 +104,8 @@ class RetrieveOutcome:
     retrieval_mode: str = "auto"
     auto_routed: bool = False
     rerank_ms: float | None = None
+    # Pre-rerank / pre-slice first-pass list. Same as chunks when no widening occurred.
+    pool_chunks: list[RetrievedChunk] = field(default_factory=list)
 
 
 @dataclass

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.auth import get_current_user
+from app.auth import get_current_user, get_report_writer_user
 from app.report_writer.nodes.gate import gate_retrieval, route_after_gate
 from app.report_writer.nodes.normalize import normalize_inputs
 from app.report_writer.state import ReportWriterState
@@ -74,12 +74,14 @@ def test_gate_passes_with_chunks():
 
 def _client() -> TestClient:
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    main.app.dependency_overrides[get_report_writer_user] = lambda: "test-user"
     main.app.state.report_writer_graph = MagicMock()
     return TestClient(main.app)
 
 
 def _clear_overrides() -> None:
     main.app.dependency_overrides.pop(get_current_user, None)
+    main.app.dependency_overrides.pop(get_report_writer_user, None)
 
 
 async def _fake_stream(*args, **kwargs):

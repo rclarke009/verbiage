@@ -35,6 +35,7 @@ export function PhotoFolderPanel({
   syncError,
   photoCounts,
   onUploadBatchStarted,
+  samplePhotos = false,
 }: {
   claimId: string
   claim: Claim
@@ -44,9 +45,10 @@ export function PhotoFolderPanel({
   syncError: string | null
   photoCounts?: PhotoAnalysisCounts | null
   onUploadBatchStarted?: (batchId: string) => void
+  samplePhotos?: boolean
 }) {
   const meta = claim.property_metadata || {}
-  const address = composeFullAddress(meta as StructuredAddress)
+  const address = samplePhotos ? '' : composeFullAddress(meta as StructuredAddress)
   const folders = normalizeDrivePhotoFolders(meta)
   const hasFolders = folders.length > 0
   const { matches, suggestedId, status: matchStatus, error: matchError } = useAddressFolderMatch(address)
@@ -128,6 +130,43 @@ export function PhotoFolderPanel({
     background: 'var(--app-surface)',
     cursor: 'pointer',
     fontSize: 13,
+  }
+
+  if (samplePhotos) {
+    return (
+      <fieldset
+        style={{
+          border: '2px solid var(--app-primary)',
+          borderRadius: 8,
+          padding: 14,
+          margin: 0,
+          background: 'var(--app-surface)',
+        }}
+      >
+        <legend style={{ ...stepLegend, padding: '0 6px' }}>Step 2 — Sample roof photos</legend>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)', lineHeight: 1.5 }}>
+          These are generic roof photos for the sample claim. They are not from a client job.
+        </p>
+        {images.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--app-text-subtle)' }}>Loading photos…</p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+            {images.map(img => {
+              const caption = img.vision_analysis?.caption
+              const captionText = typeof caption === 'string' ? caption : ''
+              return (
+              <li key={img.image_id} style={{ marginBottom: 4 }}>
+                {img.filename}{' '}
+                <span style={{ color: 'var(--app-text-muted)' }}>
+                  {captionText ? `— ${captionText}` : ''}
+                </span>
+              </li>
+              )
+            })}
+          </ul>
+        )}
+      </fieldset>
+    )
   }
 
   return (

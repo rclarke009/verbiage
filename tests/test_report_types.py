@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.auth import get_current_user
+from app.auth import get_current_user, get_report_writer_user
 from app.report_writer.constants import (
     REPORT_TYPES,
     get_report_type,
@@ -108,12 +108,14 @@ def test_generate_sections_emits_roof_section_keys():
 
 def _client() -> TestClient:
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    main.app.dependency_overrides[get_report_writer_user] = lambda: "test-user"
     main.app.state.report_writer_graph = MagicMock()
     return TestClient(main.app)
 
 
 def _clear_overrides() -> None:
     main.app.dependency_overrides.pop(get_current_user, None)
+    main.app.dependency_overrides.pop(get_report_writer_user, None)
 
 
 def test_report_types_endpoint():

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.auth import get_ask_user, get_current_user
+from app.auth import get_ask_user, get_current_user, get_report_writer_user
 
 
 def api_client() -> TestClient:
@@ -15,12 +15,14 @@ def api_client() -> TestClient:
 
     main.app.dependency_overrides[get_current_user] = _test_user
     main.app.dependency_overrides[get_ask_user] = _test_user
+    main.app.dependency_overrides[get_report_writer_user] = _test_user
     return TestClient(main.app)
 
 
 def clear_api_overrides() -> None:
     main.app.dependency_overrides.pop(get_current_user, None)
     main.app.dependency_overrides.pop(get_ask_user, None)
+    main.app.dependency_overrides.pop(get_report_writer_user, None)
 
 
 def prime_app_state(app) -> MagicMock:

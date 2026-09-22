@@ -300,7 +300,7 @@ def test_property_map_image_clears_stale_path_on_missing_file(
     from unittest.mock import patch
 
     import app.main as main
-    from app.auth import get_current_user
+    from app.auth import get_current_user, get_report_writer_user
 
     claim = {
         **sample_claim,
@@ -327,6 +327,7 @@ def test_property_map_image_clears_stale_path_on_missing_file(
         raise FileNotFoundError("missing")
 
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    main.app.dependency_overrides[get_report_writer_user] = lambda: "test-user"
     client = TestClient(main.app)
     try:
         with (
@@ -344,6 +345,7 @@ def test_property_map_image_clears_stale_path_on_missing_file(
         assert "property_map_satellite_path" not in updates[0]
     finally:
         main.app.dependency_overrides.pop(get_current_user, None)
+        main.app.dependency_overrides.pop(get_report_writer_user, None)
 
 
 def test_with_conn_maps_pool_exhausted_to_503() -> None:

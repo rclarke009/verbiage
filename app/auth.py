@@ -166,3 +166,22 @@ def get_ask_user(
     user_id = get_current_user(request, credentials)
     request.state.db_tenant = "prod"
     return user_id
+
+
+def get_report_writer_user(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+) -> str:
+    """
+    FastAPI dependency for Report Writer. Guests use the demo corpus sample claim.
+    A valid TrueDB JWT uses the prod pool.
+    """
+    if demo_anonymous_enabled():
+        token = _bearer_token(request, credentials)
+        if token:
+            return get_current_user(request, credentials)
+        request.state.db_tenant = "demo"
+        return DEMO_GUEST_USER_ID
+    user_id = get_current_user(request, credentials)
+    request.state.db_tenant = "prod"
+    return user_id

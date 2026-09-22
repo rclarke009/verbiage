@@ -40,6 +40,7 @@ import {
   clearPropertyAppraiserMetadata,
 } from '../../hooks/usePropertyAppraiser'
 import { useReportWriterStream } from '../../hooks/useReportWriterStream'
+import { useAuth } from '../../context/AuthContext'
 import { ClaimForm } from './ClaimForm'
 import { ClaimList } from './ClaimList'
 import { DocumentCanvas } from './DocumentCanvas'
@@ -91,9 +92,12 @@ const primaryBtn = (disabled: boolean): CSSProperties => ({
 
 export function ReportWriterTab() {
   const queryClient = useQueryClient()
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const { session, publicConfig } = useAuth()
+  const demoSample = !session && (!!publicConfig?.demo_anonymous || !!publicConfig?.demo_mode)
+  const [pickedId, setActiveId] = useState<string | null>(null)
   const [localDraft, setLocalDraft] = useState<Claim | null>(null)
   const [workspace, setWorkspace] = useState<ReportWriterWorkspace | null>(null)
+  const [workspaceForId, setWorkspaceForId] = useState<string | null>(null)
   const {
     modalOpen: pdfModalOpen,
     iframeUrl: pdfIframeUrl,
@@ -113,7 +117,6 @@ export function ReportWriterTab() {
     cancel: cancelGeneration,
     reset: resetStream,
   } = useReportWriterStream()
-  const photoSync = useClaimPhotoSync(activeId)
 
   const reportTypesQuery = useQuery({
     queryKey: ['report-writer-types'],
@@ -129,6 +132,11 @@ export function ReportWriterTab() {
     queryFn: listClaims,
   })
 
+  const activeId =
+    pickedId ??
+    (demoSample && !claimsLoading && claims[0] ? claims[0].claim_id : null)
+  const photoSync = useClaimPhotoSync(activeId)
+
   const claimQuery = useQuery({
     queryKey: ['report-writer-claim', activeId],
     queryFn: () => getClaim(activeId!),
@@ -143,6 +151,7 @@ export function ReportWriterTab() {
 
   const draft = localDraft ?? claimQuery.data ?? emptyClaim()
   const fullAddress = composeFullAddress(draft.property_metadata ?? {})
+  const externalLookupAddress = demoSample ? '' : fullAddress
   const reportTypes = reportTypesQuery.data ?? []
   const activeReportType = reportTypes.find(t => t.id === draft.property_metadata?.report_type)
   const sectionKeys = activeReportType?.sections.map(s => s.key) ?? []
@@ -150,27 +159,23 @@ export function ReportWriterTab() {
   const generateBlockers = getGenerateBlockers(draft)
   const canGenerate = canGenerateFromDraft(draft)
 
-  const defaultWorkspaceFor = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (activeId !== defaultWorkspaceFor.current) {
-      defaultWorkspaceFor.current = null
-      setWorkspace(null)
-    }
-    if (!activeId || !claimQuery.data || claimQuery.data.claim_id !== activeId) return
-    if (defaultWorkspaceFor.current === activeId) return
-    defaultWorkspaceFor.current = activeId
+  if (activeId !== workspaceForId) {
+    setWorkspaceForId(activeId)
+    setWorkspace(null)
+  } else if (generating && workspace !== 'report') {
+    setWorkspace('report')
+  } else if (
+    workspace === null &&
+    activeId &&
+    claimQuery.data?.claim_id === activeId
+  ) {
     setWorkspace(
       defaultReportWriterWorkspace({
         hasGeneratedContent: claimHasGeneratedContent(claimQuery.data.sections),
         generating: false,
       }),
     )
-  }, [activeId, claimQuery.data])
-
-  useEffect(() => {
-    if (generating) setWorkspace('report')
-  }, [generating])
+  }
 
   useEffect(() => {
     if (!activeId || workspace !== 'report') return
@@ -208,7 +213,7 @@ export function ReportWriterTab() {
 
   const propertyMap = usePropertyMap({
     claimId: activeId,
-    address: fullAddress,
+    address: externalLookupAddress,
     metadata: draft.property_metadata ?? {},
     onMetadataPatch: patch =>
       updateDraft(prev => {
@@ -228,7 +233,7 @@ export function ReportWriterTab() {
 
   const propertyAppraiser = usePropertyAppraiser({
     claimId: activeId,
-    address: fullAddress,
+    address: externalLookupAddress,
     metadata: draft.property_metadata ?? {},
     onMetadataPatch: patch =>
       updateDraft(prev => {
@@ -248,7 +253,7 @@ export function ReportWriterTab() {
 
   const historicalAerials = useHistoricalAerials({
     claimId: activeId,
-    address: fullAddress,
+    address: externalLookupAddress,
     stormDate: draft.property_metadata?.storm_date ?? '',
     stormDateIso: draft.property_metadata?.storm_date_iso ?? '',
     metadata: draft.property_metadata ?? {},
@@ -469,6 +474,7 @@ export function ReportWriterTab() {
         }}
         onCreate={() => createMutation.mutate()}
         onImportPackage={() => importInputRef.current?.click()}
+        demoSample={demoSample}
       />
       <input
         ref={importInputRef}
@@ -497,7 +503,9 @@ export function ReportWriterTab() {
         )}
         {!activeId ? (
           <p style={{ color: 'var(--app-text-subtle)', fontSize: 14 }}>
-            Create or select a claim to draft a report from field notes and similar past reports.
+            {demoSample
+              ? 'Loading the sample claim…'
+              : 'Create or select a claim to draft a report from field notes and similar past reports.'}
           </p>
         ) : (
           <>
@@ -565,6 +573,7 @@ export function ReportWriterTab() {
                   </button>
                 </>
               ) : null}
+              {demoSample ? null : (
               <button
                 type="button"
                 onClick={() => {
@@ -579,6 +588,7 @@ export function ReportWriterTab() {
               >
                 Delete
               </button>
+              )}
             </div>
 
             <div
@@ -634,10 +644,17 @@ export function ReportWriterTab() {
               <p style={{ color: 'var(--app-text-subtle)', fontSize: 14 }}>Loading claim…</p>
             ) : null}
 
+            {demoSample ? (
+              <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--app-text-muted)' }}>
+                Sample claim on fictional inspection reports. Fields and roof photos are filled in. Generate a draft to see the report.
+              </p>
+            ) : null}
+
             {workspace === 'intake' ? (
               <div style={{ maxWidth: 720 }}>
                 <ClaimForm
                   claim={draft}
+                  hideLiveLookups={demoSample}
                   reportTypes={reportTypes}
                   typeLocked={hasGeneratedContent}
                   onChange={patch => updateDraft(prev => ({ ...prev, ...patch, property_metadata: patch.property_metadata ?? prev.property_metadata }))}
@@ -711,6 +728,7 @@ export function ReportWriterTab() {
                 <PhotoFolderPanel
                   claimId={activeId}
                   claim={draft}
+                  samplePhotos={demoSample}
                   onMetadataChange={patch =>
                     updateDraft(prev => ({
                       ...prev,

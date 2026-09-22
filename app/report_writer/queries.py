@@ -485,8 +485,9 @@ def insert_claim_image(
     sort_order: int = 0,
     vision_analysis: dict | None = None,
     analysis_status: str = "pending",
+    image_id: str | None = None,
 ) -> dict[str, Any]:
-    image_id = str(uuid.uuid4())
+    image_id = image_id or str(uuid.uuid4())
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute(

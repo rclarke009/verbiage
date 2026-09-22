@@ -64,6 +64,7 @@ export function ClaimForm({
   onHistoricalAerialsCachedUnavailable,
   onHistoricalAerialIncludeChange,
   onHistoricalAerialCommentChange,
+  hideLiveLookups = false,
 }: {
   claim: Claim
   reportTypes: ReportTypeDefinition[]
@@ -91,6 +92,7 @@ export function ClaimForm({
   onHistoricalAerialsCachedUnavailable?: () => void
   onHistoricalAerialIncludeChange?: (year: number, include: boolean) => void
   onHistoricalAerialCommentChange?: (comment: string) => void
+  hideLiveLookups?: boolean
 }) {
   const meta = claim.property_metadata || {}
   const [stormCustom, setStormCustom] = useState(false)
@@ -166,6 +168,8 @@ export function ClaimForm({
             />
           </label>
         </fieldset>
+        {hideLiveLookups ? null : (
+        <>
         <PropertyMapPreview
           preview={propertyMapPreview ?? null}
           loading={!!propertyMapLoading}
@@ -181,6 +185,8 @@ export function ClaimForm({
           onRefresh={onRefreshPropertyAppraiser ?? (() => {})}
           onCachedImagesUnavailable={onPropertyAppraiserCachedUnavailable}
         />
+        </>
+        )}
       </div>
 
       <fieldset
@@ -299,10 +305,11 @@ export function ClaimForm({
           metadata={meta}
           loading={!!weatherLoading}
           error={weatherError ?? null}
-          disabled={typeLocked}
-          onRefresh={onRefreshWeather ?? (() => {})}
+          disabled={typeLocked || hideLiveLookups}
+          onRefresh={hideLiveLookups ? () => {} : (onRefreshWeather ?? (() => {}))}
           onSelectionChange={onWeatherSelectionChange ?? (() => {})}
         />
+        {hideLiveLookups ? null : (
         <HistoricalAerialsPreview
           preview={historicalAerialsPreview ?? null}
           loading={!!historicalAerialsLoading}
@@ -313,6 +320,7 @@ export function ClaimForm({
           onIncludeChange={onHistoricalAerialIncludeChange ?? (() => {})}
           onCommentChange={onHistoricalAerialCommentChange ?? (() => {})}
         />
+        )}
       </fieldset>
 
       <label style={{ fontSize: 13 }}>

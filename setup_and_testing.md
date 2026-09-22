@@ -57,6 +57,10 @@ Default: `http://localhost:8000`. The same server can serve the **built** SPA at
 
 ---
 
+Lab sheet (what / when / how / blanks for results): **[docs/test-plan.md](docs/test-plan.md)**.
+
+---
+
 ## Automated checks on commit / push (git hooks)
 
 Repo-tracked hooks in **`.githooks/`** run the test gates for you so a broken commit can't slip through. **Enable them once per clone** — this writes to *this* repo's `.git/config` only, and is **not** committed, so every fresh clone (or new machine) needs it again:
@@ -145,6 +149,8 @@ The build typechecks exclude test files (`tsconfig.app.json`), so `npm run build
 
 ## Faithfulness eval (opt-in)
 
+Fill-in lab sheet for this suite (and unit/frontend cadence): **[docs/test-plan.md](docs/test-plan.md)**.
+
 A regression harness that checks, after every retrieval/prompt tweak, whether **every claim in an answer is supported by the context that was actually retrieved**. It runs the real pipeline (`auto` routing → RRF → grounded prompt → LLM) against a frozen corpus seeded into a throwaway pgvector container, then judges each answer's claims. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest tests/` run stays fast and offline.
 
 ### Prerequisites
@@ -171,19 +177,29 @@ git commit -m "Warm eval embeddings cache"
 ### Routine use
 
 ```bash
-make eval            # fast NLI gate (run after every tweak)
+make eval            # fast gate: retrieval recall@pool + NLI faithfulness
 make eval-full       # deep gate: OpenAI LLM-as-judge (needs OPENAI_API_KEY)
+make eval-retrieval-rerank  # optional MiniLM rerank vs slice (not every tweak)
 make eval-warm-cache # re-embed + rewrite the cache after changing corpus/chunking/model
 make eval-down       # manually stop + remove the eval DB (data is ephemeral; nothing is lost)
 ```
 
 Each `make eval*` target tears the DB down automatically when it finishes (even on failure). `eval-up` is also self-healing: it runs `down -v --remove-orphans` before starting, so a leftover container from an interrupted previous run is cleared automatically. Use `make eval-down` only if you brought the DB up manually or cancelled a run mid-flight (Ctrl-C before teardown).
 
-Gold questions (including deliberately **unanswerable** ones that must trigger a refusal) live in `tests/eval/gold_questions.yaml`. The bar lives in `tests/eval/test_faithfulness.py`: `FAST_MIN_FAITHFULNESS` and the `NliJudge` threshold — loosen these if sentence-level NLI proves too strict on legitimately-grounded paraphrase.
+Gold questions (including deliberately **unanswerable** ones that must trigger a refusal) live in `tests/eval/gold_questions.yaml`. Answerable rows also carry `relevant_doc_ids` for recall@pool / recall@k. The faithfulness bar lives in `tests/eval/test_faithfulness.py` (`FAST_MIN_FAITHFULNESS`); the retrieval bar lives in `tests/eval/test_retrieval.py` (recall@pool = 1.0 on `auto`). Design notes: [`docs/retrieval-eval.md`](docs/retrieval-eval.md).
+
+The retrieval tests need Docker + the embedding cache only — **no LLM**. To run them without generation:
+
+```bash
+make eval-up
+VERBIAGE_EVAL=1 EVAL_DATABASE_URL=postgresql://postgres:postgres@localhost:5433/verbiage_eval \
+  pytest -m eval_fast tests/eval/test_retrieval.py -s
+make eval-down
+```
 
 ### Notes / gotchas
 
-- Caching removes the **embedding** network dependency only; **generation calls the LLM every run** (that's what's being tested), so a backend must always be reachable.
+- Caching removes the **embedding** network dependency only; **generation** (faithfulness tests) **calls the LLM every run**, so a backend must always be reachable for `make eval`. Retrieval-only (`tests/eval/test_retrieval.py`) does not generate.
 - `make eval` manages its own env (`VERBIAGE_EVAL=1`, `EVAL_DATABASE_URL`), so no `PYTHONPATH=.` prefix is needed unlike the unit tests above.
 - Port 5433 busy → `up --wait` hangs; free it or change the host port in `docker-compose.eval.yml`.
 - A failure tagged as a retriever miss (missing `must_mention` terms) points at retrieval, not generation — see the assertion messages in `tests/eval/test_faithfulness.py`.

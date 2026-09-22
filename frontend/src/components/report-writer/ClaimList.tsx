@@ -9,6 +9,7 @@ export function ClaimList({
   onSelect,
   onCreate,
   onImportPackage,
+  demoSample = false,
 }: {
   claims: Claim[]
   loading?: boolean
@@ -17,11 +18,14 @@ export function ClaimList({
   onSelect: (id: string) => void
   onCreate: () => void
   onImportPackage: () => void
+  demoSample?: boolean
 }) {
   const typeLabel = (id: string | undefined) =>
     reportTypes.find(t => t.id === id)?.label ?? (id ? id.replace(/_/g, ' ') : null)
   return (
     <div style={{ width: 220, flexShrink: 0 }}>
+      {demoSample ? null : (
+      <>
       <button
         type="button"
         onClick={onCreate}
@@ -56,6 +60,8 @@ export function ClaimList({
       >
         Import WindowTest package
       </button>
+      </>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {loading ? (
           <p style={{ color: 'var(--app-text-subtle)', fontSize: 13, margin: 0 }}>Loading reports…</p>

@@ -37,12 +37,13 @@ function loadStored(storageKey: string): SavedPassage[] {
 export function useCollectedPassages(userId: string | null = null) {
   const storageKey = collectedStorageKey(userId)
   const [passages, setPassages] = useState<SavedPassage[]>(() => loadStored(storageKey))
+  const [loadedKey, setLoadedKey] = useState(storageKey)
   const persistReady = useRef(false)
 
-  useEffect(() => {
-    persistReady.current = false
+  if (storageKey !== loadedKey) {
+    setLoadedKey(storageKey)
     setPassages(loadStored(storageKey))
-  }, [storageKey])
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return

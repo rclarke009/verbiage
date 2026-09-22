@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 import app.main as main
-from app.auth import get_current_user
+from app.auth import get_current_user, get_report_writer_user
 from app.db import has_active_vision_job, reclaim_stale_ingest_jobs
 
 
@@ -189,6 +189,7 @@ def test_process_claim_photo_vision_job_reads_storage_path():
 
 def test_retry_stuck_photos_route():
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    main.app.dependency_overrides[get_report_writer_user] = lambda: "test-user"
     client = TestClient(main.app)
     try:
         payload = {
@@ -213,3 +214,4 @@ def test_retry_stuck_photos_route():
         assert data["batch_id"] == "batch-1"
     finally:
         main.app.dependency_overrides.pop(get_current_user, None)
+        main.app.dependency_overrides.pop(get_report_writer_user, None)

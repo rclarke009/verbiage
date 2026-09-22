@@ -1,4 +1,4 @@
-"""Fixtures + markers for the faithfulness eval suite.
+"""Fixtures + markers for the faithfulness + retrieval eval suite.
 
 The whole suite is opt-in (set VERBIAGE_EVAL=1), mirroring the VERBIAGE_INTEGRATION
 gate in tests/test_retrieval_integration.py, so a normal `pytest` run stays fast
@@ -47,10 +47,14 @@ pytestmark = pytest.mark.skipif(
 
 def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "eval_fast: fast faithfulness gate (local NLI judge); run after every tweak"
+        "markers", "eval_fast: fast gate (retrieval recall@pool + local NLI faithfulness); run after every tweak"
     )
     config.addinivalue_line(
         "markers", "eval_full: deep faithfulness eval (OpenAI LLM judge); nightly/manual"
+    )
+    config.addinivalue_line(
+        "markers",
+        "eval_retrieval_rerank: optional MiniLM rerank vs slice comparison; not in make eval",
     )
 
 

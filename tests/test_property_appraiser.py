@@ -322,7 +322,7 @@ def test_property_appraiser_image_clears_stale_path(
     from fastapi.testclient import TestClient
 
     import app.main as main
-    from app.auth import get_current_user
+    from app.auth import get_current_user, get_report_writer_user
 
     claim = {
         **sample_claim,
@@ -349,6 +349,7 @@ def test_property_appraiser_image_clears_stale_path(
         raise FileNotFoundError("missing")
 
     main.app.dependency_overrides[get_current_user] = lambda: "test-user"
+    main.app.dependency_overrides[get_report_writer_user] = lambda: "test-user"
     client = TestClient(main.app)
     try:
         with (
@@ -365,3 +366,4 @@ def test_property_appraiser_image_clears_stale_path(
         assert "property_appraiser_path" not in updates[0]
     finally:
         main.app.dependency_overrides.pop(get_current_user, None)
+        main.app.dependency_overrides.pop(get_report_writer_user, None)

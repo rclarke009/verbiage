@@ -114,7 +114,7 @@ python scripts/seed_demo_db.py
 
 Or from Render **Shell** on `verbiage-demo` after first deploy.
 
-Seeds 12 fictional reports from `app/demo_corpus/` — no real client data.
+Seeds 15 fictional reports from `app/demo_corpus/` — no real client data.
 
 On deploy, demo mode also auto-seeds when the database is empty or has fewer `eval_fixture` documents than the corpus directory. Set `DEMO_RESEED_CORPUS=1` to force a full refresh.
 
@@ -124,9 +124,10 @@ On deploy, demo mode also auto-seeds when the database is empty or has fewer `ev
 
 1. Open demo URL → Search tab loads immediately (no sign-in when `DEMO_ANONYMOUS=1`).
 2. **Search**: ask *“What roof damage was found at 100 Harbor Example Road in Sampletown?”* → grounded answer + citations.
-3. **Report Writer** / **Documents** / **Drive** → upsell message, no API data.
-4. Ask 21 times within an hour → rate-limit message on the 21st.
-5. Confirm prod URL still works (no `DEMO_MODE` on prod service).
+3. **Search, retrieval retry**: turn on **Show retrieval retries (rewritten query)** and ask *“Which houses had intact tiles and not a storm-created opening?”* → **Retrieval retried once**, then citations for 300 Cedar Lane and 412 Example Drive.
+4. **Report Writer** / **Documents** / **Drive** → upsell message, no API data.
+5. Ask 21 times within an hour → rate-limit message on the 21st.
+6. Confirm prod URL still works (no `DEMO_MODE` on prod service).
 
 ---
 

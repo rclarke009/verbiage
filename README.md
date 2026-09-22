@@ -228,13 +228,13 @@ Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml)
 
 | Setting                   | Default | Purpose                                                           |
 | ------------------------- | ------- | ----------------------------------------------------------------- |
-| `RERANK_ENABLED=0`        | On      | Saves ~100MB RAM; avoids reranker warm-up 503s on small instances |
+| `RERANK_ENABLED=1`        | On      | Prod Standard (2GB): MiniLM rerank; set `SKIP_RERANK=0` so the image bakes torch |
 | `INGEST_WORKER_ENABLED=1` | On      | Processes photo vision jobs in the same process (no +$7 worker)   |
 
 
 **Optional:** a separate `[rag-ingest-worker](docs/render-worker-setup.md)` isolates OOM from the API (~$7/mo on Render) — only needed for large photo batches on tiny instances.
 
-**Health check** → `/health/ready` (Postgres when reranker disabled).
+**Health check** → `/health/ready` (Postgres + reranker warm-up).
 
 Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
 
@@ -260,11 +260,11 @@ The ingest worker reclaims ingest jobs stuck in `running` for `STALE_JOB_MINUTES
 A regression harness that answers one question after every retrieval/prompt tweak: **is every claim in an answer supported by the context that was actually retrieved?** It runs the real pipeline (`auto` routing -> RRF -> grounded prompt -> LLM) against a frozen corpus seeded into a throwaway pgvector container, then judges each answer's claims.
 
 ```bash
-make eval        # fast gate: local NLI judge (sentence-transformers), run every tweak
+make eval        # fast gate: retrieval recall@pool + local NLI faithfulness
 make eval-full   # deep gate: OpenAI LLM-as-judge, nightly/manual
 ```
 
-Each `make` target brings the ephemeral DB up (`docker-compose.eval.yml`), seeds `tests/eval/corpus/`, runs the suite, prints a per-question scoreboard, and tears the DB down. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest` run stays fast and offline. Gold questions (including deliberately unanswerable ones that must trigger a refusal) live in [tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml). Generation needs an LLM backend (OpenAI key or Ollama) and an embedding backend (or a warm `tests/eval/embeddings_cache.json`; refresh with `make eval-warm-cache`).
+Each `make` target brings the ephemeral DB up (`docker-compose.eval.yml`), seeds the frozen demo corpus, runs the suite, prints per-question scoreboards, and tears the DB down. The whole suite is opt-in via `VERBIAGE_EVAL=1`, so a normal `pytest` run stays fast and offline. Gold questions (including deliberately unanswerable ones that must trigger a refusal, plus `relevant_doc_ids` for recall@pool) live in [tests/eval/gold_questions.yaml](tests/eval/gold_questions.yaml). Faithfulness needs an LLM backend; retrieval eval needs only Docker + a warm [tests/eval/embeddings_cache.json](tests/eval/embeddings_cache.json) (`make eval-warm-cache`). Design notes: [docs/retrieval-eval.md](docs/retrieval-eval.md).
 
 **CI vs eval:** GitHub Actions runs `pytest -q` on every push (unit/integration tests, no LLM). The faithfulness harness is `make eval` locally or on a schedule — heavier, needs Docker + an LLM backend. See [setup_and_testing.md](setup_and_testing.md).
 
