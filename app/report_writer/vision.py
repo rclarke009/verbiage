@@ -1,4 +1,4 @@
-"""OpenAI vision analysis for claim inspection photos."""
+"""Vision analysis for claim inspection photos (xAI Grok when XAI_API_KEY is set, else OpenAI)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,15 @@ import random
 
 import httpx
 
-from app.config import LLM_MAX_ATTEMPTS, LLM_OPENAI_MODEL, LLM_TIMEOUT_SECONDS, OPENAI_API_KEY
+from app.config import (
+    LLM_MAX_ATTEMPTS,
+    LLM_OPENAI_MODEL,
+    LLM_TIMEOUT_SECONDS,
+    LLM_XAI_MODEL,
+    OPENAI_API_KEY,
+    XAI_API_KEY,
+    XAI_CHAT_URL,
+)
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMUpstreamTimeoutError
 from app.http_client import get_async_client
 from app.report_writer.image_utils import normalize_image_bytes
@@ -30,7 +38,16 @@ VISION_PROMPT = (
 )
 
 
-def _parse_vision_response(text: str) -> dict:
+def _vision_target() -> tuple[str, str, str] | None:
+    """(api_key, model, chat_url). Grok wins when its key is set."""
+    if XAI_API_KEY:
+        return (XAI_API_KEY, LLM_XAI_MODEL, XAI_CHAT_URL)
+    if OPENAI_API_KEY:
+        return (OPENAI_API_KEY, LLM_OPENAI_MODEL, OPENAI_CHAT_URL)
+    return None
+
+
+def _parse_vision_response(text: str, model: str = LLM_OPENAI_MODEL) -> dict:
     """Parse structured vision JSON; fall back to raw text on failure."""
     try:
         parsed = json.loads(text)
@@ -39,7 +56,7 @@ def _parse_vision_response(text: str) -> dict:
             result: dict = {
                 "observations": observations,
                 "caption": observations,
-                "model": LLM_OPENAI_MODEL,
+                "model": model,
             }
             if "has_damage" in parsed:
                 result["has_damage"] = bool(parsed["has_damage"])
@@ -47,7 +64,7 @@ def _parse_vision_response(text: str) -> dict:
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
     text = text.strip()
-    return {"caption": text, "observations": text, "model": LLM_OPENAI_MODEL}
+    return {"caption": text, "observations": text, "model": model}
 
 
 def _retry_delay_seconds(attempt: int, retry_after: str | None = None) -> float:
@@ -62,13 +79,16 @@ def _retry_delay_seconds(attempt: int, retry_after: str | None = None) -> float:
 
 
 async def analyze_image_bytes(image_bytes: bytes, content_type: str) -> dict:
-    """Return caption/observations dict from OpenAI vision. Raises if no API key."""
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not set")
+    """Return caption/observations dict from Grok or OpenAI vision. Raises if no API key."""
+    target = _vision_target()
+    if target is None:
+        raise RuntimeError("XAI_API_KEY or OPENAI_API_KEY is not set")
+    api_key, model, chat_url = target
+    label = "xAI" if chat_url == XAI_CHAT_URL else "OpenAI"
     image_bytes, mime = normalize_image_bytes(image_bytes, content_type)
     b64 = base64.standard_b64encode(image_bytes).decode("ascii")
     payload = {
-        "model": LLM_OPENAI_MODEL,
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -85,7 +105,7 @@ async def analyze_image_bytes(image_bytes: bytes, content_type: str) -> dict:
         "max_tokens": 400,
     }
     headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
@@ -95,7 +115,7 @@ async def analyze_image_bytes(image_bytes: bytes, content_type: str) -> dict:
         try:
             client = get_async_client()
             resp = await client.post(
-                OPENAI_CHAT_URL,
+                chat_url,
                 headers=headers,
                 json=payload,
                 timeout=LLM_TIMEOUT_SECONDS,
@@ -103,22 +123,23 @@ async def analyze_image_bytes(image_bytes: bytes, content_type: str) -> dict:
             if resp.status_code == 429:
                 retry_after = resp.headers.get("retry-after")
                 logger.warning(
-                    "OpenAI vision API returned 429 (rate limited); body=%s; retry_after=%s",
+                    "%s vision API returned 429 (rate limited); body=%s; retry_after=%s",
+                    label,
                     resp.text[:500] if resp.text else "(empty)",
                     retry_after,
                 )
-                raise LLMRateLimitedError("OpenAI vision rate limited")
+                raise LLMRateLimitedError(f"{label} vision rate limited")
             if resp.status_code >= 400:
                 raise LLMServiceError(
-                    f"OpenAI vision API error {resp.status_code}: {resp.text[:200]}"
+                    f"{label} vision API error {resp.status_code}: {resp.text[:200]}"
                 )
             data = resp.json()
             choice = (data.get("choices") or [None])[0]
             msg = (choice.get("message") if choice else None) or {}
             text = (msg.get("content") or "").strip()
-            return _parse_vision_response(text)
+            return _parse_vision_response(text, model)
         except httpx.TimeoutException:
-            last_exc = LLMUpstreamTimeoutError("OpenAI vision request timed out")
+            last_exc = LLMUpstreamTimeoutError(f"{label} vision request timed out")
             retry_after = None
             if attempt < LLM_MAX_ATTEMPTS - 1:
                 await asyncio.sleep(_retry_delay_seconds(attempt))
@@ -138,4 +159,4 @@ async def analyze_image_bytes(image_bytes: bytes, content_type: str) -> dict:
         break
     if last_exc:
         raise last_exc
-    raise RuntimeError("OpenAI vision retries exhausted")
+    raise RuntimeError(f"{label} vision retries exhausted")

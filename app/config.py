@@ -82,8 +82,10 @@ def report_writer_database_url() -> str:
 
 DB_PATH = os.getenv("DATABASE_PATH", "verbiage.db")
 
-# OpenAI: when OPENAI_API_KEY is set, use OpenAI for embeddings and LLM first; optional fallback to Ollama via env flags.
+# OpenAI: embeddings always, and chat/vision when XAI_API_KEY is unset.
+# xAI Grok: when XAI_API_KEY is set, chat and photo vision use Grok instead of OpenAI.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+XAI_API_KEY = os.getenv("XAI_API_KEY", "").strip()
 EMBED_LOCAL_ONLY = os.getenv("EMBED_LOCAL_ONLY", "").lower() in ("1", "true", "yes")
 EMBED_FALLBACK_TO_LOCAL = os.getenv("EMBED_FALLBACK_TO_LOCAL", "").lower() in ("1", "true", "yes")
 LLM_FALLBACK_TO_LOCAL = os.getenv("LLM_FALLBACK_TO_LOCAL", "").lower() in ("1", "true", "yes")
@@ -94,10 +96,13 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 EMBED_TIMEOUT = int(os.getenv("EMBED_TIMEOUT", 30))
 EMBED_MAX_ATTEMPTS = int(os.getenv("EMBED_MAX_ATTEMPTS", 3))
 
-# LLM: OpenAI (gpt-4o-mini or LLM_OPENAI_MODEL) or Ollama
+# LLM: xAI Grok when XAI_API_KEY is set, else OpenAI (gpt-4o-mini), else Ollama
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1:8b")
 LLM_OPENAI_MODEL = os.getenv("LLM_OPENAI_MODEL", "gpt-4o-mini")
+LLM_XAI_MODEL = os.getenv("LLM_XAI_MODEL", "grok-4.6")
+XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions"
+XAI_MODELS_URL = "https://api.x.ai/v1/models"
 # Low (not zero) so borderline retrievals resolve consistently toward quoting relevant
 # passages instead of flip-flopping into spurious "not enough context" refusals.
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))

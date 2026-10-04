@@ -44,6 +44,8 @@ services:
         value: "1"
       - key: OPENAI_API_KEY
         sync: false
+      - key: XAI_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -105,6 +107,8 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: OPENAI_API_KEY
+        sync: false
+      - key: XAI_API_KEY
         sync: false
       - key: SUPABASE_URL
         sync: false

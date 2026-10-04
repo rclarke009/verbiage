@@ -20,6 +20,8 @@ from app.config import (
     HEALTH_READY_DB_TIMEOUT,
     LLM_BASE_URL,
     OPENAI_API_KEY,
+    XAI_API_KEY,
+    XAI_MODELS_URL,
 )
 from app.db import get_valid_conn
 from app.embeddings_openai import (
@@ -98,7 +100,12 @@ async def check_llm_backend() -> tuple[bool, str]:
     timeout = HEALTH_DEEP_TIMEOUT
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            if OPENAI_API_KEY:
+            if XAI_API_KEY:
+                response = await client.get(
+                    XAI_MODELS_URL,
+                    headers={"Authorization": f"Bearer {XAI_API_KEY}"},
+                )
+            elif OPENAI_API_KEY:
                 response = await client.get(
                     OPENAI_MODELS_URL,
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},

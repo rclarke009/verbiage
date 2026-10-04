@@ -40,6 +40,7 @@ _OPENAI_OK = {"choices": [{"message": {"content": "ok"}}]}
 
 
 def test_openai_uses_configured_temperature_by_default(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "")
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "test-key")
     captured: dict = {}
     _capture_post(monkeypatch, captured, _OPENAI_OK)
@@ -51,6 +52,7 @@ def test_openai_uses_configured_temperature_by_default(monkeypatch):
 
 
 def test_openai_explicit_temperature_overrides(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "")
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "test-key")
     captured: dict = {}
     _capture_post(monkeypatch, captured, _OPENAI_OK)
@@ -67,6 +69,7 @@ _OLLAMA_OK = {"message": {"content": "ok"}}
 
 
 def test_ollama_sets_temperature_option(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "")
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "")  # force the local path
     captured: dict = {}
     _capture_post(monkeypatch, captured, _OLLAMA_OK)
@@ -78,6 +81,7 @@ def test_ollama_sets_temperature_option(monkeypatch):
 
 
 def test_ollama_defaults_to_configured_temperature(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "")
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
     captured: dict = {}
     _capture_post(monkeypatch, captured, _OLLAMA_OK)
@@ -87,7 +91,29 @@ def test_ollama_defaults_to_configured_temperature(monkeypatch):
     assert captured["payload"]["options"]["temperature"] == LLM_TEMPERATURE
 
 
+def test_xai_uses_grok_chat_url(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "xai-test-key")
+    monkeypatch.setattr(llm, "LLM_XAI_MODEL", "grok-4.6")
+    captured: dict = {}
+
+    async def fake_post(self, *args, **kwargs):
+        captured["url"] = args[0] if args else kwargs.get("url")
+        captured["payload"] = kwargs.get("json")
+        captured["auth"] = (kwargs.get("headers") or {}).get("Authorization")
+        return _FakeResp(_OPENAI_OK)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    out = asyncio.run(llm.answer_with_context("prompt"))
+
+    assert out == "ok"
+    assert captured["url"] == "https://api.x.ai/v1/chat/completions"
+    assert captured["payload"]["model"] == "grok-4.6"
+    assert captured["auth"] == "Bearer xai-test-key"
+
+
 def test_ollama_null_message_returns_empty_string(monkeypatch):
+    monkeypatch.setattr(llm, "XAI_API_KEY", "")
     monkeypatch.setattr(llm, "OPENAI_API_KEY", "")
     _capture_post(monkeypatch, {}, {"message": None})
 

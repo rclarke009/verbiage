@@ -1,6 +1,6 @@
 """
-LLM client: async answer_with_context uses OpenAI when OPENAI_API_KEY is set,
-with optional fallback to Ollama; otherwise Ollama only.
+LLM client: async answer_with_context uses xAI Grok when XAI_API_KEY is set,
+otherwise OpenAI when OPENAI_API_KEY is set, with optional fallback to Ollama.
 
 Streaming helpers yield text deltas for POST /ask/stream (SSE).
 """
@@ -20,7 +20,10 @@ from app.config import (
     LLM_OPENAI_MODEL,
     LLM_TEMPERATURE,
     LLM_TIMEOUT_SECONDS,
+    LLM_XAI_MODEL,
     OPENAI_API_KEY,
+    XAI_API_KEY,
+    XAI_CHAT_URL,
 )
 from app.errors import LLMRateLimitedError, LLMServiceError, LLMUpstreamTimeoutError
 from app.http_client import get_async_client
@@ -31,13 +34,31 @@ logger = logging.getLogger(__name__)
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 
-async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
-    """Call OpenAI chat completions; return assistant content. Retries on rate limit/timeout."""
+def remote_chat() -> tuple[str, str, str, str] | None:
+    """(provider, api_key, model, chat_url). Grok wins when its key is set."""
+    if XAI_API_KEY:
+        return ("xai", XAI_API_KEY, LLM_XAI_MODEL, XAI_CHAT_URL)
+    if OPENAI_API_KEY:
+        return ("openai", OPENAI_API_KEY, LLM_OPENAI_MODEL, OPENAI_CHAT_URL)
+    return None
+
+
+async def _answer_remote(
+    prompt: str,
+    *,
+    provider: str,
+    api_key: str,
+    model: str,
+    chat_url: str,
+    temperature: float | None = None,
+) -> str:
+    """Call an OpenAI-compatible chat completions API. Retries on rate limit/timeout."""
+    label = "xAI" if provider == "xai" else "OpenAI"
     last_exc: BaseException | None = None
     for attempt in range(LLM_MAX_ATTEMPTS):
         try:
             payload = {
-                "model": LLM_OPENAI_MODEL,
+                "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
             }
@@ -45,10 +66,10 @@ async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
                 payload["temperature"] = temperature
             client = get_async_client()
             resp = await client.post(
-                OPENAI_CHAT_URL,
+                chat_url,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                 },
                 json=payload,
                 timeout=LLM_TIMEOUT_SECONDS,
@@ -56,30 +77,31 @@ async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
             if resp.status_code == 429:
                 retry_after = resp.headers.get("retry-after")
                 logger.warning(
-                    "OpenAI chat API returned 429 (rate limited); body=%s; retry_after=%s",
+                    "%s chat API returned 429 (rate limited); body=%s; retry_after=%s",
+                    label,
                     resp.text[:500] if resp.text else "(empty)",
                     retry_after,
                 )
-                raise LLMRateLimitedError("OpenAI rate limited")
+                raise LLMRateLimitedError(f"{label} rate limited")
             if resp.status_code >= 400:
                 raise LLMServiceError(
-                    f"OpenAI API error {resp.status_code}: {resp.text[:200]}"
+                    f"{label} API error {resp.status_code}: {resp.text[:200]}"
                 )
             data = resp.json()
             choice = (data.get("choices") or [None])[0]
             if not choice:
-                raise LLMServiceError("OpenAI response had no choices")
+                raise LLMServiceError(f"{label} response had no choices")
             msg = choice.get("message") or {}
             text = (msg.get("content") or "").strip()
             return text
         except httpx.TimeoutException:
-            last_exc = LLMUpstreamTimeoutError("OpenAI request timed out")
+            last_exc = LLMUpstreamTimeoutError(f"{label} request timed out")
             if attempt < LLM_MAX_ATTEMPTS - 1:
                 delay = 1.0 * (2**attempt)
                 jitter = random.uniform(0, delay * 0.5)
                 await asyncio.sleep(delay + jitter)
             else:
-                record_upstream_timeout("llm_openai")
+                record_upstream_timeout("llm_xai" if provider == "xai" else "llm_openai")
                 raise last_exc
             continue
         except (LLMRateLimitedError, LLMUpstreamTimeoutError) as e:
@@ -96,7 +118,7 @@ async def _answer_openai(prompt: str, temperature: float | None = None) -> str:
         break
     if last_exc:
         raise last_exc
-    raise RuntimeError("OpenAI LLM retries exhausted")
+    raise RuntimeError(f"{label} LLM retries exhausted")
 
 
 async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
@@ -155,7 +177,7 @@ async def _answer_ollama(prompt: str, temperature: float | None = None) -> str:
 
 
 async def answer_with_context(prompt: str, temperature: float | None = None) -> str:
-    """Use OpenAI when OPENAI_API_KEY is set, else Ollama. If OpenAI fails and LLM_FALLBACK_TO_LOCAL is set, use Ollama.
+    """Use Grok when XAI_API_KEY is set, else OpenAI, else Ollama. Remote failures fall back to Ollama when LLM_FALLBACK_TO_LOCAL is set.
 
     When temperature is None we fall back to LLM_TEMPERATURE (a low default) rather than
     the provider default of 1.0, so production generations stay stable instead of
@@ -163,26 +185,45 @@ async def answer_with_context(prompt: str, temperature: float | None = None) -> 
     explicitly so the faithfulness gate scores a reproducible generation.
     """
     temp = LLM_TEMPERATURE if temperature is None else temperature
-    if OPENAI_API_KEY:
+    remote = remote_chat()
+    if remote:
+        provider, api_key, model, chat_url = remote
+        label = "xAI" if provider == "xai" else "OpenAI"
         try:
-            return await _answer_openai(prompt, temperature=temp)
+            return await _answer_remote(
+                prompt,
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                chat_url=chat_url,
+                temperature=temp,
+            )
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
-                logger.warning("OpenAI LLM failed, falling back to local: %s", e)
+                logger.warning("%s LLM failed, falling back to local: %s", label, e)
                 record_upstream_fallback("llm")
                 return await _answer_ollama(prompt, temperature=temp)
             raise
     return await _answer_ollama(prompt, temperature=temp)
 
 
-async def _answer_openai_stream(prompt: str, temperature: float | None = None):
-    """Stream OpenAI chat completion content deltas."""
+async def _answer_remote_stream(
+    prompt: str,
+    *,
+    provider: str,
+    api_key: str,
+    model: str,
+    chat_url: str,
+    temperature: float | None = None,
+):
+    """Stream OpenAI-compatible chat completion content deltas."""
+    label = "xAI" if provider == "xai" else "OpenAI"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
     }
     payload = {
-        "model": LLM_OPENAI_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
     }
@@ -191,18 +232,18 @@ async def _answer_openai_stream(prompt: str, temperature: float | None = None):
     client = get_async_client()
     async with client.stream(
         "POST",
-        OPENAI_CHAT_URL,
+        chat_url,
         headers=headers,
         json=payload,
         timeout=LLM_TIMEOUT_SECONDS,
     ) as resp:
         if resp.status_code == 429:
-            raise LLMRateLimitedError("OpenAI rate limited")
+            raise LLMRateLimitedError(f"{label} rate limited")
         if resp.status_code >= 400:
             err_txt = await resp.aread()
             snippet = err_txt[:200].decode(errors="replace") if err_txt else "(empty)"
             raise LLMServiceError(
-                f"OpenAI API error {resp.status_code}: {snippet}"
+                f"{label} API error {resp.status_code}: {snippet}"
             )
         async for line in resp.aiter_lines():
             line = line.strip()
@@ -225,15 +266,25 @@ async def _answer_openai_stream(prompt: str, temperature: float | None = None):
 
 
 async def answer_with_context_stream(prompt: str, temperature: float | None = None):
-    """Async iterator of answer text deltas. OpenAI streamed; otherwise one chunk from non-stream APIs.
+    """Async iterator of answer text deltas. Remote chat is streamed; otherwise one chunk from Ollama.
 
     When temperature is None we fall back to LLM_TEMPERATURE (a low default) so the
     streamed generation users actually see is as stable as the non-stream/eval paths.
     """
     temp = LLM_TEMPERATURE if temperature is None else temperature
-    if OPENAI_API_KEY:
+    remote = remote_chat()
+    if remote:
+        provider, api_key, model, chat_url = remote
+        label = "xAI" if provider == "xai" else "OpenAI"
         try:
-            async for part in _answer_openai_stream(prompt, temperature=temp):
+            async for part in _answer_remote_stream(
+                prompt,
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                chat_url=chat_url,
+                temperature=temp,
+            ):
                 yield part
             return
         except LLMRateLimitedError:
@@ -244,7 +295,7 @@ async def answer_with_context_stream(prompt: str, temperature: float | None = No
             raise
         except Exception as e:
             if LLM_FALLBACK_TO_LOCAL:
-                logger.warning("OpenAI streaming failed, falling back to local once: %s", e)
+                logger.warning("%s streaming failed, falling back to local once: %s", label, e)
                 record_upstream_fallback("llm")
                 text = await _answer_ollama(prompt, temperature=temp)
                 if text:

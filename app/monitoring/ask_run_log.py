@@ -28,7 +28,9 @@ from app.config import (
     EMBED_MODEL,
     LLM_MODEL,
     LLM_OPENAI_MODEL,
+    LLM_XAI_MODEL,
     OPENAI_API_KEY,
+    XAI_API_KEY,
     RAG_MIN_RELEVANCE_SCORE,
 )
 from app.corrective import is_soft_refuse
@@ -190,12 +192,17 @@ def hash_user_id(user_id: str | None) -> str | None:
 
 
 def resolve_model_names(embed_model: str | None = None) -> AskRunModels:
-    use_openai_llm = bool(OPENAI_API_KEY)
     use_openai_embed = bool(OPENAI_API_KEY) and not EMBED_LOCAL_ONLY
+    if XAI_API_KEY:
+        llm_name, provider = LLM_XAI_MODEL, "xai"
+    elif OPENAI_API_KEY:
+        llm_name, provider = LLM_OPENAI_MODEL, "openai"
+    else:
+        llm_name, provider = LLM_MODEL, "ollama"
     return AskRunModels(
         embed=embed_model or (OPENAI_EMBED_MODEL if use_openai_embed else EMBED_MODEL),
-        llm=LLM_OPENAI_MODEL if use_openai_llm else LLM_MODEL,
-        provider="openai" if use_openai_llm else "ollama",
+        llm=llm_name,
+        provider=provider,
     )
 
 
