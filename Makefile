@@ -1,6 +1,6 @@
 # Eval harness. Brings up an ephemeral pgvector DB, seeds the frozen corpus, runs
 # retrieval (recall@pool) + faithfulness, and tears the DB down. Requires Docker.
-# Faithfulness also needs an LLM backend (OPENAI_API_KEY or Ollama) and an embedding
+# Faithfulness also needs an LLM backend (XAI_API_KEY, OPENAI_API_KEY, or Ollama) and an embedding
 # backend / warm cache; retrieval-only needs the cache, not generation.
 
 # --env-file /dev/null: the eval stack needs nothing from the repo .env, and skipping

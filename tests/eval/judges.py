@@ -55,6 +55,9 @@ def is_refusal(answer: str) -> bool:
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _DOUBLE_QUOTED = re.compile(r'"([^"]{8,})"')
+# Grok often emits curly quotes; a ” after a period also blocks the sentence split
+# because the character before the whitespace is no longer . ! or ?
+_CURLY_DOUBLE_QUOTES = str.maketrans({"\u201c": '"', "\u201d": '"', "\u201e": '"'})
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -74,24 +77,23 @@ def _split_sentences(text: str) -> list[str]:
 def split_claims(answer: str) -> list[str]:
     """Decompose an answer into atomic claims (sentence-level, v1).
 
-    When the model answers with report quotes (``"..."``), use the quoted text as
-    the claim source so markdown titles do not dilute NLI — and sentence-split
-    inside each quote so multi-sentence blocks stay atomic.
+    When the model answers with report quotes (straight ``"..."`` or curly “...”
+    quotes), use the quoted text as the claim source so markdown titles and
+    "Conclusion:" labels do not dilute NLI. Sentence-split inside each quote, and
+    on newlines, so a multi-sentence or bulleted block stays atomic. The same
+    rules apply to GPT and Grok.
     """
     if not answer:
         return []
-    quoted = _DOUBLE_QUOTED.findall(answer)
+    normalized = answer.translate(_CURLY_DOUBLE_QUOTES)
+    quoted = _DOUBLE_QUOTED.findall(normalized)
     if quoted:
         parts: list[str] = []
         for passage in quoted:
-            for part in _SENTENCE_SPLIT.split(passage.strip()):
-                part = part.strip()
-                if len(part) >= 8:
-                    parts.append(part)
+            parts.extend(_split_sentences(passage))
         if parts:
             return parts
-    parts = [s.strip() for s in _SENTENCE_SPLIT.split(answer.strip()) if s.strip()]
-    return [p for p in parts if len(p) >= 8]
+    return _split_sentences(normalized)
 
 
 @dataclass

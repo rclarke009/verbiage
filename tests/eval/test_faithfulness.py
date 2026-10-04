@@ -10,8 +10,10 @@ Run after every tweak (fast, local NLI judge):
 Deeper run (OpenAI LLM judge):
     VERBIAGE_EVAL=1 ... pytest -m eval_full tests/eval -s   (or `make eval-full`)
 
-Generation always needs an LLM backend (OPENAI_API_KEY or a running Ollama) and an
-embedding backend (or a warm embeddings_cache.json).
+Generation always needs an LLM backend (XAI_API_KEY, OPENAI_API_KEY, or a running
+Ollama) and an embedding backend (or a warm embeddings_cache.json). Claim
+splitting treats straight quotes and curly quotes the same, so GPT and Grok
+answers are judged on the quoted sentences rather than markdown titles.
 """
 
 from __future__ import annotations
