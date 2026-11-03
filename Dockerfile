@@ -20,7 +20,7 @@ ENV HF_HOME=/app/hf-cache \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Skip ~2GB torch/sentence-transformers bake unless SKIP_RERANK=0.
-# Prod Render env sets SKIP_RERANK=0 (passed as a Docker build-arg). Demo leaves 1.
+# Live and demo Render env set SKIP_RERANK=1 (passed as a Docker build-arg).
 ARG SKIP_RERANK=1
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel

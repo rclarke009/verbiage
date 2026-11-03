@@ -1,29 +1,35 @@
 # Render Blueprint (https://render.com/docs/blueprint-spec)
 #
 # Web services:
-#   rag-document-analysis-backend — prod (API + ingest worker + Report Writer)
-#   verbiage-demo — public Ask-only demo (see docs/demo-deploy.md)
+#   true-ai-service — live (API + ingest worker + Report Writer), Free tier
+#   true-ai-demo — public Ask-only demo (see docs/demo-deploy.md), Free tier
+# Older suspended services (rag-document-analysis-backend, verbiage-demo, trueai)
+# are left in place until cleaned up.
 #
 # Optional separate worker (extra ~$7/mo): see docs/render-worker-setup.md
 #
-# Prod Standard (2GB): RERANK_ENABLED=1 + SKIP_RERANK=0 bakes MiniLM at image build
-# (Render maps env vars to Docker ARG). Demo stays SKIP_RERANK=1 / RERANK_ENABLED=0.
+# Free tier (512MB, spins down after 15 idle minutes): reranker off.
+# RERANK_ENABLED=0 + SKIP_RERANK=1 skips the
+# MiniLM/torch image bake (Render maps env vars to Docker ARG). Turn both back on
+# and use a 2GB plan before enabling the reranker again.
+# Demo stays SKIP_RERANK=1 / RERANK_ENABLED=0.
 # Dual tenant: DATABASE_URL=TrueDB, DEMO_DATABASE_URL=verbiage-demo. Do not set DEMO_MODE.
 # INGEST_WORKER_ENABLED=1 processes photo vision on this service (no second worker).
-# Health: /health/ready so Render waits out reranker warm-up (503 until MiniLM loads).
+# Health: /health/ready (Postgres). Reranker warm-up only when RERANK_ENABLED=1.
 #
 # Secrets use sync: false — managed in the Render dashboard.
 services:
   - type: web
-    name: rag-document-analysis-backend
+    name: true-ai-service
     runtime: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health/ready
+    plan: free
     envVars:
       - key: RERANK_ENABLED
-        value: "1"
-      - key: SKIP_RERANK
         value: "0"
+      - key: SKIP_RERANK
+        value: "1"
       - key: INGEST_WORKER_ENABLED
         value: "1"
       - key: REPORT_EXPORT_MAX_PHOTOS
@@ -72,11 +78,11 @@ services:
         sync: false
 
   - type: web
-    name: verbiage-demo
+    name: true-ai-demo
     runtime: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
-    plan: starter
+    plan: free
     envVars:
       - key: DEMO_MODE
         value: "1"

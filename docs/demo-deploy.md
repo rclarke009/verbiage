@@ -151,4 +151,4 @@ On deploy, demo mode also auto-seeds when the database is empty or has fewer `ev
 | Demo Supabase | Free tier (may pause when idle — open dashboard before demos) |
 | OpenAI on demo | Cents (capped per user) |
 
-Prod Standard (~$25) is unchanged.
+Live service is Free (`true-ai-service`) with the reranker off. Demo is Free (`true-ai-demo`).

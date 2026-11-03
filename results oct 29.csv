@@ -1,0 +1,63 @@
+rebeccaclarke@Beccas-MacBook-Pro verbiage % make eval-up
+VERBIAGE_EVAL=1 EVAL_DATABASE_URL=postgresql://postgres:postgres@localhost:5433/verbiage_eval \
+  .venv/bin/python -m pytest -m eval_fast tests/eval/test_retrieval.py -s
+make eval-down
+docker compose --env-file /dev/null -f docker-compose.eval.yml down -v --remove-orphans 2>/dev/null || true
+docker compose --env-file /dev/null -f docker-compose.eval.yml up -d --wait
+[+] up 2/2
+ ✔ Network verbiage_eval_default Created                                      0.0s
+ ✔ Container verbiage_eval_db    Healthy                                      2.6s
+============================== test session starts ===============================
+platform darwin -- Python 3.14.4, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/rebeccaclarke/a_new_projects_folder/verbiage
+plugins: anyio-4.14.1, langsmith-0.9.3
+collected 58 items / 1 deselected / 57 selected                                  
+
+tests/eval/test_retrieval.py .........................................................
+
+MYDEBUG -> retrieval scoreboard
+corpus n_docs=15 n_chunks=20 pool_k=20
+question_id                      cat                r@pool r@k    hit@k mrr   mode     pool_docs
+water_damage_storm_opening       answerable_multi   1.00   0.33   1     1.00  hybrid   200_remote_example_st_farville,200_birch_ave_riverton,600_windward_example_lane_farpoint,100_maple_ct_lakeside,400_willow_way_hillcrest,800_sand_example_rd_duneville
+sample_road_roof                 answerable_single  1.00   1.00   1     1.00  hybrid   100_harbor_example_rd_sampletown,100_maple_ct_lakeside,27_example_lane_sampletown,150_ocean_example_terrace_surfside,200_remote_example_st_farville,200_birch_ave_riverton
+floor_tiles_storm                answerable_multi   1.00   0.75   1     1.00  hybrid   400_willow_way_hillcrest,600_windward_example_lane_farpoint,100_maple_ct_lakeside,100_harbor_example_rd_sampletown,200_remote_example_st_farville,800_sand_example_rd_duneville
+sample_city_moisture_cause       answerable_single  1.00   1.00   1     1.00  hybrid   412_example_drive_samplecity,100_harbor_example_rd_sampletown,300_cedar_ln_brookfield,100_maple_ct_lakeside,200_remote_example_st_farville,200_birch_ave_riverton
+hail_tile_gulfview               answerable_single  1.00   1.00   1     1.00  hybrid   500_palm_example_blvd_gulfview,250_mango_example_ct_groveport,100_maple_ct_lakeside,800_sand_example_rd_duneville,100_harbor_example_rd_sampletown,400_willow_way_hillcrest
+hail_quotes_verbose              answerable_single  1.00   1.00   1     0.50  lexical  250_mango_example_ct_groveport,500_palm_example_blvd_gulfview
+hail_quotes_will_you_please      answerable_single  1.00   1.00   1     0.50  lexical  250_mango_example_ct_groveport,500_palm_example_blvd_gulfview
+hail_quotes_suffix               answerable_single  1.00   1.00   1     0.50  lexical  250_mango_example_ct_groveport,500_palm_example_blvd_gulfview
+soffit_fascia_surfside           answerable_single  1.00   1.00   1     1.00  hybrid   150_ocean_example_terrace_surfside,100_maple_ct_lakeside,800_sand_example_rd_duneville,600_windward_example_lane_farpoint,250_mango_example_ct_groveport,200_birch_ave_riverton
+no_storm_damage_groveport        answerable_single  1.00   1.00   1     1.00  hybrid   250_mango_example_ct_groveport,100_maple_ct_lakeside,500_palm_example_blvd_gulfview,100_harbor_example_rd_sampletown,150_ocean_example_terrace_surfside,400_willow_way_hillcrest
+nearby_ian_sampletown            answerable_multi   1.00   1.00   1     1.00  nearby_storm 400_willow_way_hillcrest,100_maple_ct_lakeside,200_birch_ave_riverton
+maple_lakeside_shingles          answerable_single  1.00   1.00   1     1.00  hybrid   100_maple_ct_lakeside,100_harbor_example_rd_sampletown,200_birch_ave_riverton,400_willow_way_hillcrest,150_ocean_example_terrace_surfside,500_palm_example_blvd_gulfview
+birch_riverton_crown_molding     answerable_single  1.00   1.00   1     1.00  hybrid   200_birch_ave_riverton,200_remote_example_st_farville,100_maple_ct_lakeside,300_cedar_ln_brookfield,800_sand_example_rd_duneville,400_willow_way_hillcrest
+farville_bathroom_window         answerable_single  1.00   1.00   1     1.00  hybrid   200_remote_example_st_farville,100_harbor_example_rd_sampletown,100_maple_ct_lakeside,200_birch_ave_riverton,412_example_drive_samplecity,600_windward_example_lane_farpoint
+cedar_brookfield_plumbing        answerable_single  1.00   1.00   1     1.00  hybrid   300_cedar_ln_brookfield,412_example_drive_samplecity,200_birch_ave_riverton,100_maple_ct_lakeside,400_willow_way_hillcrest,100_harbor_example_rd_sampletown
+willow_hillcrest_moisture_readings answerable_single  1.00   1.00   1     1.00  hybrid   400_willow_way_hillcrest,200_birch_ave_riverton,100_harbor_example_rd_sampletown,100_maple_ct_lakeside,300_cedar_ln_brookfield,200_remote_example_st_farville
+windward_farpoint_family_room    answerable_single  1.00   1.00   1     1.00  hybrid   600_windward_example_lane_farpoint,100_maple_ct_lakeside,27_example_lane_sampletown,100_harbor_example_rd_sampletown,500_palm_example_blvd_gulfview,18_example_ct_sampletown
+duneville_chimney_cricket        answerable_single  1.00   1.00   1     1.00  hybrid   800_sand_example_rd_duneville,200_remote_example_st_farville,100_harbor_example_rd_sampletown,100_maple_ct_lakeside,27_example_lane_sampletown,600_windward_example_lane_farpoint
+duneville_west_stucco            answerable_single  1.00   1.00   1     1.00  hybrid   800_sand_example_rd_duneville,250_mango_example_ct_groveport,500_palm_example_blvd_gulfview,150_ocean_example_terrace_surfside,200_remote_example_st_farville,100_maple_ct_lakeside
+surfside_attic_staining          answerable_single  1.00   1.00   1     1.00  hybrid   150_ocean_example_terrace_surfside,100_maple_ct_lakeside,250_mango_example_ct_groveport,200_birch_ave_riverton,100_harbor_example_rd_sampletown,200_remote_example_st_farville
+gulfview_living_room_ceiling     answerable_single  1.00   1.00   1     1.00  hybrid   500_palm_example_blvd_gulfview,100_maple_ct_lakeside,800_sand_example_rd_duneville,250_mango_example_ct_groveport,600_windward_example_lane_farpoint,100_harbor_example_rd_sampletown
+groveport_metal_roof_intact      answerable_single  1.00   1.00   1     1.00  hybrid   250_mango_example_ct_groveport,500_palm_example_blvd_gulfview,100_maple_ct_lakeside,150_ocean_example_terrace_surfside,100_harbor_example_rd_sampletown,400_willow_way_hillcrest
+sampletown_garage_ceiling        answerable_single  1.00   1.00   1     1.00  hybrid   100_harbor_example_rd_sampletown,100_maple_ct_lakeside,412_example_drive_samplecity,200_remote_example_st_farville,300_cedar_ln_brookfield,200_birch_ave_riverton
+sampletown_bedroom_windowsill    answerable_single  1.00   1.00   1     1.00  hybrid   100_harbor_example_rd_sampletown,100_maple_ct_lakeside,200_remote_example_st_farville,200_birch_ave_riverton,150_ocean_example_terrace_surfside,27_example_lane_sampletown
+plumbing_not_storm_multi         answerable_multi   1.00   1.00   1     1.00  hybrid   412_example_drive_samplecity,300_cedar_ln_brookfield,200_remote_example_st_farville,200_birch_ave_riverton,100_harbor_example_rd_sampletown,400_willow_way_hillcrest
+hip_roof_south_slope_multi       answerable_multi   1.00   1.00   1     0.50  hybrid   150_ocean_example_terrace_surfside,200_remote_example_st_farville,200_birch_ave_riverton,500_palm_example_blvd_gulfview,400_willow_way_hillcrest,800_sand_example_rd_duneville
+tile_roof_no_storm_opening_multi answerable_multi   1.00   1.00   1     1.00  hybrid   412_example_drive_samplecity,300_cedar_ln_brookfield,18_example_ct_sampletown,22_example_ct_sampletown,27_example_lane_sampletown,800_sand_example_rd_duneville
+nearby_ian_willow                answerable_multi   1.00   1.00   1     1.00  nearby_storm 100_harbor_example_rd_sampletown,100_maple_ct_lakeside,200_birch_ave_riverton
+
+MYDEBUG -> retrieval mode ablation (mean over RAG answerable)
+mode       n   mean r@pool  mean r@k   mean MRR
+auto        26        1.000      0.965    0.923
+vector      26        0.885      0.801    0.827
+lexical     26        0.481      0.481    0.442
+hybrid      26        0.885      0.849    0.865
+
+
+======================== 57 passed, 1 deselected in 3.83s ========================
+docker compose --env-file /dev/null -f docker-compose.eval.yml down -v
+[+] down 2/2
+ ✔ Container verbiage_eval_db    Removed                                      0.1s
+ ✔ Network verbiage_eval_default Removed                                      0.1s
+rebeccaclarke@Beccas-MacBook-Pro verbiage % 
