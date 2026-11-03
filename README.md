@@ -8,9 +8,7 @@
 
 ## Try it
 
-**Live demo — no login:** [rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com/)
-
-Sign in with a TrueAI account to use the real report library on the same URL.
+**Live demo — no login:** [true-ai-demo.onrender.com](https://true-ai-demo.onrender.com/)
 
 ---
 
@@ -39,7 +37,7 @@ Examples below are drawn from the faithfulness eval corpus
 ## Internal deployment
 
 The production app at
-[rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com)
+[true-ai-service.onrender.com](https://true-ai-service.onrender.com)
 requires sign-in. More background in [overview.md](overview.md).
 
 ---
@@ -228,13 +226,13 @@ Deployed on Render from the [Dockerfile](Dockerfile); [render.yaml](render.yaml)
 
 | Setting                   | Default | Purpose                                                           |
 | ------------------------- | ------- | ----------------------------------------------------------------- |
-| `RERANK_ENABLED=1`        | On      | Prod Standard (2GB): MiniLM rerank; set `SKIP_RERANK=0` so the image bakes torch |
+| `RERANK_ENABLED=0`        | Off     | Live Free tier. Set `RERANK_ENABLED=1` and `SKIP_RERANK=0` on a 2GB plan to bake MiniLM |
 | `INGEST_WORKER_ENABLED=1` | On      | Processes photo vision jobs in the same process (no +$7 worker)   |
 
 
 **Optional:** a separate `[rag-ingest-worker](docs/render-worker-setup.md)` isolates OOM from the API (~$7/mo on Render) — only needed for large photo batches on tiny instances.
 
-**Health check** → `/health/ready` (Postgres + reranker warm-up).
+**Health check** → `/health/ready` (Postgres; reranker warm-up only when `RERANK_ENABLED=1`).
 
 Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_*`, `GOOGLE_*`, …) use `sync: false` — managed in the Render dashboard.
 

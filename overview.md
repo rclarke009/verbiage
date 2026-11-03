@@ -40,6 +40,6 @@ Domain focus: storm damage reports and reusable inspection wording.
 
 ## Hosting
 
-**Live demo URL:** [https://rag-document-analysis-backend.onrender.com](https://rag-document-analysis-backend.onrender.com) (no login; anonymous Ask on sample corpus)
+**Live demo URL:** [https://true-ai-demo.onrender.com](https://true-ai-demo.onrender.com) (no login; anonymous Ask on sample corpus)
 
 More detail: [README.md](README.md).
