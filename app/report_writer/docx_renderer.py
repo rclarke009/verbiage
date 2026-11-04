@@ -337,14 +337,18 @@ class DocxReportRenderer:
         xml += xml_engineering_paragraph("Licensed Professional Engineer")
         xml += xml_engineering_paragraph("K. Renevier, P.E.", spacing_after=120)
 
-        stamp_data = load_asset_bytes("engineer_stamp.png")
-        stamp_ref = self._add_image(
-            stamp_data,
-            "stamp",
-            cx=int(2.35 * EMU_PER_INCH),
-            cy=int(2.35 * EMU_PER_INCH),
-        )
-        xml += xml_anchored_image(stamp_ref.rel_id, stamp_ref.doc_pr_id, stamp_ref.cx, stamp_ref.cy)
+        try:
+            stamp_data = load_asset_bytes("engineer_stamp.png")
+        except OSError:
+            stamp_data = None
+        if stamp_data:
+            stamp_ref = self._add_image(
+                stamp_data,
+                "stamp",
+                cx=int(2.35 * EMU_PER_INCH),
+                cy=int(2.35 * EMU_PER_INCH),
+            )
+            xml += xml_anchored_image(stamp_ref.rel_id, stamp_ref.doc_pr_id, stamp_ref.cx, stamp_ref.cy)
         disclaimer = (
             "Kyle Renevier, State of Florida, Professional Engineer, License No. 98372. "
             "This item has been digitally signed and sealed by Kyle Renevier on the date indicated here. "
