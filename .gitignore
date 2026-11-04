@@ -31,6 +31,9 @@ htmlcov/
 # Cursor / local agent artifacts (do not publish)
 .cursor/
 
+# Engineer seal stays local so it cannot be published.
+app/report_writer/assets/engineer_stamp.png
+
 # Local reference documents and photos may contain client data.
 files_for_reference/
 
